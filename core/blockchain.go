@@ -90,13 +90,16 @@ var (
 )
 
 const (
-	bodyCacheLimit      = 256
-	blockCacheLimit     = 256
-	receiptsCacheLimit  = 32
+	bodyCacheLimit      = 512
+	blockCacheLimit     = 512
+	receiptsCacheLimit  = 512
+	txLogsCacheLimit    = 512
 	txLookupCacheLimit  = 1024
 	maxFutureBlocks     = 256
 	maxTimeFutureBlocks = 30
-	TriesInMemory       = 128 // default number of recent trie roots to keep in memory
+
+	miningStateCacheLimit = 128
+	TriesInMemory         = 128 // default number of recent trie roots to keep in memory
 
 	// BlockChainVersion ensures that an incompatible database forces a resync from scratch.
 	//
@@ -210,6 +213,11 @@ type BlockChain struct {
 	bodyRLPCache  *lru.Cache[common.Hash, rlp.RawValue]
 	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
 	blockCache    *lru.Cache[common.Hash, *types.Block]
+
+	miningReceiptsCache *lru.Cache[common.Hash, []*types.Receipt]
+	miningTxLogsCache   *lru.Cache[common.Hash, []*types.Log]
+	miningStateCache    *lru.Cache[common.Hash, *state.StateDB]
+
 	txLookupCache *lru.Cache[common.Hash, *rawdb.LegacyTxLookupEntry]
 
 	// future blocks are blocks added for later processing
@@ -266,25 +274,29 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 
 	bc := &BlockChain{
-		chainConfig:   chainConfig,
-		cacheConfig:   cacheConfig,
-		db:            db,
-		triedb:        triedb,
-		flushInterval: int64(cacheConfig.TrieTimeLimit),
-		triegc:        prque.New[int64, common.Hash](nil),
-		quit:          make(chan struct{}),
-		chainmu:       syncx.NewClosableMutex(),
-		bodyCache:     lru.NewCache[common.Hash, *types.Body](bodyCacheLimit),
-		bodyRLPCache:  lru.NewCache[common.Hash, rlp.RawValue](bodyCacheLimit),
-		receiptsCache: lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
-		blockCache:    lru.NewCache[common.Hash, *types.Block](blockCacheLimit),
-		txLookupCache: lru.NewCache[common.Hash, *rawdb.LegacyTxLookupEntry](txLookupCacheLimit),
-		futureBlocks:  lru.NewCache[common.Hash, *types.Block](maxFutureBlocks),
-		engine:        engine,
-		vmConfig:      vmConfig,
+		chainConfig:         chainConfig,
+		cacheConfig:         cacheConfig,
+		db:                  db,
+		triedb:              triedb,
+		flushInterval:       int64(cacheConfig.TrieTimeLimit),
+		triegc:              prque.New[int64, common.Hash](nil),
+		quit:                make(chan struct{}),
+		chainmu:             syncx.NewClosableMutex(),
+		bodyCache:           lru.NewCache[common.Hash, *types.Body](bodyCacheLimit),
+		bodyRLPCache:        lru.NewCache[common.Hash, rlp.RawValue](bodyCacheLimit),
+		receiptsCache:       lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
+		blockCache:          lru.NewCache[common.Hash, *types.Block](blockCacheLimit),
+		miningReceiptsCache: lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
+		miningTxLogsCache:   lru.NewCache[common.Hash, []*types.Log](txLogsCacheLimit),
+		miningStateCache:    lru.NewCache[common.Hash, *state.StateDB](miningStateCacheLimit),
+		txLookupCache:       lru.NewCache[common.Hash, *rawdb.LegacyTxLookupEntry](txLookupCacheLimit),
+		futureBlocks:        lru.NewCache[common.Hash, *types.Block](maxFutureBlocks),
+		engine:              engine,
+		vmConfig:            vmConfig,
 	}
 	bc.forker = NewForkChoice(bc, shouldPreserve)
 	bc.stateCache = state.NewDatabaseWithNodeDBAndCache(bc.db, bc.triedb)
+
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = NewStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
@@ -772,6 +784,9 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.bodyRLPCache.Purge()
 	bc.receiptsCache.Purge()
 	bc.blockCache.Purge()
+	bc.miningReceiptsCache.Purge()
+	bc.miningTxLogsCache.Purge()
+	bc.miningStateCache.Purge()
 	bc.txLookupCache.Purge()
 	bc.futureBlocks.Purge()
 
@@ -1032,6 +1047,33 @@ func (bc *BlockChain) procFutureBlocks() {
 			bc.InsertChain(blocks[i : i+1])
 		}
 	}
+}
+
+// CacheBlock cache block in memory
+func (bc *BlockChain) CacheBlock(hash common.Hash, block *types.Block) {
+	bc.hc.numberCache.Add(hash, block.NumberU64())
+	bc.hc.headerCache.Add(hash, block.Header())
+	bc.blockCache.Add(hash, block)
+}
+
+// CacheReceipts cache receipts in memory
+func (bc *BlockChain) CacheReceipts(hash common.Hash, receipts types.Receipts) {
+	bc.receiptsCache.Add(hash, receipts)
+}
+
+// CacheMiningReceipts cache receipts in memory
+func (bc *BlockChain) CacheMiningReceipts(hash common.Hash, receipts types.Receipts) {
+	bc.miningReceiptsCache.Add(hash, receipts)
+}
+
+// CacheMiningTxLogs cache tx logs in memory
+func (bc *BlockChain) CacheMiningTxLogs(hash common.Hash, logs []*types.Log) {
+	bc.miningTxLogsCache.Add(hash, logs)
+}
+
+// CacheMiningState cache mining state in memory
+func (bc *BlockChain) CacheMiningState(hash common.Hash, state *state.StateDB) {
+	bc.miningStateCache.Add(hash, state)
 }
 
 // WriteStatus status of write
@@ -1765,46 +1807,58 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 			continue
 		}
 
-		// Retrieve the parent block and it's state to execute on top
-		start := time.Now()
-		parent := it.previous()
-		if parent == nil {
-			parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
-		}
-		statedb, err := state.NewWithSharedPool(parent.Root, bc.stateCache, bc.snaps)
-		if err != nil {
-			return it.index, err
-		}
+		var (
+			err                    error
+			receipts, receiptExist = bc.miningReceiptsCache.Get(block.Hash())
+			logs, logExist         = bc.miningTxLogsCache.Get(block.Hash())
+			statedb, stateExist    = bc.miningStateCache.Get(block.Hash())
+			usedGas                = block.GasUsed()
+			start                  = time.Now()
+		)
 
-		// Enable prefetching to pull in trie node paths while processing transactions
-		statedb.StartPrefetcher("chain")
-		activeState = statedb
-
-		// If we have a followup block, run that against the current state to pre-cache
-		// transactions and probabilistically some of the account/storage trie nodes.
 		interruptCh := make(chan struct{})
-		if !bc.cacheConfig.TrieCleanNoPrefetch {
-			if followup, err := it.peek(); followup != nil && err == nil {
-				throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
+		pstart := time.Now()
 
-				go func(start time.Time, followup *types.Block, throwaway *state.StateDB) {
-					bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, interruptCh)
+		// skip block process if we already have the state, receipts and logs from mining work
+		if !(receiptExist && logExist && stateExist) {
+			// Retrieve the parent block and it's state to execute on top
+			parent := it.previous()
+			if parent == nil {
+				parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
+			}
+			statedb, err = state.NewWithSharedPool(parent.Root, bc.stateCache, bc.snaps)
+			if err != nil {
+				return it.index, err
+			}
 
-					blockPrefetchExecuteTimer.Update(time.Since(start))
-				}(time.Now(), followup, throwaway)
+			// Enable prefetching to pull in trie node paths while processing transactions
+			statedb.StartPrefetcher("chain")
+			activeState = statedb
+
+			// If we have a followup block, run that against the current state to pre-cache
+			// transactions and probabilistically some of the account/storage trie nodes.
+
+			if !bc.cacheConfig.TrieCleanNoPrefetch {
+				if followup, err := it.peek(); followup != nil && err == nil {
+					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
+
+					go func(start time.Time, followup *types.Block, throwaway *state.StateDB) {
+						bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, interruptCh)
+
+						blockPrefetchExecuteTimer.Update(time.Since(start))
+					}(time.Now(), followup, throwaway)
+				}
+			}
+			// Process block using the parent state as reference point
+			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
+			if err != nil {
+				bc.reportBlock(block, receipts, err)
+				close(interruptCh)
+				return it.index, err
 			}
 		}
 
-		// Process block using the parent state as reference point
-		pstart := time.Now()
-		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
-		if err != nil {
-			bc.reportBlock(block, receipts, err)
-			close(interruptCh)
-			return it.index, err
-		}
 		ptime := time.Since(pstart)
-
 		vstart := time.Now()
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
 			bc.reportBlock(block, receipts, err)
@@ -1813,6 +1867,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		}
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
+
+		// pre-cache the block and receipts, so that it can be retrieved quickly by rcp
+		bc.CacheBlock(block.Hash(), block)
+		err = types.Receipts(receipts).DeriveFields(bc.chainConfig, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), block.Transactions())
+		if err != nil {
+			log.Warn("Failed to derive receipt fields", "block", block.Hash(), "err", err)
+		}
+		bc.CacheReceipts(block.Hash(), receipts)
 
 		// Update the metrics touched during block processing and validation
 		accountReadTimer.Update(statedb.AccountReads)                   // Account reads are complete(in processing)

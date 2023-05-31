@@ -1355,19 +1355,19 @@ func RPCMarshalBlock(ctx context.Context, block *types.Block, inclTx bool, fullT
 	fields["size"] = hexutil.Uint64(block.Size())
 
 	if inclTx {
-		formatTx := func(tx *types.Transaction) (interface{}, error) {
+		formatTx := func(tx *types.Transaction, index int) (interface{}, error) {
 			return tx.Hash(), nil
 		}
 		if fullTx {
-			formatTx = func(tx *types.Transaction) (interface{}, error) {
-				return newRPCTransactionFromBlockHash(ctx, block, tx.Hash(), backend), nil
+			formatTx = func(tx *types.Transaction, index int) (interface{}, error) {
+				return newRPCTransactionFromBlockHash(ctx, block, tx.Hash(), index, tx, backend), nil
 			}
 		}
 		txs := block.Transactions()
 		transactions := make([]interface{}, len(txs))
 		var err error
 		for i, tx := range txs {
-			if transactions[i], err = formatTx(tx); err != nil {
+			if transactions[i], err = formatTx(tx, i); err != nil {
 				return nil, err
 			}
 		}
@@ -1512,12 +1512,15 @@ func NewRPCPendingTransaction(tx *types.Transaction, current *types.Header, conf
 }
 
 // newRPCTransactionFromBlockIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockIndex(ctx context.Context, b *types.Block, index uint64, backend Backend) *RPCTransaction {
-	txs := b.Transactions()
-	if index >= uint64(len(txs)) {
-		return nil
+func newRPCTransactionFromBlockIndex(ctx context.Context, b *types.Block, index uint64, tx *types.Transaction, backend Backend) *RPCTransaction {
+	if tx == nil {
+		txs := b.Transactions()
+		if index >= uint64(len(txs)) {
+			return nil
+		}
+		tx = txs[index]
 	}
-	tx := txs[index]
+
 	rcpt := depositTxReceipt(ctx, b.Hash(), index, backend, tx)
 	return newRPCTransaction(tx, b.Hash(), b.NumberU64(), index, b.BaseFee(), backend.ChainConfig(), rcpt)
 }
@@ -1547,13 +1550,8 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 }
 
 // newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockHash(ctx context.Context, b *types.Block, hash common.Hash, backend Backend) *RPCTransaction {
-	for idx, tx := range b.Transactions() {
-		if tx.Hash() == hash {
-			return newRPCTransactionFromBlockIndex(ctx, b, uint64(idx), backend)
-		}
-	}
-	return nil
+func newRPCTransactionFromBlockHash(ctx context.Context, b *types.Block, hash common.Hash, idx int, tx *types.Transaction, backend Backend) *RPCTransaction {
+	return newRPCTransactionFromBlockIndex(ctx, b, uint64(idx), tx, backend)
 }
 
 // accessListResult returns an optional accesslist
@@ -1700,7 +1698,7 @@ func (s *TransactionAPI) GetBlockTransactionCountByHash(ctx context.Context, blo
 // GetTransactionByBlockNumberAndIndex returns the transaction for the given block number and index.
 func (s *TransactionAPI) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) *RPCTransaction {
 	if block, _ := s.b.BlockByNumber(ctx, blockNr); block != nil {
-		return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), s.b)
+		return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), nil, s.b)
 	}
 	return nil
 }
@@ -1708,7 +1706,7 @@ func (s *TransactionAPI) GetTransactionByBlockNumberAndIndex(ctx context.Context
 // GetTransactionByBlockHashAndIndex returns the transaction for the given block hash and index.
 func (s *TransactionAPI) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) *RPCTransaction {
 	if block, _ := s.b.BlockByHash(ctx, blockHash); block != nil {
-		return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), s.b)
+		return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), nil, s.b)
 	}
 	return nil
 }
@@ -1910,9 +1908,9 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 
 	if tx.To() == nil {
 		addr := crypto.CreateAddress(from, tx.Nonce())
-		log.Info("Submitted contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value())
+		log.Debug("Submitted contract creation", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "contract", addr.Hex(), "value", tx.Value())
 	} else {
-		log.Info("Submitted transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value())
+		log.Debug("Submitted transaction", "hash", tx.Hash().Hex(), "from", from, "nonce", tx.Nonce(), "recipient", tx.To(), "value", tx.Value())
 	}
 	return tx.Hash(), nil
 }

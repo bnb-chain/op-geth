@@ -242,6 +242,11 @@ var (
 		Value:    true,
 		Category: flags.EthCategory,
 	}
+	TriesInMemoryFlag = &cli.Uint64Flag{
+		Name:  "triesInMemory",
+		Usage: "The layer of tries trees that keep in memory",
+		Value: 128,
+	}
 	TxLookupLimitFlag = &cli.Uint64Flag{
 		Name:     "txlookuplimit",
 		Usage:    "Number of recent blocks to maintain transactions index for (default = about one year, 0 = entire chain)",
@@ -465,7 +470,7 @@ var (
 	CacheDatabaseFlag = &cli.IntFlag{
 		Name:     "cache.database",
 		Usage:    "Percentage of cache memory allowance to use for database io",
-		Value:    50,
+		Value:    40,
 		Category: flags.PerfCategory,
 	}
 	CacheTrieFlag = &cli.IntFlag{
@@ -1852,6 +1857,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.IsSet(CacheFlag.Name) || ctx.IsSet(CacheGCFlag.Name) {
 		cfg.TrieDirtyCache = ctx.Int(CacheFlag.Name) * ctx.Int(CacheGCFlag.Name) / 100
 	}
+	if ctx.IsSet(TriesInMemoryFlag.Name) {
+		cfg.TriesInMemory = ctx.Uint64(TriesInMemoryFlag.Name)
+	}
 	if ctx.IsSet(CacheFlag.Name) || ctx.IsSet(CacheSnapshotFlag.Name) {
 		cfg.SnapshotCache = ctx.Int(CacheFlag.Name) * ctx.Int(CacheSnapshotFlag.Name) / 100
 	}
@@ -2296,6 +2304,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readonly bool) (*core.BlockCh
 		TrieDirtyLimit:      ethconfig.Defaults.TrieDirtyCache,
 		TrieDirtyDisabled:   ctx.String(GCModeFlag.Name) == "archive",
 		TrieTimeLimit:       ethconfig.Defaults.TrieTimeout,
+		TriesInMemory:       ethconfig.Defaults.TriesInMemory,
 		SnapshotLimit:       ethconfig.Defaults.SnapshotCache,
 		Preimages:           ctx.Bool(CachePreimagesFlag.Name),
 	}

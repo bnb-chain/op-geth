@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -999,7 +1000,8 @@ func (s *Syncer) assignAccountTasks(success chan *accountResponse, fail chan *ac
 		delete(s.accountIdlers, idle)
 
 		s.pend.Add(1)
-		go func(root common.Hash) {
+		root := s.root
+		gopool.Submit(func() {
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
@@ -1013,7 +1015,7 @@ func (s *Syncer) assignAccountTasks(success chan *accountResponse, fail chan *ac
 				peer.Log().Debug("Failed to request account range", "err", err)
 				s.scheduleRevertAccountRequest(req)
 			}
-		}(s.root)
+		})
 
 		// Inject the request into the task to block further assignments
 		task.req = req
@@ -1110,7 +1112,7 @@ func (s *Syncer) assignBytecodeTasks(success chan *bytecodeResponse, fail chan *
 		delete(s.bytecodeIdlers, idle)
 
 		s.pend.Add(1)
-		go func() {
+		gopool.Submit(func() {
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
@@ -1118,7 +1120,7 @@ func (s *Syncer) assignBytecodeTasks(success chan *bytecodeResponse, fail chan *
 				log.Debug("Failed to request bytecodes", "err", err)
 				s.scheduleRevertBytecodeRequest(req)
 			}
-		}()
+		})
 	}
 }
 
@@ -1257,7 +1259,8 @@ func (s *Syncer) assignStorageTasks(success chan *storageResponse, fail chan *st
 		delete(s.storageIdlers, idle)
 
 		s.pend.Add(1)
-		go func(root common.Hash) {
+		root := s.root
+		gopool.Submit(func() {
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
@@ -1269,7 +1272,7 @@ func (s *Syncer) assignStorageTasks(success chan *storageResponse, fail chan *st
 				log.Debug("Failed to request storage", "err", err)
 				s.scheduleRevertStorageRequest(req)
 			}
-		}(s.root)
+		})
 
 		// Inject the request into the subtask to block further assignments
 		if subtask != nil {
@@ -1394,7 +1397,8 @@ func (s *Syncer) assignTrienodeHealTasks(success chan *trienodeHealResponse, fai
 		delete(s.trienodeHealIdlers, idle)
 
 		s.pend.Add(1)
-		go func(root common.Hash) {
+		root := s.root
+		gopool.Submit(func() {
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
@@ -1402,7 +1406,7 @@ func (s *Syncer) assignTrienodeHealTasks(success chan *trienodeHealResponse, fai
 				log.Debug("Failed to request trienode healers", "err", err)
 				s.scheduleRevertTrienodeHealRequest(req)
 			}
-		}(s.root)
+		})
 	}
 }
 
@@ -1510,7 +1514,7 @@ func (s *Syncer) assignBytecodeHealTasks(success chan *bytecodeHealResponse, fai
 		delete(s.bytecodeHealIdlers, idle)
 
 		s.pend.Add(1)
-		go func() {
+		gopool.Submit(func() {
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
@@ -1518,7 +1522,7 @@ func (s *Syncer) assignBytecodeHealTasks(success chan *bytecodeHealResponse, fai
 				log.Debug("Failed to request bytecode healers", "err", err)
 				s.scheduleRevertBytecodeHealRequest(req)
 			}
-		}()
+		})
 	}
 }
 

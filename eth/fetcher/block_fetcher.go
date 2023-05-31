@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -461,17 +462,18 @@ func (f *BlockFetcher) loop() {
 				log.Trace("Fetching scheduled headers", "peer", peer, "list", hashes)
 
 				// Create a closure of the fetch and schedule in on a new thread
-				fetchHeader, hashes := f.fetching[hashes[0]].fetchHeader, hashes
-				go func(peer string) {
+				fetchHeader, hashes, peer := f.fetching[hashes[0]].fetchHeader, hashes, peer
+				gopool.Submit(func() {
 					if f.fetchingHook != nil {
 						f.fetchingHook(hashes)
 					}
 					for _, hash := range hashes {
 						headerFetchMeter.Mark(1)
-						go func(hash common.Hash) {
+						copiedHash := hash // copy for closure
+						gopool.Submit(func() {
 							resCh := make(chan *eth.Response)
 
-							req, err := fetchHeader(hash, resCh)
+							req, err := fetchHeader(copiedHash, resCh)
 							if err != nil {
 								return // Legacy code, yolo
 							}
@@ -492,9 +494,9 @@ func (f *BlockFetcher) loop() {
 								// peer however, it's a protocol violation.
 								f.dropPeer(peer)
 							}
-						}(hash)
+						})
 					}
-				}(peer)
+				})
 			}
 			// Schedule the next fetch if blocks are still pending
 			f.rescheduleFetch(fetchTimer)
@@ -525,7 +527,8 @@ func (f *BlockFetcher) loop() {
 				fetchBodies := f.completing[hashes[0]].fetchBodies
 				bodyFetchMeter.Mark(int64(len(hashes)))
 
-				go func(peer string, hashes []common.Hash) {
+				peer, hashes := peer, hashes
+				gopool.Submit(func() {
 					resCh := make(chan *eth.Response)
 
 					req, err := fetchBodies(hashes, resCh)
@@ -551,7 +554,7 @@ func (f *BlockFetcher) loop() {
 						// peer however, it's a protocol violation.
 						f.dropPeer(peer)
 					}
-				}(peer, hashes)
+				})
 			}
 			// Schedule the next fetch if blocks are still pending
 			f.rescheduleComplete(completeTimer)
@@ -807,7 +810,7 @@ func (f *BlockFetcher) importHeaders(peer string, header *types.Header) {
 	hash := header.Hash()
 	log.Debug("Importing propagated header", "peer", peer, "number", header.Number, "hash", hash)
 
-	go func() {
+	gopool.Submit(func() {
 		defer func() { f.done <- hash }()
 		// If the parent's unknown, abort insertion
 		parent := f.getHeader(header.ParentHash)
@@ -830,7 +833,7 @@ func (f *BlockFetcher) importHeaders(peer string, header *types.Header) {
 		if f.importedHook != nil {
 			f.importedHook(header, nil)
 		}
-	}()
+	})
 }
 
 // importBlocks spawns a new goroutine to run a block insertion into the chain. If the
@@ -841,7 +844,7 @@ func (f *BlockFetcher) importBlocks(peer string, block *types.Block) {
 
 	// Run the import on a new thread
 	log.Debug("Importing propagated block", "peer", peer, "number", block.Number(), "hash", hash)
-	go func() {
+	gopool.Submit(func() {
 		defer func() { f.done <- hash }()
 
 		// If the parent's unknown, abort insertion
@@ -879,7 +882,7 @@ func (f *BlockFetcher) importBlocks(peer string, block *types.Block) {
 		if f.importedHook != nil {
 			f.importedHook(nil, block)
 		}
-	}()
+	})
 }
 
 // forgetHash removes all traces of a block announcement from the fetcher's

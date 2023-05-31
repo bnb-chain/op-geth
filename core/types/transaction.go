@@ -669,6 +669,61 @@ func (t *TransactionsByPriceAndNonce) Pop() {
 	heap.Pop(&t.heads)
 }
 
+// Forward moves current transaction to be the one which is one index after tx
+func (t *TransactionsByPriceAndNonce) Forward(tx *Transaction) {
+	if tx == nil {
+		if len(t.heads) > 0 {
+			t.heads = t.heads[0:0]
+		}
+		return
+	}
+	//check whether target tx exists in t.heads
+	for _, head := range t.heads {
+		if tx == head.tx {
+			//shift t to the position one after tx
+			txTmp := t.Peek()
+			for txTmp != tx {
+				t.Shift()
+				txTmp = t.Peek()
+			}
+			t.Shift()
+			return
+		}
+	}
+	//get the sender address of tx
+	acc, _ := Sender(t.signer, tx)
+	//check whether target tx exists in t.txs
+	if txs, ok := t.txs[acc]; ok {
+		for _, txTmp := range txs {
+			//found the same pointer in t.txs as tx and then shift t to the position one after tx
+			if txTmp == tx {
+				txTmp = t.Peek()
+				for txTmp != tx {
+					t.Shift()
+					txTmp = t.Peek()
+				}
+				t.Shift()
+				return
+			}
+		}
+	}
+}
+
+// Copy returns a new TransactionsPriceAndNonce with the same *transaction
+func (t *TransactionsByPriceAndNonce) Copy() *TransactionsByPriceAndNonce {
+	heads := make([]*TxWithMinerFee, len(t.heads))
+	copy(heads, t.heads)
+	txs := make(map[common.Address]Transactions, len(t.txs))
+	for acc, txsTmp := range t.txs {
+		txs[acc] = txsTmp
+	}
+	return &TransactionsByPriceAndNonce{
+		heads:  heads,
+		txs:    txs,
+		signer: t.signer,
+	}
+}
+
 // copyAddressPtr copies an address.
 func copyAddressPtr(a *common.Address) *common.Address {
 	if a == nil {

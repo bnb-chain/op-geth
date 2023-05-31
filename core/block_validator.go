@@ -19,6 +19,7 @@ package core
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -64,29 +65,54 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
 		return fmt.Errorf("uncle root hash mismatch (header value %x, calculated %x)", header.UncleHash, hash)
 	}
-	if hash := types.DeriveSha(block.Transactions(), trie.NewStackTrie(nil)); hash != header.TxHash {
-		return fmt.Errorf("transaction root hash mismatch (header value %x, calculated %x)", header.TxHash, hash)
+
+	validateFuns := []func() error{
+		func() error {
+			if hash := types.DeriveSha(block.Transactions(), trie.NewStackTrie(nil)); hash != header.TxHash {
+				return fmt.Errorf("transaction root hash mismatch (header value %x, calculated %x)", header.TxHash, hash)
+			}
+			return nil
+		},
+		func() error {
+			// Withdrawals are present after the Shanghai fork.
+			if header.WithdrawalsHash != nil {
+				// Withdrawals list must be present in body after Shanghai.
+				if block.Withdrawals() == nil {
+					return fmt.Errorf("missing withdrawals in block body")
+				}
+				if hash := types.DeriveSha(block.Withdrawals(), trie.NewStackTrie(nil)); hash != *header.WithdrawalsHash {
+					return fmt.Errorf("withdrawals root hash mismatch (header value %x, calculated %x)", *header.WithdrawalsHash, hash)
+				}
+			} else if block.Withdrawals() != nil {
+				// Withdrawals are not allowed prior to shanghai fork
+				return fmt.Errorf("withdrawals present in block body")
+			}
+			return nil
+		},
+		func() error {
+			if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
+				if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
+					return consensus.ErrUnknownAncestor
+				}
+				return consensus.ErrPrunedAncestor
+			}
+			return nil
+		},
 	}
-	// Withdrawals are present after the Shanghai fork.
-	if header.WithdrawalsHash != nil {
-		// Withdrawals list must be present in body after Shanghai.
-		if block.Withdrawals() == nil {
-			return fmt.Errorf("missing withdrawals in block body")
+	validateRes := make(chan error, len(validateFuns))
+	for _, f := range validateFuns {
+		tmpFunc := f
+		gopool.Submit(func() {
+			validateRes <- tmpFunc()
+		})
+	}
+	for i := 0; i < len(validateFuns); i++ {
+		err := <-validateRes
+		if err != nil {
+			return err
 		}
-		if hash := types.DeriveSha(block.Withdrawals(), trie.NewStackTrie(nil)); hash != *header.WithdrawalsHash {
-			return fmt.Errorf("withdrawals root hash mismatch (header value %x, calculated %x)", *header.WithdrawalsHash, hash)
-		}
-	} else if block.Withdrawals() != nil {
-		// Withdrawals are not allowed prior to shanghai fork
-		return fmt.Errorf("withdrawals present in block body")
 	}
 
-	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
-		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
-			return consensus.ErrUnknownAncestor
-		}
-		return consensus.ErrPrunedAncestor
-	}
 	return nil
 }
 

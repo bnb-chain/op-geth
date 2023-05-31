@@ -52,6 +52,7 @@ var (
 				Flags: flags.Merge([]cli.Flag{
 					utils.CacheTrieJournalFlag,
 					utils.BloomFilterSizeFlag,
+					utils.TriesInMemoryFlag,
 				}, utils.NetworkFlags, utils.DatabasePathFlags),
 				Description: `
 geth snapshot prune-state <state-root>
@@ -73,7 +74,7 @@ the trie clean cache with default directory will be deleted.
 				Usage:     "Recalculate state hash based on the snapshot for verification",
 				ArgsUsage: "<root>",
 				Action:    verifyState,
-				Flags:     flags.Merge(utils.NetworkFlags, utils.DatabasePathFlags),
+				Flags:     flags.Merge(utils.NetworkFlags, utils.DatabasePathFlags, []cli.Flag{utils.TriesInMemoryFlag}),
 				Description: `
 geth snapshot verify-state <state-root>
 will traverse the whole accounts and storages set based on the specified
@@ -144,6 +145,7 @@ It's also usable without snapshot enabled.
 					utils.ExcludeStorageFlag,
 					utils.StartKeyFlag,
 					utils.DumpLimitFlag,
+					utils.TriesInMemoryFlag,
 				}, utils.NetworkFlags, utils.DatabasePathFlags),
 				Description: `
 This command is semantically equivalent to 'geth dump', but uses the snapshots
@@ -171,7 +173,8 @@ func pruneState(ctx *cli.Context) error {
 		Cachedir:  stack.ResolvePath(config.Eth.TrieCleanCacheJournal),
 		BloomSize: ctx.Uint64(utils.BloomFilterSizeFlag.Name),
 	}
-	pruner, err := pruner.NewPruner(chaindb, prunerconfig)
+	pruner, err := pruner.NewPruner(chaindb, prunerconfig,
+		pruner.WithTriesInMemory(ctx.Uint64(utils.TriesInMemoryFlag.Name)))
 	if err != nil {
 		log.Error("Failed to open snapshot tree", "err", err)
 		return err
@@ -213,7 +216,8 @@ func verifyState(ctx *cli.Context) error {
 		NoBuild:    true,
 		AsyncBuild: false,
 	}
-	snaptree, err := snapshot.New(snapconfig, chaindb, trie.NewDatabase(chaindb), headBlock.Root())
+	snaptree, err := snapshot.New(snapconfig, chaindb, trie.NewDatabase(chaindb), headBlock.Root(),
+		snapshot.SetCapLimit(int(ctx.Uint64(utils.TriesInMemoryFlag.Name))))
 	if err != nil {
 		log.Error("Failed to open snapshot tree", "err", err)
 		return err
@@ -496,7 +500,8 @@ func dumpState(ctx *cli.Context) error {
 		NoBuild:    true,
 		AsyncBuild: false,
 	}
-	snaptree, err := snapshot.New(snapConfig, db, trie.NewDatabase(db), root)
+	snaptree, err := snapshot.New(snapConfig, db, trie.NewDatabase(db), root,
+		snapshot.SetCapLimit(int(ctx.Uint64(utils.TriesInMemoryFlag.Name))))
 	if err != nil {
 		return err
 	}

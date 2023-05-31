@@ -198,6 +198,7 @@ type worker struct {
 	engine      consensus.Engine
 	eth         Backend
 	chain       *core.BlockChain
+	prefetcher  core.Prefetcher
 
 	// Feeds
 	pendingLogsFeed event.Feed
@@ -279,6 +280,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		engine:             engine,
 		eth:                eth,
 		chain:              eth.BlockChain(),
+		prefetcher:         core.NewStatePrefetcher(chainConfig, eth.BlockChain(), engine),
 		mux:                mux,
 		isLocalBlock:       isLocalBlock,
 		localUncles:        make(map[common.Hash]*types.Block),
@@ -802,6 +804,7 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 			parentBlock := w.eth.BlockChain().GetBlockByHash(parent.Hash())
 			state, release, err = historicalBackend.StateAtBlock(context.Background(), parentBlock, ^uint64(0), nil, false, false)
 			state = state.Copy()
+			state.EnableWriteOnSharedStorage()
 			release()
 		}
 	}
@@ -895,6 +898,14 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 	}
 	var coalescedLogs []*types.Log
 
+	stopPrefetchCh := make(chan struct{})
+	defer close(stopPrefetchCh)
+	//prefetch txs from all pending txs
+	txsPrefetch := txs.Copy()
+	tx := txsPrefetch.Peek()
+	txCurr := &tx
+	w.prefetcher.PrefetchMining(txsPrefetch, env.header, env.gasPool.Gas(), env.state.CopyDoPrefetch(), *w.chain.GetVMConfig(), stopPrefetchCh, txCurr)
+
 	for {
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
@@ -908,7 +919,7 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 			break
 		}
 		// Retrieve the next transaction and abort if all done.
-		tx := txs.Peek()
+		tx = txs.Peek()
 		if tx == nil {
 			break
 		}

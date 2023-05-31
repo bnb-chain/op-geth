@@ -18,6 +18,7 @@ package vm
 
 import (
 	"math/big"
+	"sync"
 	"sync/atomic"
 
 	"github.com/holiman/uint256"
@@ -31,6 +32,13 @@ import (
 // emptyCodeHash is used by create to ensure deployment is disallowed to already
 // deployed contract addresses (relevant after the account abstraction).
 var emptyCodeHash = crypto.Keccak256Hash(nil)
+
+// EvmPool is a pool of EVM instances
+var EvmPool = sync.Pool{
+	New: func() interface{} {
+		return &EVM{}
+	},
+}
 
 type (
 	// CanTransferFunc is the signature of a transfer guard function
@@ -129,14 +137,16 @@ type EVM struct {
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig *params.ChainConfig, config Config) *EVM {
-	evm := &EVM{
-		Context:     blockCtx,
-		TxContext:   txCtx,
-		StateDB:     statedb,
-		Config:      config,
-		chainConfig: chainConfig,
-		chainRules:  chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Random != nil, blockCtx.Time),
-	}
+	evm := EvmPool.Get().(*EVM)
+	evm.Context = blockCtx
+	evm.TxContext = txCtx
+	evm.StateDB = statedb
+	evm.Config = config
+	evm.chainConfig = chainConfig
+	evm.chainRules = chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Random != nil, blockCtx.Time)
+	evm.abort = 0
+	evm.callGasTemp = 0
+	evm.depth = 0
 	evm.interpreter = NewEVMInterpreter(evm)
 	return evm
 }

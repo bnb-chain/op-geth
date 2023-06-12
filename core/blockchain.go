@@ -209,10 +209,11 @@ type BlockChain struct {
 	currentFinalBlock atomic.Pointer[types.Header] // Latest (consensus) finalized block
 	currentSafeBlock  atomic.Pointer[types.Header] // Latest (consensus) safe block
 
-	bodyCache     *lru.Cache[common.Hash, *types.Body]
-	bodyRLPCache  *lru.Cache[common.Hash, rlp.RawValue]
-	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
-	blockCache    *lru.Cache[common.Hash, *types.Block]
+	bodyCache      *lru.Cache[common.Hash, *types.Body]
+	bodyRLPCache   *lru.Cache[common.Hash, rlp.RawValue]
+	receiptsCache  *lru.Cache[common.Hash, []*types.Receipt]
+	blockCache     *lru.Cache[common.Hash, *types.Block]
+	blockHashCache *lru.Cache[uint64, common.Hash]
 
 	miningReceiptsCache *lru.Cache[common.Hash, []*types.Receipt]
 	miningTxLogsCache   *lru.Cache[common.Hash, []*types.Log]
@@ -286,6 +287,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bodyRLPCache:        lru.NewCache[common.Hash, rlp.RawValue](bodyCacheLimit),
 		receiptsCache:       lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
 		blockCache:          lru.NewCache[common.Hash, *types.Block](blockCacheLimit),
+		blockHashCache:      lru.NewCache[uint64, common.Hash](blockCacheLimit),
 		miningReceiptsCache: lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
 		miningTxLogsCache:   lru.NewCache[common.Hash, []*types.Log](txLogsCacheLimit),
 		miningStateCache:    lru.NewCache[common.Hash, *state.StateDB](miningStateCacheLimit),
@@ -784,6 +786,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.bodyRLPCache.Purge()
 	bc.receiptsCache.Purge()
 	bc.blockCache.Purge()
+	bc.blockHashCache.Purge()
 	bc.miningReceiptsCache.Purge()
 	bc.miningTxLogsCache.Purge()
 	bc.miningStateCache.Purge()
@@ -932,6 +935,9 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 
 	bc.currentBlock.Store(block.Header())
 	headBlockGauge.Update(int64(block.NumberU64()))
+
+	// Update the block hash cache
+	bc.blockHashCache.Add(block.NumberU64(), block.Hash())
 }
 
 // stop stops the blockchain service. If any imports are currently in progress
@@ -1054,6 +1060,7 @@ func (bc *BlockChain) CacheBlock(hash common.Hash, block *types.Block) {
 	bc.hc.numberCache.Add(hash, block.NumberU64())
 	bc.hc.headerCache.Add(hash, block.Header())
 	bc.blockCache.Add(hash, block)
+	bc.blockHashCache.Add(block.NumberU64(), block.Hash())
 }
 
 // CacheReceipts cache receipts in memory
@@ -1239,6 +1246,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 				continue
 			}
 			rawdb.DeleteCanonicalHash(batch, block.NumberU64())
+			bc.blockHashCache.Remove(block.NumberU64())
 			rawdb.DeleteBlockWithoutNumber(batch, block.Hash(), block.NumberU64())
 		}
 		// Delete side chain hash-to-number mappings.
@@ -2293,6 +2301,7 @@ func (bc *BlockChain) reorg(oldHead *types.Header, newHead *types.Block) error {
 			break
 		}
 		rawdb.DeleteCanonicalHash(indexesBatch, i)
+		bc.blockHashCache.Remove(i)
 	}
 	if err := indexesBatch.Write(); err != nil {
 		log.Crit("Failed to delete useless indexes", "err", err)

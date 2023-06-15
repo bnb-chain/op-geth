@@ -52,6 +52,9 @@ const (
 	// more expensive to propagate; larger transactions also take more resources
 	// to validate whether they fit into the pool or not.
 	txMaxSize = 4 * txSlotSize // 128KB
+
+	// txReannoMaxNum is the maximum number of transactions a reannounce action can include.
+	txReannoMaxNum = 1024
 )
 
 var (
@@ -103,7 +106,8 @@ var (
 	// L1 Info Gas Overhead is the amount of gas the the L1 info deposit consumes.
 	// It is removed from the tx pool max gas to better indicate that L2 transactions
 	// are not able to consume all of the gas in a L2 block as the L1 info deposit is always present.
-	l1InfoGasOverhead = uint64(70_000)
+	l1InfoGasOverhead  = uint64(70_000)
+	reannounceInterval = time.Minute // Time interval to check for reannounce transactions
 )
 
 var (
@@ -179,7 +183,8 @@ type Config struct {
 	AccountQueue uint64 // Maximum number of non-executable transaction slots permitted per account
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
-	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
+	Lifetime       time.Duration // Maximum amount of time non-executable transaction are queued
+	ReannounceTime time.Duration // Duration for announcing local pending transactions again
 }
 
 // DefaultConfig contains the default configurations for the transaction
@@ -196,7 +201,8 @@ var DefaultConfig = Config{
 	AccountQueue: 64,
 	GlobalQueue:  1024,
 
-	Lifetime: 3 * time.Hour,
+	Lifetime:       3 * time.Hour,
+	ReannounceTime: 10 * 365 * 24 * time.Hour,
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -235,6 +241,10 @@ func (config *Config) sanitize() Config {
 		log.Warn("Sanitizing invalid txpool lifetime", "provided", conf.Lifetime, "updated", DefaultConfig.Lifetime)
 		conf.Lifetime = DefaultConfig.Lifetime
 	}
+	if conf.ReannounceTime < time.Minute {
+		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", time.Minute)
+		conf.ReannounceTime = time.Minute
+	}
 	return conf
 }
 
@@ -246,14 +256,15 @@ func (config *Config) sanitize() Config {
 // current state) and future transactions. Transactions move between those
 // two states over time as they are received and processed.
 type TxPool struct {
-	config      Config
-	chainconfig *params.ChainConfig
-	chain       blockChain
-	gasPrice    *big.Int
-	txFeed      event.Feed
-	scope       event.SubscriptionScope
-	signer      types.Signer
-	mu          sync.RWMutex
+	config       Config
+	chainconfig  *params.ChainConfig
+	chain        blockChain
+	gasPrice     *big.Int
+	txFeed       event.Feed
+	reannoTxFeed event.Feed // Event feed for announcing transactions again
+	scope        event.SubscriptionScope
+	signer       types.Signer
+	mu           sync.RWMutex
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -358,14 +369,16 @@ func (pool *TxPool) loop() {
 	var (
 		prevPending, prevQueued, prevStales int
 		// Start the stats reporting and transaction eviction tickers
-		report  = time.NewTicker(statsReportInterval)
-		evict   = time.NewTicker(evictionInterval)
-		journal = time.NewTicker(pool.config.Rejournal)
+		report     = time.NewTicker(statsReportInterval)
+		evict      = time.NewTicker(evictionInterval)
+		reannounce = time.NewTicker(reannounceInterval)
+		journal    = time.NewTicker(pool.config.Rejournal)
 		// Track the previous head headers for transaction reorgs
 		head = pool.chain.CurrentBlock()
 	)
 	defer report.Stop()
 	defer evict.Stop()
+	defer reannounce.Stop()
 	defer journal.Stop()
 
 	// Notify tests that the init phase is done
@@ -415,6 +428,33 @@ func (pool *TxPool) loop() {
 			}
 			pool.mu.Unlock()
 
+		case <-reannounce.C:
+			pool.mu.RLock()
+			reannoTxs := func() []*types.Transaction {
+				txs := make([]*types.Transaction, 0)
+				for addr, list := range pool.pending {
+					if !pool.locals.contains(addr) {
+						continue
+					}
+
+					for _, tx := range list.Flatten() {
+						// Default ReannounceTime is 10 years, won't announce by default.
+						if time.Since(tx.Time()) < pool.config.ReannounceTime {
+							break
+						}
+						txs = append(txs, tx)
+						if len(txs) >= txReannoMaxNum {
+							return txs
+						}
+					}
+				}
+				return txs
+			}()
+			pool.mu.RUnlock()
+			if len(reannoTxs) > 0 {
+				pool.reannoTxFeed.Send(core.ReannoTxsEvent{reannoTxs})
+			}
+
 		// Handle local transaction journal rotation
 		case <-journal.C:
 			if pool.journal != nil {
@@ -447,6 +487,12 @@ func (pool *TxPool) Stop() {
 // starts sending event to the given channel.
 func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return pool.scope.Track(pool.txFeed.Subscribe(ch))
+}
+
+// SubscribeReannoTxsEvent registers a subscription of ReannoTxsEvent and
+// starts sending event to the given channel.
+func (pool *TxPool) SubscribeReannoTxsEvent(ch chan<- core.ReannoTxsEvent) event.Subscription {
+	return pool.scope.Track(pool.reannoTxFeed.Subscribe(ch))
 }
 
 // GasPrice returns the current gas price enforced by the transaction pool.

@@ -100,6 +100,11 @@ type TxData interface {
 	effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int
 }
 
+// Time returns transaction's time
+func (tx *Transaction) Time() time.Time {
+	return tx.time
+}
+
 // EncodeRLP implements rlp.Encoder
 func (tx *Transaction) EncodeRLP(w io.Writer) error {
 	if tx.Type() == LegacyTxType {

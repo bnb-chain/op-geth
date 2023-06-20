@@ -44,4 +44,6 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: ${{ steps.image.outputs.IMAGE_ID }}:${{ steps.image.outputs.VERSION }},${{ steps.image.outputs.IMAGE_ID }}:latest
+          cache-from: type=registry,ref=${{ steps.image.outputs.IMAGE_ID }}:buildcache
+          cache-to: type=registry,ref=${{ steps.image.outputs.IMAGE_ID }}:buildcache,mode=max
 

@@ -81,17 +81,18 @@ type txPool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	Database       ethdb.Database            // Database for direct sync insertions
-	Chain          *core.BlockChain          // Blockchain to serve data from
-	TxPool         txPool                    // Transaction pool to propagate from
-	Merger         *consensus.Merger         // The manager for eth1/2 transition
-	Network        uint64                    // Network identifier to adfvertise
-	Sync           downloader.SyncMode       // Whether to snap or full sync
-	BloomCache     uint64                    // Megabytes to alloc for snap sync bloom
-	EventMux       *event.TypeMux            // Legacy event mux, deprecate for `feed`
-	Checkpoint     *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
-	RequiredBlocks map[uint64]common.Hash    // Hard coded map of required block hashes for sync challenges
-	NoTxGossip     bool                      // Disable P2P transaction gossip
+	Database             ethdb.Database            // Database for direct sync insertions
+	Chain                *core.BlockChain          // Blockchain to serve data from
+	TxPool               txPool                    // Transaction pool to propagate from
+	Merger               *consensus.Merger         // The manager for eth1/2 transition
+	Network              uint64                    // Network identifier to adfvertise
+	Sync                 downloader.SyncMode       // Whether to snap or full sync
+	BloomCache           uint64                    // Megabytes to alloc for snap sync bloom
+	EventMux             *event.TypeMux            // Legacy event mux, deprecate for `feed`
+	Checkpoint           *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
+	RequiredBlocks       map[uint64]common.Hash    // Hard coded map of required block hashes for sync challenges
+	NoTxGossip           bool                      // Disable P2P transaction gossip
+	CollectUnderpricedTx bool                      // Wether collect underpriced tx or not
 }
 
 type handler struct {
@@ -312,6 +313,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		return p.RequestTxs(hashes)
 	}
 	h.txFetcher = fetcher.NewTxFetcher(h.txpool.Has, h.txpool.AddRemotes, fetchTx)
+	h.txFetcher.AllowUnderpricedTx = config.CollectUnderpricedTx
 	h.chainSync = newChainSyncer(h)
 	return h, nil
 }

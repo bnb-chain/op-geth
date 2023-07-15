@@ -37,7 +37,7 @@ import (
 const (
 	// maxTxAnnounces is the maximum number of unique transaction a peer
 	// can announce in a short time.
-	maxTxAnnounces = 4096
+	maxTxAnnounces = 8192
 
 	// maxTxRetrievals is the maximum transaction number can be fetched in one
 	// request. The rationale to pick 256 is:
@@ -144,6 +144,10 @@ type txDrop struct {
 //     only ever one concurrently. This ensures we can immediately know what is
 //     missing from a reply and reschedule it.
 type TxFetcher struct {
+	// Usually underpriced transactions should be rejected directly.
+	// but in some cases when the pool desires more transactions, it helps to improve the throughput
+	AllowUnderpricedTx bool
+
 	notify  chan *txAnnounce
 	cleanup chan *txDelivery
 	drop    chan *txDrop
@@ -232,7 +236,7 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 		case f.hasTx(hash):
 			duplicate++
 
-		case f.underpriced.Contains(hash):
+		case !f.AllowUnderpricedTx && f.underpriced.Contains(hash):
 			underpriced++
 
 		default:

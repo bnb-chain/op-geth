@@ -476,6 +476,8 @@ type ChainConfig struct {
 
 	// Optimism config, nil if not active
 	Optimism *OptimismConfig `json:"optimism,omitempty"`
+	// PreContractForkBlock hard-fork switch block (nil = no fork, 0 = already on preContractForkBlock)
+	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -598,6 +600,9 @@ func (c *ChainConfig) Description() string {
 	}
 	if c.RegolithTime != nil {
 		banner += fmt.Sprintf(" - Regolith:                    @%-10v\n", *c.RegolithTime)
+	}
+	if c.PreContractForkBlock != nil {
+		banner += fmt.Sprintf(" - PreContractForkBlock:        @%-10v\n", *c.PreContractForkBlock)
 	}
 	return banner
 }
@@ -1028,12 +1033,12 @@ func (err *ConfigCompatError) Error() string {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                 *big.Int
-	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon                                      bool
-	IsMerge, IsShanghai, isCancun, isPrague                 bool
-	IsOptimismBedrock, IsOptimismRegolith                   bool
+	ChainID                                                   *big.Int
+	IsHomestead, IsEIP150, IsEIP155, IsEIP158                 bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul   bool
+	IsBerlin, IsLondon                                        bool
+	IsMerge, IsShanghai, isCancun, isPrague                   bool
+	IsOptimismBedrock, IsOptimismRegolith, IsPreContractBlock bool
 }
 
 // Rules ensures c's ChainID is not nil.

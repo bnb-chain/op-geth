@@ -162,6 +162,10 @@ func (pre *Prestate) Apply(vmConfig vm.Config, chainConfig *params.ChainConfig,
 		misc.ApplyDAOHardFork(statedb)
 	}
 
+	if chainConfig.PreContractForkBlock != nil && chainConfig.PreContractForkBlock.Cmp(new(big.Int).SetUint64(pre.Env.Number)) == 0 {
+		misc.ApplyPreContractHardFork(statedb)
+	}
+
 	for i, tx := range txs {
 		msg, err := core.TransactionToMessage(tx, signer, pre.Env.BaseFee)
 		if err != nil {

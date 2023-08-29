@@ -106,8 +106,7 @@ var (
 	// L1 Info Gas Overhead is the amount of gas the the L1 info deposit consumes.
 	// It is removed from the tx pool max gas to better indicate that L2 transactions
 	// are not able to consume all of the gas in a L2 block as the L1 info deposit is always present.
-	l1InfoGasOverhead  = uint64(70_000)
-	reannounceInterval = time.Minute // Time interval to check for reannounce transactions
+	l1InfoGasOverhead = uint64(70_000)
 )
 
 var (
@@ -183,8 +182,10 @@ type Config struct {
 	AccountQueue uint64 // Maximum number of non-executable transaction slots permitted per account
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
-	Lifetime       time.Duration // Maximum amount of time non-executable transaction are queued
-	ReannounceTime time.Duration // Duration for announcing local pending transactions again
+	Lifetime           time.Duration // Maximum amount of time non-executable transaction are queued
+	ReannounceTime     time.Duration // Duration for announcing local pending transactions again
+	ReannounceRemotes  bool          // Wether reannounce remote transactions or not
+	ReannounceInterval time.Duration // Interval for reannouncing transactions
 }
 
 // DefaultConfig contains the default configurations for the transaction
@@ -201,8 +202,10 @@ var DefaultConfig = Config{
 	AccountQueue: 64,
 	GlobalQueue:  1024,
 
-	Lifetime:       3 * time.Hour,
-	ReannounceTime: 10 * 365 * 24 * time.Hour,
+	Lifetime:           3 * time.Hour,
+	ReannounceTime:     10 * 365 * 24 * time.Hour,
+	ReannounceRemotes:  false,
+	ReannounceInterval: 1 * time.Minute,
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -244,6 +247,10 @@ func (config *Config) sanitize() Config {
 	if conf.ReannounceTime < time.Minute {
 		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", time.Minute)
 		conf.ReannounceTime = time.Minute
+	}
+	if conf.ReannounceInterval <= 0 {
+		log.Warn("Sanitizing invalid txpool reannounce interval", "provided", conf.ReannounceInterval, "updated", time.Minute)
+		conf.ReannounceInterval = 1 * time.Minute
 	}
 	return conf
 }
@@ -365,16 +372,17 @@ func NewTxPool(config Config, chainconfig *params.ChainConfig, chain blockChain)
 // eviction events.
 func (pool *TxPool) loop() {
 	defer pool.wg.Done()
-
 	var (
 		prevPending, prevQueued, prevStales int
 		// Start the stats reporting and transaction eviction tickers
 		report     = time.NewTicker(statsReportInterval)
 		evict      = time.NewTicker(evictionInterval)
-		reannounce = time.NewTicker(reannounceInterval)
+		reannounce = time.NewTicker(pool.config.ReannounceInterval)
 		journal    = time.NewTicker(pool.config.Rejournal)
 		// Track the previous head headers for transaction reorgs
 		head = pool.chain.CurrentBlock()
+		// waiting queue for reannouncing transactions
+		reannoQueue = NewReannounceQueue()
 	)
 	defer report.Stop()
 	defer evict.Stop()
@@ -431,12 +439,21 @@ func (pool *TxPool) loop() {
 		case <-reannounce.C:
 			pool.mu.RLock()
 			reannoTxs := func() []*types.Transaction {
+				for addr := range pool.pending {
+					reannoQueue.Add(addr)
+				}
+
 				txs := make([]*types.Transaction, 0)
-				for addr, list := range pool.pending {
-					if !pool.locals.contains(addr) {
+				for i := 0; i < reannoQueue.Len(); i++ {
+					addr := reannoQueue.Next()
+					list := pool.pending[addr]
+					if list == nil || list.Len() == 0 {
+						reannoQueue.MarkRemoved(addr)
 						continue
 					}
-
+					if !pool.config.ReannounceRemotes && !pool.locals.contains(addr) {
+						continue
+					}
 					for _, tx := range list.Flatten() {
 						// Default ReannounceTime is 10 years, won't announce by default.
 						if time.Since(tx.Time()) < pool.config.ReannounceTime {
@@ -451,6 +468,7 @@ func (pool *TxPool) loop() {
 				return txs
 			}()
 			pool.mu.RUnlock()
+			reannoQueue.Clean()
 			if len(reannoTxs) > 0 {
 				pool.reannoTxFeed.Send(core.ReannoTxsEvent{reannoTxs})
 			}
@@ -466,6 +484,118 @@ func (pool *TxPool) loop() {
 			}
 		}
 	}
+}
+
+// Reannounce queue for pending tx to be reannounced, which ensures that every address in pending pool has equal chances
+// to be reannounced
+type reannounceQueue struct {
+	toRemove map[common.Address]bool
+	global   map[common.Address]bool
+	head     *reannounceSeat
+	tail     *reannounceSeat
+	curr     *reannounceSeat
+	len      int
+}
+
+type reannounceSeat struct {
+	addr common.Address
+	next *reannounceSeat
+}
+
+func NewReannounceQueue() *reannounceQueue {
+	return &reannounceQueue{
+		global:   make(map[common.Address]bool),
+		toRemove: make(map[common.Address]bool),
+		len:      0,
+	}
+}
+
+// Add a new addr into queue. If already in queue, it will be ignored
+func (rq *reannounceQueue) Add(addr common.Address) {
+	if rq.global[addr] {
+		return
+	}
+	rq.global[addr] = true
+	rq.len++
+	if rq.head == nil {
+		firstSeat := &reannounceSeat{
+			addr: addr,
+			next: nil,
+		}
+		//we need to loop back if it reaches the end
+		firstSeat.next = firstSeat
+		rq.curr, rq.head, rq.tail = firstSeat, firstSeat, firstSeat
+		return
+	}
+	//insert into queue from head
+	newSeat := &reannounceSeat{
+		addr: addr,
+		next: rq.head,
+	}
+	rq.head = newSeat
+	rq.tail.next = rq.head
+}
+
+// Mark an addr to be removed later
+func (rq *reannounceQueue) MarkRemoved(addrs ...common.Address) {
+	for _, addr := range addrs {
+		rq.toRemove[addr] = true
+	}
+}
+
+// Clean all addrs marked to be removed
+func (rq *reannounceQueue) Clean() {
+	if rq.head == nil {
+		return
+	}
+	curr, prev := rq.head, rq.tail
+	total := len(rq.global)
+	for i := 0; i < total; i++ {
+		addr := curr.addr
+		if rq.toRemove[addr] {
+			//remove the current seat
+			delete(rq.global, addr)
+			delete(rq.toRemove, addr)
+			rq.len--
+			//when cleaning the last one, just reinit all pointers
+			if curr == rq.head && curr == rq.tail {
+				rq.head, rq.tail, rq.curr = nil, nil, nil
+				return
+			}
+			//shift the curr seat if it's to be removed
+			if rq.curr == curr {
+				rq.curr = curr.next
+			}
+			//shift the head if to be removed
+			if rq.head == curr {
+				rq.head, rq.tail.next = curr.next, curr.next
+			}
+			//shift the tail if to be removed
+			if rq.tail == curr {
+				rq.tail = prev
+			}
+			//link the prev one & next one
+			prev.next = curr.next
+			curr = curr.next
+		} else {
+			prev = curr
+			curr = curr.next
+		}
+	}
+}
+
+// Get the waiting addr which should be process now, empty address will be returned if the queue is empty
+func (rq *reannounceQueue) Next() common.Address {
+	if rq.curr == nil {
+		return common.Address{}
+	}
+	addr := rq.curr.addr
+	rq.curr = rq.curr.next
+	return addr
+}
+
+func (rq *reannounceQueue) Len() int {
+	return rq.len
 }
 
 // Stop terminates the transaction pool.

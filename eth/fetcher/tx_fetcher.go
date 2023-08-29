@@ -353,12 +353,23 @@ func (f *TxFetcher) Drop(peer string) error {
 // hash notifications and block fetches until termination requested.
 func (f *TxFetcher) Start() {
 	go f.loop()
+	go f.cleanUnderpriced(100)
 }
 
 // Stop terminates the announcement based synchroniser, canceling all pending
 // operations.
 func (f *TxFetcher) Stop() {
 	close(f.quit)
+}
+
+func (f *TxFetcher) cleanUnderpriced(num int) {
+	// pop out underpriced transactions per second
+	var cleanTimer = time.NewTicker(time.Second)
+	for range cleanTimer.C {
+		for i := 0; i < num; i++ {
+			f.underpriced.Pop()
+		}
+	}
 }
 
 func (f *TxFetcher) loop() {

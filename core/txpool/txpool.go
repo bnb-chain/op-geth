@@ -382,7 +382,7 @@ func (pool *TxPool) loop() {
 		// Track the previous head headers for transaction reorgs
 		head = pool.chain.CurrentBlock()
 		// waiting queue for reannouncing transactions
-		reannoQueue = NewReannounceQueue()
+		reannoQueue = NewRingChain()
 	)
 	defer report.Stop()
 	defer evict.Stop()
@@ -486,116 +486,94 @@ func (pool *TxPool) loop() {
 	}
 }
 
-// Reannounce queue for pending tx to be reannounced, which ensures that every address in pending pool has equal chances
+// ringchain for for pending tx to be reannounced, which ensures that every address in pending pool has equal chances
 // to be reannounced
-type reannounceQueue struct {
-	toRemove map[common.Address]bool
-	global   map[common.Address]bool
-	head     *reannounceSeat
-	tail     *reannounceSeat
-	curr     *reannounceSeat
+type RingChain struct {
+	entry    *RingNode
+	preEntry *RingNode            //the pointer of pre-node of entry
+	toRemove map[interface{}]bool // values to be removed by Clean()
 	len      int
 }
 
-type reannounceSeat struct {
-	addr common.Address
-	next *reannounceSeat
+type RingNode struct {
+	val  interface{}
+	next *RingNode
 }
 
-func NewReannounceQueue() *reannounceQueue {
-	return &reannounceQueue{
-		global:   make(map[common.Address]bool),
-		toRemove: make(map[common.Address]bool),
+func NewRingChain() *RingChain {
+	return &RingChain{
+		toRemove: make(map[interface{}]bool),
 		len:      0,
 	}
 }
 
-// Add a new addr into queue. If already in queue, it will be ignored
-func (rq *reannounceQueue) Add(addr common.Address) {
-	if rq.global[addr] {
+// Add a new addr into ring. If already included, it will be ignored
+func (rc *RingChain) Add(value interface{}) {
+	newone := &RingNode{
+		val: value,
+	}
+	defer func() { rc.len++ }()
+	if rc.len == 0 {
+		rc.entry, rc.preEntry = newone, newone
+		rc.entry.next = newone
 		return
 	}
-	rq.global[addr] = true
-	rq.len++
-	if rq.head == nil {
-		firstSeat := &reannounceSeat{
-			addr: addr,
-			next: nil,
-		}
-		//we need to loop back if it reaches the end
-		firstSeat.next = firstSeat
-		rq.curr, rq.head, rq.tail = firstSeat, firstSeat, firstSeat
+	if rc.len == 1 {
+		rc.preEntry.next, rc.entry, newone.next = newone, newone, rc.entry.next
+		return
+
+	} else {
+		newone.next = rc.entry.next
+		rc.preEntry, rc.entry = rc.entry, newone
+		rc.preEntry.next = rc.entry
 		return
 	}
-	//insert into queue from head
-	newSeat := &reannounceSeat{
-		addr: addr,
-		next: rq.head,
-	}
-	rq.head = newSeat
-	rq.tail.next = rq.head
 }
 
 // Mark an addr to be removed later
-func (rq *reannounceQueue) MarkRemoved(addrs ...common.Address) {
-	for _, addr := range addrs {
-		rq.toRemove[addr] = true
+func (rc *RingChain) MarkRemoved(values ...interface{}) {
+	for _, val := range values {
+		rc.toRemove[val] = true
 	}
 }
 
 // Clean all addrs marked to be removed
-func (rq *reannounceQueue) Clean() {
-	if rq.head == nil {
-		return
-	}
-	curr, prev := rq.head, rq.tail
-	total := len(rq.global)
+func (rc *RingChain) Clean() {
+	total := rc.len
 	for i := 0; i < total; i++ {
-		addr := curr.addr
-		if rq.toRemove[addr] {
-			//remove the current seat
-			delete(rq.global, addr)
-			delete(rq.toRemove, addr)
-			rq.len--
-			//when cleaning the last one, just reinit all pointers
-			if curr == rq.head && curr == rq.tail {
-				rq.head, rq.tail, rq.curr = nil, nil, nil
-				return
-			}
-			//shift the curr seat if it's to be removed
-			if rq.curr == curr {
-				rq.curr = curr.next
-			}
-			//shift the head if to be removed
-			if rq.head == curr {
-				rq.head, rq.tail.next = curr.next, curr.next
-			}
-			//shift the tail if to be removed
-			if rq.tail == curr {
-				rq.tail = prev
-			}
-			//link the prev one & next one
-			prev.next = curr.next
-			curr = curr.next
-		} else {
-			prev = curr
-			curr = curr.next
+		entry := rc.entry
+		if _, ok := rc.toRemove[entry.val]; ok {
+			rc.trim()
+			delete(rc.toRemove, entry.val)
 		}
+		rc.Next()
 	}
 }
 
-// Get the waiting addr which should be process now, empty address will be returned if the queue is empty
-func (rq *reannounceQueue) Next() common.Address {
-	if rq.curr == nil {
+// return the value holded by entry and then move the entry to next position.
+func (rc *RingChain) Next() common.Address {
+	if rc.entry == nil {
 		return common.Address{}
 	}
-	addr := rq.curr.addr
-	rq.curr = rq.curr.next
-	return addr
+	curr := rc.entry.val
+	rc.preEntry, rc.entry = rc.entry, rc.entry.next
+	return curr.(common.Address)
 }
 
-func (rq *reannounceQueue) Len() int {
-	return rq.len
+func (rc *RingChain) Len() int {
+	return rc.len
+}
+
+func (rc *RingChain) trim() {
+	if rc.len == 0 {
+		return
+	}
+	defer func() { rc.len-- }()
+	if rc.len == 1 {
+		rc.entry, rc.preEntry = nil, nil
+		return
+	}
+	rc.entry, rc.preEntry.next = rc.entry.next, rc.entry.next
 }
 
 // Stop terminates the transaction pool.

@@ -337,6 +337,7 @@ func TestReannounceQueue(t *testing.T) {
 	// case of: queue[1]
 	rq = NewRingChain()
 	rq.Add(addr0)
+	rq.Add(common.HexToAddress("0x0000000000000000000000000000000000000000"))
 	if addr := rq.Next(); addr != addr0 {
 		t.Fatalf("wrong addr returned")
 	}
@@ -360,6 +361,9 @@ func TestReannounceQueue(t *testing.T) {
 	rq = NewRingChain()
 	rq.Add(addr0)
 	rq.Add(addr1)
+	// case of duplicated address
+	rq.Add(common.HexToAddress("0x0000000000000000000000000000000000000000"))
+	rq.Add(common.HexToAddress("0x0000000000000000000000000000000000000001"))
 	if addr := rq.Next(); addr != addr1 {
 		t.Fatalf("wrong addr returned")
 	}
@@ -376,12 +380,12 @@ func TestReannounceQueue(t *testing.T) {
 	rq.MarkRemoved(addr1)
 	rq.Clean()
 	curr = rq.entry.val.(common.Address)
-	if rq.entry != rq.preEntry || curr != addr0 || rq.len != 1 {
+	if rq.entry != rq.preEntry || curr != addr0 || rq.Len() != 1 {
 		t.Fatalf("queue should be only one waiting addr: addr1")
 	}
 	rq.MarkRemoved(addr0)
 	rq.Clean()
-	if rq.entry != nil || rq.preEntry != nil || len(rq.toRemove) != 0 || rq.len != 0 {
+	if rq.entry != nil || rq.preEntry != nil || len(rq.toRemove) != 0 || rq.Len() != 0 {
 		t.Fatalf("should be empty")
 	}
 
@@ -407,7 +411,7 @@ func TestReannounceQueue(t *testing.T) {
 	}
 	rq.MarkRemoved(addr0, addr1, addr2)
 	rq.Clean()
-	if rq.entry != nil || rq.preEntry != nil || len(rq.toRemove) != 0 || rq.len != 0 {
+	if rq.entry != nil || rq.preEntry != nil || len(rq.toRemove) != 0 || rq.Len() != 0 {
 		t.Fatalf("should be empty")
 	}
 
@@ -417,7 +421,7 @@ func TestReannounceQueue(t *testing.T) {
 	rq.Add(addr1)
 	rq.Add(addr2)
 	rq.Add(addr3)
-	rq.MarkRemoved(addr0)
+	rq.MarkRemoved(common.HexToAddress("0x0000000000000000000000000000000000000000"))
 	rq.Clean()
 	if addr := rq.Next(); addr != addr1 {
 		t.Fatalf("wrong addr returned")
@@ -431,20 +435,20 @@ func TestReannounceQueue(t *testing.T) {
 	if rq.Len() != 3 {
 		t.Fatalf("length of waiting queue should be 3")
 	}
-	rq.MarkRemoved(addr2)
+	rq.MarkRemoved(common.HexToAddress("0x0000000000000000000000000000000000000003"))
 	rq.Clean()
-	if addr := rq.Next(); addr != addr3 {
+	if addr := rq.Next(); addr != addr1 {
 		t.Fatalf("wrong addr returned")
 	}
-	if addr := rq.Next(); addr != addr1 {
+	if addr := rq.Next(); addr != addr2 {
 		t.Fatalf("wrong addr returned")
 	}
 	if rq.Len() != 2 {
 		t.Fatalf("length of waiting queue should be 2")
 	}
-	rq.MarkRemoved(addr3, addr1)
+	rq.MarkRemoved(addr2, addr1)
 	rq.Clean()
-	if rq.entry != nil || rq.preEntry != nil || len(rq.toRemove) != 0 || rq.len != 0 {
+	if rq.entry != nil || rq.preEntry != nil || len(rq.toRemove) != 0 || rq.Len() != 0 {
 		t.Fatalf("should be empty")
 	}
 	if rq.Len() != 0 {

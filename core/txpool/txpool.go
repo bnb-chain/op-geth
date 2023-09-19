@@ -490,9 +490,9 @@ func (pool *TxPool) loop() {
 // to be reannounced
 type RingChain struct {
 	entry    *RingNode
-	preEntry *RingNode            //the pointer of pre-node of entry
-	toRemove map[interface{}]bool // values to be removed by Clean()
-	len      int
+	preEntry *RingNode               //the pointer of pre-node of entry
+	toRemove map[interface{}]bool    // values to be removed by Clean()
+	exists   map[common.Address]bool // to avoid duplicate element enqueue the list
 }
 
 type RingNode struct {
@@ -503,22 +503,22 @@ type RingNode struct {
 func NewRingChain() *RingChain {
 	return &RingChain{
 		toRemove: make(map[interface{}]bool),
-		len:      0,
+		exists:   make(map[common.Address]bool),
 	}
 }
 
 // Add a new addr into ring. If already included, it will be ignored
-func (rc *RingChain) Add(value interface{}) {
+func (rc *RingChain) Add(value common.Address) {
 	newone := &RingNode{
 		val: value,
 	}
-	defer func() { rc.len++ }()
-	if rc.len == 0 {
+	defer func() { rc.exists[value] = true }()
+	if rc.Len() == 0 {
 		rc.entry, rc.preEntry = newone, newone
 		rc.entry.next = newone
 		return
 	}
-	if rc.len == 1 {
+	if rc.Len() == 1 {
 		rc.preEntry.next, rc.entry, newone.next = newone, newone, rc.entry.next
 		return
 
@@ -539,7 +539,7 @@ func (rc *RingChain) MarkRemoved(values ...interface{}) {
 
 // Clean all addrs marked to be removed
 func (rc *RingChain) Clean() {
-	total := rc.len
+	total := rc.Len()
 	for i := 0; i < total; i++ {
 		entry := rc.entry
 		if _, ok := rc.toRemove[entry.val]; ok {
@@ -561,15 +561,16 @@ func (rc *RingChain) Next() common.Address {
 }
 
 func (rc *RingChain) Len() int {
-	return rc.len
+	return len(rc.exists)
 }
 
 func (rc *RingChain) trim() {
-	if rc.len == 0 {
+	if rc.Len() == 0 {
 		return
 	}
-	defer func() { rc.len-- }()
-	if rc.len == 1 {
+	curr := rc.entry.val.(common.Address)
+	defer func() { delete(rc.exists, curr) }()
+	if rc.Len() == 1 {
 		rc.entry, rc.preEntry = nil, nil
 		return
 	}

@@ -232,7 +232,6 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	)
 	isUnderpriced := func(hash common.Hash) bool {
 		prevTime, ok := f.underpriced.Peek(hash)
-		//if ok && prevTime+maxTxUnderpricedTimeout < time.Now().Unix() {
 		if ok && time.Since(prevTime) > maxTxUnderpricedTimeout {
 			f.underpriced.Remove(hash)
 			return false

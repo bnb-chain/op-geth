@@ -423,13 +423,13 @@ func TestReannounceQueue(t *testing.T) {
 	rq.Add(addr3)
 	rq.MarkRemoved(common.HexToAddress("0x0000000000000000000000000000000000000000"))
 	rq.Clean()
+	if addr := rq.Next(); addr != addr3 {
+		t.Fatalf("wrong addr returned")
+	}
 	if addr := rq.Next(); addr != addr1 {
 		t.Fatalf("wrong addr returned")
 	}
 	if addr := rq.Next(); addr != addr2 {
-		t.Fatalf("wrong addr returned")
-	}
-	if addr := rq.Next(); addr != addr3 {
 		t.Fatalf("wrong addr returned")
 	}
 	if rq.Len() != 3 {
@@ -446,13 +446,21 @@ func TestReannounceQueue(t *testing.T) {
 	if rq.Len() != 2 {
 		t.Fatalf("length of waiting queue should be 2")
 	}
+	rq.MarkRemoved(addr2)
+	rq.Clean()
+	if addr := rq.Next(); addr != addr1 {
+		t.Fatalf("should be addr1")
+	}
+	if addr := rq.Next(); addr != addr1 {
+		t.Fatalf("should be addr1")
+	}
+	if rq.Len() != 1 {
+		t.Fatalf("length of waiting queue should be 1")
+	}
 	rq.MarkRemoved(addr2, addr1)
 	rq.Clean()
 	if rq.entry != nil || rq.preEntry != nil || len(rq.toRemove) != 0 || rq.Len() != 0 {
 		t.Fatalf("should be empty")
-	}
-	if rq.Len() != 0 {
-		t.Fatalf("length of waiting queue should be 0")
 	}
 
 }

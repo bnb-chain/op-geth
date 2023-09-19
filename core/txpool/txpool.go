@@ -509,6 +509,9 @@ func NewRingChain() *RingChain {
 
 // Add a new addr into ring. If already included, it will be ignored
 func (rc *RingChain) Add(value common.Address) {
+	if _, ok := rc.exists[value]; ok {
+		return
+	}
 	newone := &RingNode{
 		val: value,
 	}
@@ -539,15 +542,19 @@ func (rc *RingChain) MarkRemoved(values ...interface{}) {
 
 // Clean all addrs marked to be removed
 func (rc *RingChain) Clean() {
+	defer func() { rc.toRemove = make(map[interface{}]bool) }()
 	total := rc.Len()
+	preEntry, entry := rc.preEntry, rc.entry
 	for i := 0; i < total; i++ {
-		entry := rc.entry
 		if _, ok := rc.toRemove[entry.val]; ok {
-			rc.trim()
+			rc.trim(entry, preEntry)
 			delete(rc.toRemove, entry.val)
+			entry = entry.next
+		} else {
+			preEntry, entry = entry, entry.next
 		}
-		rc.Next()
 	}
+
 }
 
 // return the value holded by entry and then move the entry to next position.
@@ -564,17 +571,33 @@ func (rc *RingChain) Len() int {
 	return len(rc.exists)
 }
 
-func (rc *RingChain) trim() {
+func (rc *RingChain) trim(entry, preEntry *RingNode) {
 	if rc.Len() == 0 {
 		return
 	}
-	curr := rc.entry.val.(common.Address)
+	curr := entry.val.(common.Address)
 	defer func() { delete(rc.exists, curr) }()
+
+	//only one element left, clear all status
 	if rc.Len() == 1 {
 		rc.entry, rc.preEntry = nil, nil
 		return
 	}
-	rc.entry, rc.preEntry.next = rc.entry.next, rc.entry.next
+
+	// remove current element from the ring
+	preEntry.next = entry.next
+
+	//update the rc.entry if it's hit
+	if entry == rc.entry {
+		rc.entry = preEntry.next
+		return
+	}
+
+	//update the rc.preEntry if it's hit
+	if entry == rc.preEntry {
+		rc.preEntry = preEntry
+		return
+	}
 }
 
 // Stop terminates the transaction pool.

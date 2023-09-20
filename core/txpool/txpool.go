@@ -27,6 +27,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/prque"
+	"github.com/ethereum/go-ethereum/common/ringlist"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -245,8 +246,8 @@ func (config *Config) sanitize() Config {
 		conf.Lifetime = DefaultConfig.Lifetime
 	}
 	if conf.ReannounceTime < time.Minute {
-		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", time.Minute)
-		conf.ReannounceTime = time.Minute
+		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", DefaultConfig.ReannounceTime)
+		conf.ReannounceTime = DefaultConfig.ReannounceTime
 	}
 	if conf.ReannounceInterval <= 0 {
 		log.Warn("Sanitizing invalid txpool reannounce interval", "provided", conf.ReannounceInterval, "updated", time.Minute)
@@ -382,7 +383,7 @@ func (pool *TxPool) loop() {
 		// Track the previous head headers for transaction reorgs
 		head = pool.chain.CurrentBlock()
 		// waiting queue for reannouncing transactions
-		reannoQueue = NewReannQueue[common.Address]()
+		reannoQueue = ringlist.NewRingList[common.Address]()
 	)
 	defer report.Stop()
 	defer evict.Stop()
@@ -468,7 +469,7 @@ func (pool *TxPool) loop() {
 				return txs
 			}()
 			pool.mu.RUnlock()
-			reannoQueue.Clean()
+			reannoQueue.Purge()
 			if len(reannoTxs) > 0 {
 				pool.reannoTxFeed.Send(core.ReannoTxsEvent{reannoTxs})
 			}
@@ -483,120 +484,6 @@ func (pool *TxPool) loop() {
 				pool.mu.Unlock()
 			}
 		}
-	}
-}
-
-// ReannQueue for for pending tx to be reannounced, which ensures that every address in pending pool has equal chances
-// to be reannounced
-type ReannQueue[T comparable] struct {
-	entry    *ReannSlot[T]
-	preEntry *ReannSlot[T] //the pointer of pre-node of entry
-	toRemove map[T]bool    // values to be removed by Clean()
-	exists   map[T]bool    // to avoid duplicate element enqueue the list
-}
-
-type ReannSlot[T comparable] struct {
-	val  T
-	next *ReannSlot[T]
-}
-
-func NewReannQueue[T comparable]() *ReannQueue[T] {
-	return &ReannQueue[T]{
-		toRemove: make(map[T]bool),
-		exists:   make(map[T]bool),
-	}
-}
-
-// Add a new addr into ring. If already included, it will be ignored
-func (rc *ReannQueue[T]) Add(value T) {
-	if _, ok := rc.exists[value]; ok {
-		return
-	}
-	newone := &ReannSlot[T]{
-		val: value,
-	}
-	defer func() { rc.exists[value] = true }()
-	if rc.Len() == 0 {
-		rc.entry, rc.preEntry = newone, newone
-		rc.entry.next = newone
-		return
-	}
-	if rc.Len() == 1 {
-		rc.preEntry.next, rc.entry, newone.next = newone, newone, rc.entry.next
-		return
-
-	} else {
-		newone.next = rc.entry.next
-		rc.preEntry, rc.entry = rc.entry, newone
-		rc.preEntry.next = rc.entry
-		return
-	}
-}
-
-// Mark an addr to be removed later
-func (rc *ReannQueue[T]) MarkRemoved(values ...T) {
-	for _, val := range values {
-		rc.toRemove[val] = true
-	}
-}
-
-// Clean all addrs marked to be removed
-func (rc *ReannQueue[T]) Clean() {
-	defer func() { rc.toRemove = make(map[T]bool) }()
-	total := rc.Len()
-	preEntry, entry := rc.preEntry, rc.entry
-	for i := 0; i < total; i++ {
-		if _, ok := rc.toRemove[entry.val]; ok {
-			rc.trim(entry, preEntry)
-			delete(rc.toRemove, entry.val)
-			entry = entry.next
-		} else {
-			preEntry, entry = entry, entry.next
-		}
-	}
-
-}
-
-// return the value holded by entry and then move the entry to next position.
-func (rc *ReannQueue[T]) Next(defaultVal T) T {
-	if rc.entry == nil {
-		return defaultVal
-	}
-	curr := rc.entry.val
-	rc.preEntry, rc.entry = rc.entry, rc.entry.next
-	return curr
-}
-
-func (rc *ReannQueue[T]) Len() int {
-	return len(rc.exists)
-}
-
-func (rc *ReannQueue[T]) trim(entry, preEntry *ReannSlot[T]) {
-	if rc.Len() == 0 {
-		return
-	}
-	curr := entry.val
-	defer func() { delete(rc.exists, curr) }()
-
-	//only one element left, clear all status
-	if rc.Len() == 1 {
-		rc.entry, rc.preEntry = nil, nil
-		return
-	}
-
-	// remove current element from the ring
-	preEntry.next = entry.next
-
-	//update the rc.entry if it's hit
-	if entry == rc.entry {
-		rc.entry = preEntry.next
-		return
-	}
-
-	//update the rc.preEntry if it's hit
-	if entry == rc.preEntry {
-		rc.preEntry = preEntry
-		return
 	}
 }
 

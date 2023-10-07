@@ -1,3 +1,4 @@
+// Package v2 is used for tendermint v0.34.22 and its compatible version.
 package lightclient
 
 import (
@@ -117,12 +118,14 @@ func (cs *ConsensusState) ApplyLightBlock(block *types.LightBlock) (bool, error)
 		}
 	}
 
+	valSetChanged := !(bytes.Equal(cs.ValidatorSet.Hash(), block.ValidatorsHash))
+
 	// update consensus state
 	cs.Height = uint64(block.Height)
 	cs.NextValidatorSetHash = block.NextValidatorsHash
 	cs.ValidatorSet = block.ValidatorSet
 
-	return !(bytes.Equal(cs.ValidatorSet.Hash(), block.ValidatorsHash)), nil
+	return valSetChanged, nil
 }
 
 // input:

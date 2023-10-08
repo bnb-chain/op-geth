@@ -1,4 +1,4 @@
-// Package v2 is used for tendermint v0.34.22 and its compatible version.
+// Package lightclient is used for tendermint v0.34.22 and its compatible version.
 package lightclient
 
 import (

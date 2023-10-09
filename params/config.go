@@ -32,6 +32,10 @@ var (
 	SepoliaGenesisHash = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
 	RinkebyGenesisHash = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash  = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
+
+	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
+	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
+	OPBNBDevNetGenesisHash  = common.HexToHash("0xa4634772ef68bd0f764ae9c34df6f63c90c70b7607cda424a7fec74576081b84")
 )
 
 // OP Stack chain config
@@ -89,7 +93,6 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  newUint64(1681338455),
 		Ethash:                        new(EthashConfig),
-		// todo: add GreenfieldLink block
 	}
 
 	// MainnetTrustedCheckpoint contains the light client trusted checkpoint for the main network.
@@ -234,6 +237,96 @@ var (
 			common.HexToAddress("0x0DF8fa387C602AE62559cC4aFa4972A7045d6707"), // Guillaume
 		},
 		Threshold: 2,
+	}
+
+	OPBNBMainNetConfig = &ChainConfig{
+		ChainID:                       big.NewInt(204),
+		HomesteadBlock:                big.NewInt(0),
+		EIP150Block:                   big.NewInt(0),
+		EIP150Hash:                    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		MergeNetsplitBlock:            big.NewInt(0),
+		BedrockBlock:                  big.NewInt(0),
+		RegolithTime:                  newUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		Optimism: &OptimismConfig{
+			EIP1559Elasticity:  2,
+			EIP1559Denominator: 8,
+		},
+		PreContractForkBlock: big.NewInt(0),
+		// todo change block number
+		GreenfieldLinkBlock: big.NewInt(0),
+	}
+
+	OPBNBTestNetConfig = &ChainConfig{
+		ChainID:                       big.NewInt(5611),
+		HomesteadBlock:                big.NewInt(0),
+		EIP150Block:                   big.NewInt(0),
+		EIP150Hash:                    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		MergeNetsplitBlock:            big.NewInt(0),
+		BedrockBlock:                  big.NewInt(0),
+		RegolithTime:                  newUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		Optimism: &OptimismConfig{
+			EIP1559Elasticity:  2,
+			EIP1559Denominator: 8,
+		},
+		PreContractForkBlock: big.NewInt(0),
+		// todo change block number
+		GreenfieldLinkBlock: big.NewInt(0),
+	}
+
+	OPBNBDevNetConfig = &ChainConfig{
+		ChainID:                       big.NewInt(901),
+		HomesteadBlock:                big.NewInt(0),
+		EIP150Block:                   big.NewInt(0),
+		EIP150Hash:                    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		MergeNetsplitBlock:            big.NewInt(0),
+		BedrockBlock:                  big.NewInt(0),
+		RegolithTime:                  newUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		Optimism: &OptimismConfig{
+			EIP1559Elasticity:  2,
+			EIP1559Denominator: 8,
+		},
+		PreContractForkBlock: big.NewInt(0),
+		// todo change block number
+		GreenfieldLinkBlock: big.NewInt(0),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -454,7 +547,6 @@ type ChainConfig struct {
 	MuirGlacierBlock    *big.Int `json:"muirGlacierBlock,omitempty"`    // Eip-2384 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	BerlinBlock         *big.Int `json:"berlinBlock,omitempty"`         // Berlin switch block (nil = no fork, 0 = already on berlin)
 	LondonBlock         *big.Int `json:"londonBlock,omitempty"`         // London switch block (nil = no fork, 0 = already on london)
-	GreenfieldLinkBlock *big.Int `json:"greenfieldLinkBlock,omitempty"` // GreenfieldLink switch block (nil = no fork, 0 = already on london)
 	ArrowGlacierBlock   *big.Int `json:"arrowGlacierBlock,omitempty"`   // Eip-4345 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	GrayGlacierBlock    *big.Int `json:"grayGlacierBlock,omitempty"`    // Eip-5133 (bomb delay) switch block (nil = no fork, 0 = already activated)
 	MergeNetsplitBlock  *big.Int `json:"mergeNetsplitBlock,omitempty"`  // Virtual fork after The Merge to use as a network splitter
@@ -485,6 +577,8 @@ type ChainConfig struct {
 	Optimism *OptimismConfig `json:"optimism,omitempty"`
 	// PreContractForkBlock hard-fork switch block (nil = no fork, 0 = already on preContractForkBlock)
 	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
+	// GreenfieldLink switch block (nil = no fork, 0 = already on GreenfieldLink)
+	GreenfieldLinkBlock *big.Int `json:"greenfieldLinkBlock,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -571,7 +665,6 @@ func (c *ChainConfig) Description() string {
 	}
 	banner += fmt.Sprintf(" - Berlin:                      #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/berlin.md)\n", c.BerlinBlock)
 	banner += fmt.Sprintf(" - London:                      #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md)\n", c.LondonBlock)
-	banner += fmt.Sprintf(" - GreenfieldLink:              #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md)\n", c.GreenfieldLinkBlock) // TODO: add bep
 	if c.ArrowGlacierBlock != nil {
 		banner += fmt.Sprintf(" - Arrow Glacier:               #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/arrow-glacier.md)\n", c.ArrowGlacierBlock)
 	}
@@ -609,9 +702,12 @@ func (c *ChainConfig) Description() string {
 	if c.RegolithTime != nil {
 		banner += fmt.Sprintf(" - Regolith:                    @%-10v\n", *c.RegolithTime)
 	}
+	banner += "OPBNB hard forks (block based):\n"
 	if c.PreContractForkBlock != nil {
-		banner += fmt.Sprintf(" - PreContractForkBlock:        @%-10v\n", *c.PreContractForkBlock)
+		banner += fmt.Sprintf(" - PreContractForkBlock:        #%-8v\n", c.PreContractForkBlock)
 	}
+	// TODO: add bep
+	banner += fmt.Sprintf(" - GreenfieldLink:              #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md)\n", c.GreenfieldLinkBlock)
 	return banner
 }
 
@@ -797,7 +893,6 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "shanghaiTime", timestamp: c.ShanghaiTime},
 		{name: "cancunTime", timestamp: c.CancunTime, optional: true},
 		{name: "pragueTime", timestamp: c.PragueTime, optional: true},
-		{name: "greenfieldLink", block: c.GreenfieldLinkBlock},
 	} {
 		if lastFork.name != "" {
 			switch {
@@ -1054,9 +1149,9 @@ type Rules struct {
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon                                      bool
-	IsGreenfieldLink                                        bool
 	IsMerge, IsShanghai, isCancun, isPrague                 bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
+	IsGreenfieldLink                                        bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1077,7 +1172,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsIstanbul:       c.IsIstanbul(num),
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
-		IsGreenfieldLink: c.IsGreenfieldLink(num),
 		IsMerge:          isMerge,
 		IsShanghai:       c.IsShanghai(timestamp),
 		isCancun:         c.IsCancun(timestamp),
@@ -1085,5 +1179,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
+		IsGreenfieldLink:   c.IsGreenfieldLink(num),
 	}
 }

@@ -35,7 +35,7 @@ var (
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBDevNetGenesisHash  = common.HexToHash("0xa4634772ef68bd0f764ae9c34df6f63c90c70b7607cda424a7fec74576081b84")
+	OPBNBDevNetGenesisHash  = common.HexToHash("0xe2514227fcad054d16d4eeff73425908d2c30f3f31b8a0d6ac82e9defe37f67f")
 )
 
 // OP Stack chain config
@@ -132,7 +132,6 @@ var (
 		MuirGlacierBlock:              big.NewInt(0),
 		BerlinBlock:                   big.NewInt(0),
 		LondonBlock:                   big.NewInt(0),
-		GreenfieldLinkBlock:           big.NewInt(0),
 		TerminalTotalDifficulty:       big.NewInt(17_000_000_000_000_000),
 		TerminalTotalDifficultyPassed: true,
 		MergeNetsplitBlock:            big.NewInt(1735371),
@@ -264,9 +263,8 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		PreContractForkBlock: big.NewInt(0),
 		// todo change block number
-		GreenfieldLinkBlock: big.NewInt(0),
+		Fermat: big.NewInt(0),
 	}
 
 	OPBNBTestNetConfig = &ChainConfig{
@@ -294,13 +292,13 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		PreContractForkBlock: big.NewInt(0),
+		PreContractForkBlock: big.NewInt(5805494),
 		// todo change block number
-		GreenfieldLinkBlock: big.NewInt(0),
+		Fermat: big.NewInt(0),
 	}
 
 	OPBNBDevNetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(901),
+		ChainID:                       big.NewInt(2320),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
 		EIP150Hash:                    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
@@ -324,9 +322,7 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		PreContractForkBlock: big.NewInt(0),
-		// todo change block number
-		GreenfieldLinkBlock: big.NewInt(0),
+		Fermat: big.NewInt(86389),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -347,7 +343,6 @@ var (
 		MuirGlacierBlock:              big.NewInt(0),
 		BerlinBlock:                   big.NewInt(0),
 		LondonBlock:                   big.NewInt(0),
-		GreenfieldLinkBlock:           big.NewInt(0),
 		ArrowGlacierBlock:             big.NewInt(0),
 		GrayGlacierBlock:              big.NewInt(0),
 		MergeNetsplitBlock:            nil,
@@ -358,6 +353,7 @@ var (
 		TerminalTotalDifficultyPassed: false,
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
+		Fermat:                        big.NewInt(0),
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
@@ -378,7 +374,6 @@ var (
 		MuirGlacierBlock:              big.NewInt(0),
 		BerlinBlock:                   big.NewInt(0),
 		LondonBlock:                   big.NewInt(0),
-		GreenfieldLinkBlock:           big.NewInt(0),
 		ArrowGlacierBlock:             nil,
 		GrayGlacierBlock:              nil,
 		MergeNetsplitBlock:            nil,
@@ -389,6 +384,7 @@ var (
 		TerminalTotalDifficultyPassed: false,
 		Ethash:                        nil,
 		Clique:                        &CliqueConfig{Period: 0, Epoch: 30000},
+		Fermat:                        big.NewInt(0),
 	}
 
 	// TestChainConfig contains every protocol change (EIPs) introduced
@@ -409,7 +405,6 @@ var (
 		MuirGlacierBlock:              big.NewInt(0),
 		BerlinBlock:                   big.NewInt(0),
 		LondonBlock:                   big.NewInt(0),
-		GreenfieldLinkBlock:           big.NewInt(0),
 		ArrowGlacierBlock:             big.NewInt(0),
 		GrayGlacierBlock:              big.NewInt(0),
 		MergeNetsplitBlock:            nil,
@@ -420,6 +415,7 @@ var (
 		TerminalTotalDifficultyPassed: false,
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
+		Fermat:                        big.NewInt(0),
 	}
 
 	// NonActivatedConfig defines the chain configuration without activating
@@ -440,7 +436,6 @@ var (
 		MuirGlacierBlock:              nil,
 		BerlinBlock:                   nil,
 		LondonBlock:                   nil,
-		GreenfieldLinkBlock:           nil,
 		ArrowGlacierBlock:             nil,
 		GrayGlacierBlock:              nil,
 		MergeNetsplitBlock:            nil,
@@ -451,6 +446,7 @@ var (
 		TerminalTotalDifficultyPassed: false,
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
+		Fermat:                        nil,
 	}
 	TestRules = TestChainConfig.Rules(new(big.Int), false, 0)
 
@@ -577,8 +573,8 @@ type ChainConfig struct {
 	Optimism *OptimismConfig `json:"optimism,omitempty"`
 	// PreContractForkBlock hard-fork switch block (nil = no fork, 0 = already on preContractForkBlock)
 	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
-	// GreenfieldLink switch block (nil = no fork, 0 = already on GreenfieldLink)
-	GreenfieldLinkBlock *big.Int `json:"greenfieldLinkBlock,omitempty"`
+	// Fermat switch block (nil = no fork, 0 = already on Fermat)
+	Fermat *big.Int `json:"fermat,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -707,7 +703,7 @@ func (c *ChainConfig) Description() string {
 		banner += fmt.Sprintf(" - PreContractForkBlock:        #%-8v\n", c.PreContractForkBlock)
 	}
 	// TODO: add bep
-	banner += fmt.Sprintf(" - GreenfieldLink:              #%-8v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/london.md)\n", c.GreenfieldLinkBlock)
+	banner += fmt.Sprintf(" - Fermat:              #%-8v\n", c.Fermat)
 	return banner
 }
 
@@ -773,9 +769,9 @@ func (c *ChainConfig) IsLondon(num *big.Int) bool {
 	return isBlockForked(c.LondonBlock, num)
 }
 
-// IsGreenfieldLink returns whether num is either equal to the GreenfieldLink fork block or greater.
-func (c *ChainConfig) IsGreenfieldLink(num *big.Int) bool {
-	return isBlockForked(c.GreenfieldLinkBlock, num)
+// IsFermat returns whether num is either equal to the Fermat fork block or greater.
+func (c *ChainConfig) IsFermat(num *big.Int) bool {
+	return isBlockForked(c.Fermat, num)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -996,8 +992,11 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.PragueTime, newcfg.PragueTime, headTimestamp) {
 		return newTimestampCompatError("Prague fork timestamp", c.PragueTime, newcfg.PragueTime)
 	}
-	if isForkBlockIncompatible(c.GreenfieldLinkBlock, newcfg.GreenfieldLinkBlock, headNumber) {
-		return newBlockCompatError("Greenfield fork block", c.GreenfieldLinkBlock, newcfg.GreenfieldLinkBlock)
+	if isForkBlockIncompatible(c.PreContractForkBlock, newcfg.PreContractForkBlock, headNumber) {
+		return newBlockCompatError("PreContract fork block", c.PreContractForkBlock, newcfg.PreContractForkBlock)
+	}
+	if isForkBlockIncompatible(c.Fermat, newcfg.Fermat, headNumber) {
+		return newBlockCompatError("Fermat fork block", c.Fermat, newcfg.Fermat)
 	}
 	return nil
 }
@@ -1151,7 +1150,7 @@ type Rules struct {
 	IsBerlin, IsLondon                                      bool
 	IsMerge, IsShanghai, isCancun, isPrague                 bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
-	IsGreenfieldLink                                        bool
+	IsFermat                                                bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1179,6 +1178,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
-		IsGreenfieldLink:   c.IsGreenfieldLink(num),
+		// OPBNB
+		IsFermat: c.IsFermat(num),
 	}
 }

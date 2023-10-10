@@ -95,9 +95,9 @@ var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{9}): &blake2F{},
 }
 
-// PrecompiledContractsGreenfieldLink contains the default set of pre-compiled Ethereum
-// contracts used in the GreenfieldLink release.
-var PrecompiledContractsGreenfieldLink = map[common.Address]PrecompiledContract{
+// PrecompiledContractsFermat contains the default set of pre-compiled Ethereum
+// contracts used in the Fermat release.
+var PrecompiledContractsFermat = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{1}): &ecrecover{},
 	common.BytesToAddress([]byte{2}): &sha256hash{},
 	common.BytesToAddress([]byte{3}): &ripemd160hash{},
@@ -127,11 +127,11 @@ var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
 }
 
 var (
-	PrecompiledAddressesGreenfieldLink []common.Address
-	PrecompiledAddressesBerlin         []common.Address
-	PrecompiledAddressesIstanbul       []common.Address
-	PrecompiledAddressesByzantium      []common.Address
-	PrecompiledAddressesHomestead      []common.Address
+	PrecompiledAddressesFermat    []common.Address
+	PrecompiledAddressesBerlin    []common.Address
+	PrecompiledAddressesIstanbul  []common.Address
+	PrecompiledAddressesByzantium []common.Address
+	PrecompiledAddressesHomestead []common.Address
 )
 
 func init() {
@@ -147,16 +147,16 @@ func init() {
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
-	for k := range PrecompiledContractsGreenfieldLink {
-		PrecompiledAddressesGreenfieldLink = append(PrecompiledAddressesGreenfieldLink, k)
+	for k := range PrecompiledContractsFermat {
+		PrecompiledAddressesFermat = append(PrecompiledAddressesFermat, k)
 	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules params.Rules) []common.Address {
 	switch {
-	case rules.IsGreenfieldLink:
-		return PrecompiledAddressesGreenfieldLink
+	case rules.IsFermat:
+		return PrecompiledAddressesFermat
 	case rules.IsBerlin:
 		return PrecompiledAddressesBerlin
 	case rules.IsIstanbul:

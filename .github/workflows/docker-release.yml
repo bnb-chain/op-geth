@@ -1,16 +1,17 @@
 name: DockerImage build and push
 
 on:
+  workflow_dispatch:
   push:
-    # Publish `v1.2.3` tags as releases.
-    tags:
-      - v*
+    branches:
+      - develop
+      - main
+    tags: '*'
 
 jobs:
   # Push image to GitHub Packages.
   push-op-geth:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
 
     steps:
       - uses: actions/checkout@v3
@@ -22,28 +23,22 @@ jobs:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: ImageId
-        id: image
-        run: |
-          IMAGE_ID=ghcr.io/${{ github.repository_owner }}/op-geth
-
-          # Change all uppercase to lowercase
-          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
-          # Strip git ref prefix from version
-          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
-          # Strip "v" prefix from tag name
-          [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
-          # Use Docker `latest` tag convention
-          [ "$VERSION" == "main" ] && VERSION=latest
-          echo "IMAGE_ID=$IMAGE_ID">>$GITHUB_OUTPUT
-          echo "VERSION=$VERSION">>$GITHUB_OUTPUT
+      - name: image meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository_owner }}/op-geth
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=sha
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.image.outputs.IMAGE_ID }}:${{ steps.image.outputs.VERSION }},${{ steps.image.outputs.IMAGE_ID }}:latest
-          cache-from: type=registry,ref=${{ steps.image.outputs.IMAGE_ID }}:buildcache
-          cache-to: type=registry,ref=${{ steps.image.outputs.IMAGE_ID }}:buildcache,mode=max
-
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

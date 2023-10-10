@@ -322,7 +322,7 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		Fermat: big.NewInt(86389),
+		Fermat: big.NewInt(169189),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

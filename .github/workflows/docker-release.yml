@@ -6,7 +6,7 @@ on:
     branches:
       - develop
       - main
-    tags:
+    tags: '*'
 
 jobs:
   # Push image to GitHub Packages.

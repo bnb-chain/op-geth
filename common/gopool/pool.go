@@ -3,6 +3,7 @@ package gopool
 import (
 	"time"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/panjf2000/ants/v2"
 )
 
@@ -30,8 +31,11 @@ func init() {
 }
 
 // Submit submits a task to pool.
-func Submit(task func()) error {
-	return defaultPool.Submit(task)
+func Submit(task func()) {
+	err := defaultPool.Submit(task)
+	if err != nil {
+		log.Error("pool submit task fail", "err", err, "task", task)
+	}
 }
 
 // Running returns the number of the currently running goroutines.

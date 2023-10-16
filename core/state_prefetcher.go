@@ -22,6 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -77,7 +78,11 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 						return // Also invalid block, bail out
 					}
 					newStatedb.SetTxContext(tx.Hash(), i)
-					precacheTransaction(msg, p.config, gaspool, newStatedb, header, evm)
+					preCacheErr := precacheTransaction(msg, p.config, gaspool, newStatedb, header, evm)
+					if preCacheErr != nil {
+						log.Warn("precacheTransaction fail", "err", preCacheErr)
+						return
+					}
 
 				case <-interruptCh:
 					// If block precaching was interrupted, abort

@@ -35,7 +35,7 @@ var (
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBDevNetGenesisHash  = common.HexToHash("0xe2514227fcad054d16d4eeff73425908d2c30f3f31b8a0d6ac82e9defe37f67f")
+	OPBNBDevNetGenesisHash  = common.HexToHash("0x49d448b8dc98cc95e3968615ff3dbd904d9eec8252c5f52271f029896e6147ee")
 )
 
 // OP Stack chain config
@@ -263,8 +263,8 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		// todo change block number
-		Fermat: big.NewInt(0),
+		// TODO change block number
+		Fermat: nil,
 	}
 
 	OPBNBTestNetConfig = &ChainConfig{
@@ -293,12 +293,12 @@ var (
 			EIP1559Denominator: 8,
 		},
 		PreContractForkBlock: big.NewInt(5805494),
-		// todo change block number
-		Fermat: big.NewInt(0),
+		// TODO change block number
+		Fermat: nil,
 	}
 
 	OPBNBDevNetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(2320),
+		ChainID:                       big.NewInt(1320),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
 		EIP150Hash:                    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
@@ -322,7 +322,7 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		Fermat: big.NewInt(169189),
+		Fermat: big.NewInt(3615117),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

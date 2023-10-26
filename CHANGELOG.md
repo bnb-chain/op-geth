@@ -3,7 +3,7 @@
 ## v0.2.0
 
 This is a hardfork release for the opBNB Testnet called Fermat.
-It will be activated at block height #13063000, expected to occur on November 14, 2023, at 6 AM UTC.
+It will be activated at block height 13063000, expected to occur on November 14, 2023, at 6 AM UTC.
 
 ### User Facing Changes
 
@@ -24,7 +24,7 @@ It will be activated at block height #13063000, expected to occur on November 14
 
 ### Full Changelog
 
-https://github.com/bnb-chain/op-geth/compare/v0.1.2...v0.2.0
+https://github.com/bnb-chain/op-geth/compare/v0.1.3...v0.2.0
 
 ## v0.1.3
 

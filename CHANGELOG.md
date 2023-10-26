@@ -3,12 +3,11 @@
 ## v0.2.0
 
 This is a hardfork release for the opBNB Testnet called Fermat.
-It will be activated at block height #TBD, expected to occur at #TBD.
+It will be activated at block height #13063094, expected to occur on November 14, 2023, at 6 AM UTC.
 
 ### User Facing Changes
 
 - Two new precompiled contracts have been introduced: blsSignatureVerify and cometBFTLightBlockValidate. The purpose of blsSignatureVerify is to verify BLS signatures in smart contracts, while cometBFTLightBlockValidate is designed to validate cometBFT light blocks. Although these contracts were primarily introduced to facilitate cross-chain communication between opBNB and Greenfield, they can also be utilized for other purposes. For instance, blsSignatureVerify can be employed to verify BLS signatures in smart contracts, and cometBFTLightBlockValidate can facilitate cross-chain communication with other blockchains based on the cosmos framework.(#7)
-- The rollup configuration for opBNB Mainnet and Testnet has been added to the code. You can now use the `--network=opBNBTestnet` or `--network=opBNBMainnet` flag instead of `--rollup.config=./rollup.json` to specify the rollup configuration for the op-node. (#7)
 - Enable the layer 2 sync mechanism for opBNB by using the flag `--syncmode=snap` or `--syncmode=full` to choose the sync mode. Make sure to enable the `l2.engine-sync=true` flag on the op-node. (#8)
 
 ### Partial Changelog

@@ -39,7 +39,7 @@ This release adds the preDeployedContract hardfork, which changes the name and s
 
 This is the initial release for opBNB Testnet.
 
-The repo base is [optimism op-geth](https://github.com/ethereum-optimism/optimism).
+The repo base is [optimism op-geth](https://github.com/ethereum-optimism/op-geth).
 
 ### Changelog
 

@@ -293,7 +293,7 @@ var (
 			EIP1559Denominator: 8,
 		},
 		PreContractForkBlock: big.NewInt(5805494),
-		Fermat:               big.NewInt(13063000), // Nov-14-2023 06 AM +UTC
+		Fermat:               big.NewInt(12113000), // Nov-03-2023 06 AM +UTC
 	}
 
 	OPBNBDevNetConfig = &ChainConfig{

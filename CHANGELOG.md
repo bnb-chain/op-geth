@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.2.1
+
+This is the Fermat Hardfork release for opBNB Mainnet.
+It will be activated at block height 9397477, expected to occur on November 28, 2023, at 6 AM UTC.
+
+All mainnet nodes must upgrade to this release before the hardfork.
+Upgrading for other networks is optional.
+
+### User Facing Changes
+
+NA
+
+### Partial Changelog
+
+- #30: feat: add opbnb mainnet Fermat fork height
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.2.1
+
+### Full Changelog
+
+https://github.com/bnb-chain/op-geth/compare/v0.2.0...v0.2.1
+
 ## v0.2.0
 
 This is a hardfork release for the opBNB Testnet called Fermat.

@@ -263,8 +263,7 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		// TODO change block number
-		Fermat: nil,
+		Fermat: big.NewInt(9397477), // Nov-28-2023 06 AM +UTC
 	}
 
 	OPBNBTestNetConfig = &ChainConfig{

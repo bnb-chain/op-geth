@@ -14,7 +14,7 @@ NA
 
 ### Partial Changelog
 
-- #28: feat: add opbnb mainnet Fermat fork height
+- #30: feat: add opbnb mainnet Fermat fork height
 
 ### Docker Images
 

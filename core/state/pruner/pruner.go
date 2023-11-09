@@ -92,8 +92,13 @@ type Pruner struct {
 	triesInMemory uint64
 }
 
+type CombinedOptions struct {
+	PrunerOptions   []PrunerOption
+	SnapshotOptions []snapshot.SnapshotOption
+}
+
 // NewPruner creates the pruner instance.
-func NewPruner(db ethdb.Database, config Config, opts ...PrunerOption) (*Pruner, error) {
+func NewPruner(db ethdb.Database, config Config, opts CombinedOptions) (*Pruner, error) {
 	headBlock := rawdb.ReadHeadBlock(db)
 	if headBlock == nil {
 		return nil, errors.New("failed to load head block")
@@ -105,6 +110,11 @@ func NewPruner(db ethdb.Database, config Config, opts ...PrunerOption) (*Pruner,
 		AsyncBuild: false,
 	}
 	snaptree, err := snapshot.New(snapconfig, db, trie.NewDatabase(db), headBlock.Root())
+	for _, snapshotOption := range opts.SnapshotOptions {
+		if snapshotOption != nil {
+			snapshotOption(snaptree)
+		}
+	}
 	if err != nil {
 		return nil, err // The relevant snapshot(s) might not exist
 	}
@@ -125,9 +135,9 @@ func NewPruner(db ethdb.Database, config Config, opts ...PrunerOption) (*Pruner,
 		snaptree:      snaptree,
 		triesInMemory: core.TriesInMemory,
 	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(pruner)
+	for _, prunerOption := range opts.PrunerOptions {
+		if prunerOption != nil {
+			prunerOption(pruner)
 		}
 	}
 	return pruner, nil

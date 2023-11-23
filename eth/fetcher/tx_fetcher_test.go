@@ -1547,9 +1547,7 @@ func TestTransactionForgotten(t *testing.T) {
 			}
 			return errs
 		},
-		func(string, []common.Hash) error { return nil },
-		func(string) {},
-	)
+		func(string, []common.Hash) error { return nil })
 	fetcher.Start()
 	defer fetcher.Stop()
 	// Create one TX which is 5 minutes old, and one which is recent

@@ -1135,7 +1135,13 @@ func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	urls := params.OpBNBMainnetBootnodes
+	if ctx.IsSet(NetworkIdFlag.Name) {
+		networkId := ctx.Uint64(NetworkIdFlag.Name)
+		if networkId == params.OpBNBTestnet {
+			urls = params.OpBNBTestnetBootnodes
+		}
+	}
 	switch {
 	case ctx.IsSet(BootnodesFlag.Name):
 		urls = SplitAndTrim(ctx.String(BootnodesFlag.Name))

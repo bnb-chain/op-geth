@@ -23,6 +23,8 @@ import (
 	"os"
 	"time"
 
+	cli "github.com/urfave/cli/v2"
+
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -35,7 +37,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
-	cli "github.com/urfave/cli/v2"
 )
 
 var (
@@ -173,8 +174,14 @@ func pruneState(ctx *cli.Context) error {
 		Cachedir:  stack.ResolvePath(config.Eth.TrieCleanCacheJournal),
 		BloomSize: ctx.Uint64(utils.BloomFilterSizeFlag.Name),
 	}
-	pruner, err := pruner.NewPruner(chaindb, prunerconfig,
-		pruner.WithTriesInMemory(ctx.Uint64(utils.TriesInMemoryFlag.Name)))
+	pruner, err := pruner.NewPruner(chaindb, prunerconfig, pruner.CombinedOptions{
+		PrunerOptions: []pruner.PrunerOption{
+			pruner.WithTriesInMemory(ctx.Uint64(utils.TriesInMemoryFlag.Name)),
+		},
+		SnapshotOptions: []snapshot.SnapshotOption{
+			snapshot.SetCapLimit(int(ctx.Uint64(utils.TriesInMemoryFlag.Name))),
+		},
+	})
 	if err != nil {
 		log.Error("Failed to open snapshot tree", "err", err)
 		return err

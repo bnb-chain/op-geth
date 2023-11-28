@@ -98,7 +98,7 @@ func (p *Peer) broadcastTransactions() {
 						return
 					}
 					close(done)
-					p.Log().Trace("Sent transactions", "count", len(txs))
+					p.Log().Trace("Sent transactions bodies", "count", len(txs), "peer.id", p.Node().ID().String(), "peer.ip", p.Node().IP().String())
 				})
 			}
 		}
@@ -176,7 +176,7 @@ func (p *Peer) announceTransactions() {
 						}
 					}
 					close(done)
-					p.Log().Trace("Sent transaction announcements", "count", len(pending))
+					p.Log().Trace("Sent transaction announcements", "count", len(pending), "peer.Id", p.ID(), "peer.IP", p.Node().IP().String())
 				})
 			}
 		}

@@ -700,6 +700,12 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	if !local && tx.GasTipCapIntCmp(pool.gasPrice) < 0 {
 		return ErrUnderpriced
 	}
+	// Drop non-local transactions whose gas fee cap is below or equal to the potential minimum base fee
+	// this is to prevent transactions from being stuck in the pool forever
+	// BaseFeeChangeDenominator is the potential minimum base fee
+	if !local && tx.GasFeeCapIntCmp(new(big.Int).SetUint64(pool.chainconfig.BaseFeeChangeDenominator())) <= 0 {
+		return ErrUnderpriced
+	}
 	// Ensure the transaction adheres to nonce ordering
 	if pool.currentState.GetNonce(from) > tx.Nonce() {
 		return core.ErrNonceTooLow

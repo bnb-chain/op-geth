@@ -18,6 +18,7 @@ package eth
 
 import (
 	"math/big"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
@@ -61,6 +62,22 @@ func (p *Peer) broadcastBlocks() {
 	}
 }
 
+func collectHashes(txs []*types.Transaction) []common.Hash {
+	hashes := make([]common.Hash, len(txs))
+	for i, tx := range txs {
+		hashes[i] = tx.Hash()
+	}
+	return hashes
+}
+
+func concat(hashes []common.Hash) string {
+	strslice := make([]string, len(hashes))
+	for i, hash := range hashes {
+		strslice[i] = hash.String()
+	}
+	return strings.Join(strslice, ",")
+}
+
 // broadcastTransactions is a write loop that schedules transaction broadcasts
 // to the remote peer. The goal is to have an async writer that does not lock up
 // node internals and at the same time rate limits queued data.
@@ -98,7 +115,7 @@ func (p *Peer) broadcastTransactions() {
 						return
 					}
 					close(done)
-					p.Log().Trace("Sent transactions bodies", "count", len(txs), "peer.id", p.Node().ID().String(), "peer.ip", p.Node().IP().String())
+					p.Log().Trace("Sent transaction bodies", "count", len(txs), "peer.id", p.Node().ID().String(), "peer.ip", p.Node().IP().String(), "hashes", concat(collectHashes(txs)))
 				})
 			}
 		}
@@ -176,7 +193,7 @@ func (p *Peer) announceTransactions() {
 						}
 					}
 					close(done)
-					p.Log().Trace("Sent transaction announcements", "count", len(pending), "peer.Id", p.ID(), "peer.IP", p.Node().IP().String())
+					p.Log().Trace("Sent transaction announcements", "count", len(pending), "peer.Id", p.ID(), "peer.IP", p.Node().IP().String(), "hashes", concat(pending))
 				})
 			}
 		}

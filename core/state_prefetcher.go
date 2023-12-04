@@ -62,7 +62,9 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 	for i := 0; i < prefetchThread; i++ {
 		gopool.Submit(func() {
 			newStatedb := statedb.Copy()
-			newStatedb.EnableWriteOnSharedStorage()
+			if !p.config.IsHertzfix(header.Number) {
+				newStatedb.EnableWriteOnSharedStorage()
+			}
 			gaspool := new(GasPool).AddGas(block.GasLimit())
 			blockContext := NewEVMBlockContext(header, p.bc, nil, p.config, newStatedb)
 			evm := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
@@ -109,7 +111,9 @@ func (p *statePrefetcher) PrefetchMining(txs *types.TransactionsByPriceAndNonce,
 	for i := 0; i < prefetchThread; i++ {
 		go func(startCh <-chan *types.Transaction, stopCh <-chan struct{}) {
 			newStatedb := statedb.CopyDoPrefetch()
-			newStatedb.EnableWriteOnSharedStorage()
+			if !p.config.IsHertzfix(header.Number) {
+				newStatedb.EnableWriteOnSharedStorage()
+			}
 			gaspool := new(GasPool).AddGas(gasLimit)
 			blockContext := NewEVMBlockContext(header, p.bc, nil, p.config, newStatedb)
 			evm := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)

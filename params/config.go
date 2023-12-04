@@ -263,7 +263,8 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		Fermat: big.NewInt(9397477), // Nov-28-2023 06 AM +UTC
+		Fermat:   big.NewInt(9397477), // Nov-28-2023 06 AM +UTC
+		Hertzfix: big.NewInt(9397477), // Nov-28-2023 06 AM +UTC
 	}
 
 	OPBNBTestNetConfig = &ChainConfig{
@@ -293,6 +294,7 @@ var (
 		},
 		PreContractForkBlock: big.NewInt(5805494),
 		Fermat:               big.NewInt(12113000), // Nov-03-2023 06 AM +UTC
+		Hertzfix:             big.NewInt(9397477),  // Nov-28-2023 06 AM +UTC
 	}
 
 	OPBNBDevNetConfig = &ChainConfig{
@@ -320,7 +322,8 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		Fermat: big.NewInt(3615117),
+		Fermat:   big.NewInt(3615117),
+		Hertzfix: big.NewInt(3615117),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -352,6 +355,7 @@ var (
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
 		Fermat:                        big.NewInt(0),
+		Hertzfix:                      big.NewInt(0),
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
@@ -383,6 +387,7 @@ var (
 		Ethash:                        nil,
 		Clique:                        &CliqueConfig{Period: 0, Epoch: 30000},
 		Fermat:                        big.NewInt(0),
+		Hertzfix:                      big.NewInt(0),
 	}
 
 	// TestChainConfig contains every protocol change (EIPs) introduced
@@ -414,6 +419,7 @@ var (
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
 		Fermat:                        big.NewInt(0),
+		Hertzfix:                      big.NewInt(0),
 	}
 
 	// NonActivatedConfig defines the chain configuration without activating
@@ -445,6 +451,7 @@ var (
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
 		Fermat:                        nil,
+		Hertzfix:                      nil,
 	}
 	TestRules = TestChainConfig.Rules(new(big.Int), false, 0)
 
@@ -573,6 +580,8 @@ type ChainConfig struct {
 	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
 	// Fermat switch block (nil = no fork, 0 = already on Fermat)
 	Fermat *big.Int `json:"fermat,omitempty"`
+	// Hertzfix switch block (nil = no fork, 0 = already on Hertzfix)
+	Hertzfix *big.Int `json:"hertzfix,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -702,6 +711,7 @@ func (c *ChainConfig) Description() string {
 	}
 	// TODO: add bep
 	banner += fmt.Sprintf(" - Fermat:              #%-8v\n", c.Fermat)
+	banner += fmt.Sprintf(" - Hertzfix:            #%-8v\n", c.Hertzfix)
 	return banner
 }
 
@@ -770,6 +780,11 @@ func (c *ChainConfig) IsLondon(num *big.Int) bool {
 // IsFermat returns whether num is either equal to the Fermat fork block or greater.
 func (c *ChainConfig) IsFermat(num *big.Int) bool {
 	return isBlockForked(c.Fermat, num)
+}
+
+// IsHertzfix returns whether num is either equal to the Hertzfix fork block or greater.
+func (c *ChainConfig) IsHertzfix(num *big.Int) bool {
+	return isBlockForked(c.Hertzfix, num)
 }
 
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
@@ -995,6 +1010,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	}
 	if isForkBlockIncompatible(c.Fermat, newcfg.Fermat, headNumber) {
 		return newBlockCompatError("Fermat fork block", c.Fermat, newcfg.Fermat)
+	}
+	if isForkBlockIncompatible(c.Hertzfix, newcfg.Hertzfix, headNumber) {
+		return newBlockCompatError("Hertz fix fork block", c.Hertzfix, newcfg.Hertzfix)
 	}
 	return nil
 }

@@ -169,6 +169,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 
 // NewWithSharedPool creates a new state with sharedStorge on layer 1.5
 func NewWithSharedPool(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) {
+	log.Info("debug: NewWithSharedPool called")
 	statedb, err := New(root, db, snaps)
 	if err != nil {
 		return nil, err

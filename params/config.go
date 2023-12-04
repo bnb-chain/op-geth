@@ -323,7 +323,7 @@ var (
 			EIP1559Denominator: 8,
 		},
 		Fermat:   big.NewInt(3615117),
-		Hertzfix: big.NewInt(3615117),
+		Hertzfix: big.NewInt(0),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

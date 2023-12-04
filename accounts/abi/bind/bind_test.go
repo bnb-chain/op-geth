@@ -2103,6 +2103,13 @@ func TestGolangBindings(t *testing.T) {
 	if out, err := replacer.CombinedOutput(); err != nil {
 		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
 	}
+
+	replacer = exec.Command(gocmd, "mod", "edit", "-x", "-require", "github.com/cometbft/cometbft@v0.37.2", "-replace", "github.com/cometbft/cometbft=github.com/bnb-chain/greenfield-cometbft@v1.0.0") // Repo root
+	replacer.Dir = pkg
+	if out, err := replacer.CombinedOutput(); err != nil {
+		t.Fatalf("failed to replace cometbft dependency to bnb-chain source: %v\n%s", err, out)
+	}
+
 	tidier := exec.Command(gocmd, "mod", "tidy")
 	tidier.Dir = pkg
 	if out, err := tidier.CombinedOutput(); err != nil {

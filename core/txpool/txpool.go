@@ -183,8 +183,9 @@ type Config struct {
 	AccountQueue uint64 // Maximum number of non-executable transaction slots permitted per account
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
-	Lifetime       time.Duration // Maximum amount of time non-executable transaction are queued
-	ReannounceTime time.Duration // Duration for announcing local pending transactions again
+	Lifetime          time.Duration // Maximum amount of time non-executable transaction are queued
+	ReannounceTime    time.Duration // Duration for announcing local pending transactions again
+	ReannounceRemotes bool          // Wether reannounce remote transactions or not
 }
 
 // DefaultConfig contains the default configurations for the transaction
@@ -433,7 +434,7 @@ func (pool *TxPool) loop() {
 			reannoTxs := func() []*types.Transaction {
 				txs := make([]*types.Transaction, 0)
 				for addr, list := range pool.pending {
-					if !pool.locals.contains(addr) {
+					if !pool.config.ReannounceRemotes && !pool.locals.contains(addr) {
 						continue
 					}
 

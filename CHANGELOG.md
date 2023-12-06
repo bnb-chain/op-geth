@@ -2,7 +2,7 @@
 
 ## v0.2.2
 
-This is the v0.2.2 release for opBNB Mainnet and Testnet.
+This is a minor release for opBNB Mainnet and Testnet.
 It primarily optimizes op-geth and introduces an option to re-announce remote transactions.
 
 ### User Facing Changes

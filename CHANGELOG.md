@@ -4,6 +4,7 @@
 
 This is a minor release for opBNB Mainnet and Testnet.
 It primarily optimizes op-geth and introduces an option to re-announce remote transactions.
+Upgrading is optional.
 
 ### User Facing Changes
 

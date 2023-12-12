@@ -55,6 +55,9 @@ const (
 
 	// txReannoMaxNum is the maximum number of transactions a reannounce action can include.
 	txReannoMaxNum = 1024
+
+	// maximum duration a pending transaction can survive in pool
+	pendingExpire = 3 * time.Hour
 )
 
 var (
@@ -100,8 +103,9 @@ var (
 )
 
 var (
-	evictionInterval    = time.Minute     // Time interval to check for evictable transactions
-	statsReportInterval = 8 * time.Second // Time interval to report transaction pool stats
+	evictionInterval        = time.Minute     // Time interval to check for evictable transactions
+	pendingEvictionInterval = time.Minute     // Time interval to check for evictable pending transactions
+	statsReportInterval     = 8 * time.Second // Time interval to report transaction pool stats
 
 	// L1 Info Gas Overhead is the amount of gas the the L1 info deposit consumes.
 	// It is removed from the tx pool max gas to better indicate that L2 transactions
@@ -374,12 +378,14 @@ func (pool *TxPool) loop() {
 		reannounce = time.NewTicker(reannounceInterval)
 		journal    = time.NewTicker(pool.config.Rejournal)
 		// Track the previous head headers for transaction reorgs
-		head = pool.chain.CurrentBlock()
+		head         = pool.chain.CurrentBlock()
+		pendingEvict = time.NewTicker(pendingEvictionInterval)
 	)
 	defer report.Stop()
 	defer evict.Stop()
 	defer reannounce.Stop()
 	defer journal.Stop()
+	defer pendingEvict.Stop()
 
 	// Notify tests that the init phase is done
 	close(pool.initDoneCh)
@@ -424,6 +430,23 @@ func (pool *TxPool) loop() {
 						pool.removeTx(tx.Hash(), true)
 					}
 					queuedEvictionMeter.Mark(int64(len(list)))
+				}
+			}
+			pool.mu.Unlock()
+
+		case <-pendingEvict.C:
+			pool.mu.Lock()
+			for addr := range pool.pending {
+				// Skip local transactions from the eviction mechanism
+				if pool.locals.contains(addr) {
+					continue
+				}
+				// Any non-locals old enough should be removed
+				list := pool.pending[addr].Flatten()
+				for _, tx := range list {
+					if time.Since(tx.Time()) > pendingExpire {
+						pool.removeTx(tx.Hash(), true)
+					}
 				}
 			}
 			pool.mu.Unlock()

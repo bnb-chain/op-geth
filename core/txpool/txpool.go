@@ -107,7 +107,7 @@ var (
 	// It is removed from the tx pool max gas to better indicate that L2 transactions
 	// are not able to consume all of the gas in a L2 block as the L1 info deposit is always present.
 	l1InfoGasOverhead  = uint64(70_000)
-	reannounceInterval = time.Minute // Time interval to check for reannounce transactions
+	reannounceInterval = 10 * time.Second // Time interval to check for reannounce transactions
 )
 
 var (

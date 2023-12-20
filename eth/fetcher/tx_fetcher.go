@@ -317,6 +317,7 @@ func (f *TxFetcher) Enqueue(peer string, txs []*types.Transaction, direct bool) 
 
 			default:
 				otherreject++
+				log.Warn("Peer's transaction rejected", "peer", peer, "txHash", batch[j].Hash().String(), "err", err.Error())
 			}
 			added = append(added, batch[j].Hash())
 		}

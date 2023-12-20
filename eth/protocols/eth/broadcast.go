@@ -22,6 +22,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/metrics"
+)
+
+var (
+	txAnnounceAbandonMeter  = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/abandon", nil)
+	txBroadcastAbandonMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/abandon", nil)
 )
 
 const (
@@ -61,6 +67,14 @@ func (p *Peer) broadcastBlocks() {
 	}
 }
 
+// safeGetPeerIP
+var safeGetPeerIP = func(p *Peer) string {
+	if p.Node() != nil && p.Node().IP() != nil {
+		return p.Node().IP().String()
+	}
+	return "UNKNOWN"
+}
+
 // broadcastTransactions is a write loop that schedules transaction broadcasts
 // to the remote peer. The goal is to have an async writer that does not lock up
 // node internals and at the same time rate limits queued data.
@@ -94,6 +108,7 @@ func (p *Peer) broadcastTransactions() {
 				done = make(chan struct{})
 				gopool.Submit(func() {
 					if err := p.SendTransactions(txs); err != nil {
+						p.Log().Warn("Broadcast transactions failed", "peerId", p.ID(), "peerIP", safeGetPeerIP(p), "hashes", len(txs), "err", err.Error())
 						fail <- err
 						return
 					}
@@ -113,6 +128,8 @@ func (p *Peer) broadcastTransactions() {
 			queue = append(queue, hashes...)
 			if len(queue) > maxQueuedTxs {
 				// Fancy copy and resize to ensure buffer doesn't grow indefinitely
+				p.Log().Warn("Broadcast hashes abandon", "peerId", p.ID(), "peerIP", safeGetPeerIP(p), "abandon", len(queue)-maxQueuedTxs)
+				txBroadcastAbandonMeter.Mark(int64(len(queue) - maxQueuedTxs))
 				queue = queue[:copy(queue, queue[len(queue)-maxQueuedTxs:])]
 			}
 
@@ -166,11 +183,13 @@ func (p *Peer) announceTransactions() {
 				gopool.Submit(func() {
 					if p.version >= ETH68 {
 						if err := p.sendPooledTransactionHashes68(pending, pendingTypes, pendingSizes); err != nil {
+							p.Log().Warn("Announce hashes68 failed", "peerId", p.ID(), "peerIP", safeGetPeerIP(p), "hashes", len(pending), "err", err.Error())
 							fail <- err
 							return
 						}
 					} else {
 						if err := p.sendPooledTransactionHashes66(pending); err != nil {
+							p.Log().Warn("Announce hashes66 failed", "peerId", p.ID(), "peerIP", safeGetPeerIP(p), "hashes", len(pending), "err", err.Error())
 							fail <- err
 							return
 						}
@@ -190,6 +209,8 @@ func (p *Peer) announceTransactions() {
 			// New batch of transactions to be broadcast, queue them (with cap)
 			queue = append(queue, hashes...)
 			if len(queue) > maxQueuedTxAnns {
+				p.Log().Warn("Announce hashes abandon", "peerId", p.ID(), "peerIP", safeGetPeerIP(p), "abandon", len(queue)-maxQueuedTxAnns)
+				txAnnounceAbandonMeter.Mark(int64(len(queue) - maxQueuedTxAnns))
 				// Fancy copy and resize to ensure buffer doesn't grow indefinitely
 				queue = queue[:copy(queue, queue[len(queue)-maxQueuedTxAnns:])]
 			}

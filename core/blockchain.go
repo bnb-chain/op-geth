@@ -1424,7 +1424,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 			chosen := current - bc.cacheConfig.TriesInMemory
 			flushInterval := time.Duration(atomic.LoadInt64(&bc.flushInterval))
 			// If we exceeded time allowance, flush an entire trie to disk
-			if bc.gcproc > flushInterval {
+			if bc.gcproc > flushInterval || chosen%240 == 0 {
 				// If the header is missing (canonical chain behind), we're reorging a low
 				// diff sidechain. Suspend committing until this operation is completed.
 				header := bc.GetHeaderByNumber(chosen)

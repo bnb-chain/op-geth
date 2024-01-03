@@ -22,6 +22,7 @@ import (
 	"fmt"
 	mrand "math/rand"
 	"sort"
+	"strings"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -234,6 +235,7 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 
 		case f.underpriced.Contains(hash):
 			underpriced++
+			log.Info("announced transaction is underpriced", "hash", hash.String())
 
 		default:
 			unknowns = append(unknowns, hash)
@@ -241,6 +243,8 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	}
 	txAnnounceKnownMeter.Mark(duplicate)
 	txAnnounceUnderpricedMeter.Mark(underpriced)
+
+	// add logs
 
 	// If anything's left to announce, push it into the internal loop
 	if len(unknowns) == 0 {
@@ -383,11 +387,13 @@ func (f *TxFetcher) loop() {
 				// check. Should be fine as the limit is in the thousands and the
 				// request size in the hundreds.
 				txAnnounceDOSMeter.Mark(int64(len(ann.hashes)))
+				log.Info("announced transaction DOS overflow", "hashes", joinHashes(ann.hashes), "num", len(ann.hashes))
 				break
 			}
 			want := used + len(ann.hashes)
 			if want > maxTxAnnounces {
 				txAnnounceDOSMeter.Mark(int64(want - maxTxAnnounces))
+				log.Info("announced transaction DOS overflow", "hashes", joinHashes(ann.hashes[want-maxTxAnnounces:]), "num", len(ann.hashes))
 				ann.hashes = ann.hashes[:want-maxTxAnnounces]
 			}
 			// All is well, schedule the remainder of the transactions
@@ -499,6 +505,7 @@ func (f *TxFetcher) loop() {
 			for peer, req := range f.requests {
 				if time.Duration(f.clock.Now()-req.time)+txGatherSlack > txFetchTimeout {
 					txRequestTimeoutMeter.Mark(int64(len(req.hashes)))
+					log.Info("announced transaction request timeout", "hashes", joinHashes(req.hashes), "num", len(req.hashes))
 
 					// Reschedule all the not-yet-delivered fetches to alternate peers
 					for _, hash := range req.hashes {
@@ -818,6 +825,7 @@ func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, 
 				// failure (e.g. peer disconnected), reschedule the hashes.
 				if err := f.fetchTxs(peer, hashes); err != nil {
 					txRequestFailMeter.Mark(int64(len(hashes)))
+					log.Info("announced transaction request failed", "hashes", joinHashes(hashes), "num", len(hashes))
 					f.Drop(peer)
 				}
 			})
@@ -909,4 +917,20 @@ func rotateHashes(slice []common.Hash, n int) {
 	for i := 0; i < len(orig); i++ {
 		slice[i] = orig[(i+n)%len(orig)]
 	}
+}
+
+// joinHashes concat hashes into string, for debugging logs; 128 hashes at most, to avoid
+// too much cost of logging
+func joinHashes(hashes []common.Hash) string {
+	num := len(hashes)
+	if num > 1024 {
+		num = 1024
+	}
+	strs := make([]string, num)
+	for i, h := range hashes {
+		if i < num {
+			strs[i] = h.String()
+		}
+	}
+	return strings.Join(strs, ",")
 }

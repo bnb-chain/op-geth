@@ -244,8 +244,6 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	txAnnounceKnownMeter.Mark(duplicate)
 	txAnnounceUnderpricedMeter.Mark(underpriced)
 
-	// add logs
-
 	// If anything's left to announce, push it into the internal loop
 	if len(unknowns) == 0 {
 		return nil

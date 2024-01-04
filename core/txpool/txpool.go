@@ -1082,10 +1082,10 @@ func (pool *TxPool) addTxsLocked(txs []*types.Transaction, local bool) ([]error,
 		replaced, err := pool.add(tx, local)
 		errs[i] = err
 		if err == nil && !replaced {
+			validTxMeter.Mark(1)
 			dirty.addTx(tx)
 		}
 	}
-	validTxMeter.Mark(int64(len(dirty.accounts)))
 	return errs, dirty
 }
 

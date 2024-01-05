@@ -111,6 +111,8 @@ var (
 )
 
 var (
+	staledMeter = metrics.NewRegisteredMeter("txpool/staled/count", nil) // staled transactions
+
 	// Metrics for the pending pool
 	pendingDiscardMeter   = metrics.NewRegisteredMeter("txpool/pending/discard", nil)
 	pendingReplaceMeter   = metrics.NewRegisteredMeter("txpool/pending/replace", nil)
@@ -452,6 +454,7 @@ func (pool *TxPool) loop() {
 				return txs
 			}()
 			pool.mu.RUnlock()
+			staledMeter.Mark(int64(len(reannoTxs)))
 			if len(reannoTxs) > 0 {
 				pool.reannoTxFeed.Send(core.ReannoTxsEvent{reannoTxs})
 			}

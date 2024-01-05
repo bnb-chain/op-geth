@@ -229,7 +229,6 @@ type BlockChain struct {
 	quit          chan struct{}  // shutdown signal, closed in Stop.
 	running       int32          // 0 if chain is running, 1 when stopped
 	procInterrupt int32          // interrupt signaler for block processing
-	commitLock    sync.Mutex     // CommitLock is used to protect above field from being modified concurrently
 
 	engine     consensus.Engine
 	validator  Validator // Block and state validator interface
@@ -1397,8 +1396,6 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 
 	postCommitFuncs := []func() error{
 		func() error {
-			bc.commitLock.Lock()
-			defer bc.commitLock.Unlock()
 
 			root := block.Root()
 			// If we're running an archive node, always flush

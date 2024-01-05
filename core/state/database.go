@@ -241,7 +241,7 @@ func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
 	//try cache first
 	if db.accountTrieCache != nil {
 		if tr, ok := db.accountTrieCache.Get(root); ok {
-			return tr.(*trie.SecureTrie), nil
+			return tr.(Trie).(*trie.SecureTrie).Copy(), nil
 		}
 	}
 
@@ -249,6 +249,7 @@ func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.CacheAccount(root, tr)
 	return tr, nil
 }
 
@@ -269,6 +270,7 @@ func (db *cachingDB) OpenStorageTrie(stateRoot common.Hash, addrHash, root commo
 	if err != nil {
 		return nil, err
 	}
+	db.CacheStorage(addrHash, root, tr)
 	return tr, nil
 }
 

@@ -1873,14 +1873,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
-		// pre-cache the block and receipts, so that it can be retrieved quickly by rcp
-		bc.CacheBlock(block.Hash(), block)
-		err = types.Receipts(receipts).DeriveFields(bc.chainConfig, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), block.Transactions())
-		if err != nil {
-			log.Warn("Failed to derive receipt fields", "block", block.Hash(), "err", err)
-		}
-		bc.CacheReceipts(block.Hash(), receipts)
-
 		// Update the metrics touched during block processing and validation
 		accountReadTimer.Update(statedb.AccountReads)                   // Account reads are complete(in processing)
 		storageReadTimer.Update(statedb.StorageReads)                   // Storage reads are complete(in processing)
@@ -1912,6 +1904,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		if err != nil {
 			return it.index, err
 		}
+
+		// pre-cache the block and receipts, so that it can be retrieved quickly by rcp
+		bc.CacheBlock(block.Hash(), block)
+		err = types.Receipts(receipts).DeriveFields(bc.chainConfig, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), block.Transactions())
+		if err != nil {
+			log.Warn("Failed to derive receipt fields", "block", block.Hash(), "err", err)
+		}
+		bc.CacheReceipts(block.Hash(), receipts)
+
 		// Update the metrics touched during block commit
 		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
 		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them

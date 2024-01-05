@@ -168,8 +168,10 @@ func newHandler(config *handlerConfig) (*handler, error) {
 			log.Warn("Switch sync mode from full sync to snap sync")
 		}
 	} else {
-		if h.chain.CurrentBlock().Number.Uint64() > 0 {
+		blockNumber := h.chain.CurrentBlock().Number
+		if blockNumber.Uint64() > 0 && (!config.Chain.Config().IsOptimism() || blockNumber.Cmp(config.Chain.Config().BedrockBlock) != 0) {
 			// Print warning log if database is not empty to run snap sync.
+			// For OP chains, snap sync from bedrock block is allowed.
 			log.Warn("Switch sync mode from snap sync to full sync")
 		} else {
 			// If snap sync was requested and our database is empty, grant it
@@ -660,21 +662,29 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 		numDirect := int(math.Sqrt(float64(len(peers))))
 		for _, peer := range peers[:numDirect] {
 			txset[peer] = append(txset[peer], tx.Hash())
+			log.Trace("Broadcast transaction", "peer", peer.ID(), "hash", tx.Hash())
 		}
 		// For the remaining peers, send announcement only
 		for _, peer := range peers[numDirect:] {
 			annos[peer] = append(annos[peer], tx.Hash())
+			log.Trace("Announce transaction", "peer", peer.ID(), "hash", tx.Hash())
 		}
 	}
 	for peer, hashes := range txset {
 		directPeers++
 		directCount += len(hashes)
 		peer.AsyncSendTransactions(hashes)
+		log.Trace("Transaction broadcast bodies", "txs", len(hashes),
+			"peer.id", peer.Node().ID().String(), "peer.IP", peer.Node().IP().String(),
+		)
 	}
 	for peer, hashes := range annos {
 		annoPeers++
 		annoCount += len(hashes)
 		peer.AsyncSendPooledTransactionHashes(hashes)
+		log.Trace("Transaction broadcast hashes", "txs", len(hashes),
+			"peer.id", peer.Node().ID().String(), "peer.IP", peer.Node().IP().String(),
+		)
 	}
 	log.Debug("Transaction broadcast", "txs", len(txs),
 		"announce packs", annoPeers, "announced hashes", annoCount,

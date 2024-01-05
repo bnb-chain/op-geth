@@ -449,6 +449,13 @@ func (tx *Transaction) EffectiveGasTipIntCmp(other *big.Int, baseFee *big.Int) i
 	return tx.EffectiveGasTipValue(baseFee).Cmp(other)
 }
 
+// SetTime sets the decoding time of a transaction. This is used by tests to set
+// arbitrary times and by persistent transaction pools when loading old txs from
+// disk.
+func (tx *Transaction) SetTime(t time.Time) {
+	tx.time = t
+}
+
 // Hash returns the transaction hash.
 func (tx *Transaction) Hash() common.Hash {
 	if hash := tx.hash.Load(); hash != nil {

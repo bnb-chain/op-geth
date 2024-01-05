@@ -384,7 +384,8 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 	// chain config as that would be AllProtocolChanges (applying any new fork
 	// on top of an existing private network genesis block). In that case, only
 	// apply the overrides.
-	if genesis == nil && stored != params.MainnetGenesisHash {
+	if genesis == nil && stored != params.MainnetGenesisHash && stored != params.OPBNBMainNetGenesisHash &&
+		stored != params.OPBNBTestNetGenesisHash && stored != params.OPBNBDevNetGenesisHash {
 		newcfg = storedcfg
 		applyOverrides(newcfg)
 	}
@@ -453,6 +454,12 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.RinkebyChainConfig
 	case ghash == params.GoerliGenesisHash:
 		return params.GoerliChainConfig
+	case ghash == params.OPBNBMainNetGenesisHash:
+		return params.OPBNBMainNetConfig
+	case ghash == params.OPBNBTestNetGenesisHash:
+		return params.OPBNBTestNetConfig
+	case ghash == params.OPBNBDevNetGenesisHash:
+		return params.OPBNBDevNetConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}

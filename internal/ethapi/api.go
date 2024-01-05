@@ -1360,7 +1360,7 @@ func RPCMarshalBlock(ctx context.Context, block *types.Block, inclTx bool, fullT
 		}
 		if fullTx {
 			formatTx = func(tx *types.Transaction, index int) (interface{}, error) {
-				return newRPCTransactionFromBlockHash(ctx, block, tx.Hash(), index, tx, backend), nil
+				return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), backend), nil
 			}
 		}
 		txs := block.Transactions()
@@ -1512,14 +1512,12 @@ func NewRPCPendingTransaction(tx *types.Transaction, current *types.Header, conf
 }
 
 // newRPCTransactionFromBlockIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockIndex(ctx context.Context, b *types.Block, index uint64, tx *types.Transaction, backend Backend) *RPCTransaction {
-	if tx == nil {
-		txs := b.Transactions()
-		if index >= uint64(len(txs)) {
-			return nil
-		}
-		tx = txs[index]
+func newRPCTransactionFromBlockIndex(ctx context.Context, b *types.Block, index uint64, backend Backend) *RPCTransaction {
+	txs := b.Transactions()
+	if index >= uint64(len(txs)) {
+		return nil
 	}
+	tx := txs[index]
 
 	rcpt := depositTxReceipt(ctx, b.Hash(), index, backend, tx)
 	return newRPCTransaction(tx, b.Hash(), b.NumberU64(), index, b.BaseFee(), backend.ChainConfig(), rcpt)
@@ -1547,11 +1545,6 @@ func newRPCRawTransactionFromBlockIndex(b *types.Block, index uint64) hexutil.By
 	}
 	blob, _ := txs[index].MarshalBinary()
 	return blob
-}
-
-// newRPCTransactionFromBlockHash returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockHash(ctx context.Context, b *types.Block, hash common.Hash, idx int, tx *types.Transaction, backend Backend) *RPCTransaction {
-	return newRPCTransactionFromBlockIndex(ctx, b, uint64(idx), tx, backend)
 }
 
 // accessListResult returns an optional accesslist
@@ -1698,7 +1691,7 @@ func (s *TransactionAPI) GetBlockTransactionCountByHash(ctx context.Context, blo
 // GetTransactionByBlockNumberAndIndex returns the transaction for the given block number and index.
 func (s *TransactionAPI) GetTransactionByBlockNumberAndIndex(ctx context.Context, blockNr rpc.BlockNumber, index hexutil.Uint) *RPCTransaction {
 	if block, _ := s.b.BlockByNumber(ctx, blockNr); block != nil {
-		return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), nil, s.b)
+		return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), s.b)
 	}
 	return nil
 }
@@ -1706,7 +1699,7 @@ func (s *TransactionAPI) GetTransactionByBlockNumberAndIndex(ctx context.Context
 // GetTransactionByBlockHashAndIndex returns the transaction for the given block hash and index.
 func (s *TransactionAPI) GetTransactionByBlockHashAndIndex(ctx context.Context, blockHash common.Hash, index hexutil.Uint) *RPCTransaction {
 	if block, _ := s.b.BlockByHash(ctx, blockHash); block != nil {
-		return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), nil, s.b)
+		return newRPCTransactionFromBlockIndex(ctx, block, uint64(index), s.b)
 	}
 	return nil
 }

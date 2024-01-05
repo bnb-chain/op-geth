@@ -17,6 +17,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common/gopool"
@@ -106,11 +107,25 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 			validateRes <- tmpFunc()
 		})
 	}
+	errs := make([]error, 0, len(validateFuns))
 	for i := 0; i < len(validateFuns); i++ {
 		err := <-validateRes
+		errs = append(errs, err)
+	}
+	var ancestorErr error
+	for _, err := range errs {
 		if err != nil {
-			return err
+			if !errors.Is(err, consensus.ErrUnknownAncestor) && !errors.Is(err, consensus.ErrPrunedAncestor) {
+				//Other errors are returned first.
+				return err
+			} else {
+				ancestorErr = err
+			}
 		}
+	}
+	//If there are no other errors, but an ancestorErr, return it.
+	if ancestorErr != nil {
+		return ancestorErr
 	}
 
 	return nil

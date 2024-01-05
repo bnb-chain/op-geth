@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.2.2
+
+This is a minor release for opBNB Mainnet and Testnet.
+It primarily optimizes op-geth and introduces an option to re-announce remote transactions.
+Upgrading is optional.
+
+### User Facing Changes
+
+- The startup node will default to using the bootnodes of the opBNB mainnet. If the `--networkid=` is configured as testnet, the testnet bootnodes will be used. If `--bootnodes=` is configured, the specified bootnodes will be used. The configured `--bootnodes=` take precedence over other options.[#32](https://github.com/bnb-chain/op-geth/pull/32)
+- Enable re-announce remote transactions by using the flag `--txpool.reannounceremotes=true`.[#33](https://github.com/bnb-chain/op-geth/pull/33)
+
+### Partial Changelog
+
+- [#16](https://github.com/bnb-chain/op-geth/pull/16): fix: wrong event log value
+- [#31](https://github.com/bnb-chain/op-geth/pull/31): ci: fix blst error and unknown architecture
+- [#32](https://github.com/bnb-chain/op-geth/pull/32): feature: add opBNB bootnodes
+- [#33](https://github.com/bnb-chain/op-geth/pull/33): feat: add option to reannounce remote transactions
+- [#34](https://github.com/bnb-chain/op-geth/pull/34): fix: clear underpriced buffer
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.2.2
+
+### Full Changelog
+
+https://github.com/bnb-chain/op-geth/compare/v0.2.1...v0.2.2
+
 ## v0.2.1
 
 This is the Fermat Hardfork release for opBNB Mainnet.

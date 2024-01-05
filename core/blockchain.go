@@ -1420,7 +1420,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 				limit       = common.StorageSize(bc.cacheConfig.TrieDirtyLimit) * 1024 * 1024
 			)
 			if nodes > limit || imgs > 4*1024*1024 {
-				bc.triedb.Cap(limit - ethdb.IdealBatchSize)
+				err := bc.triedb.Cap(limit - ethdb.IdealBatchSize)
+				if err != nil {
+					return err
+				}
 			}
 			// Find the next state trie we need to commit
 			chosen := current - bc.cacheConfig.TriesInMemory
@@ -1439,7 +1442,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 						log.Info("State in memory for too long, committing", "time", bc.gcproc, "allowance", flushInterval, "optimum", float64(chosen-bc.lastWrite)/TriesInMemory)
 					}
 					// Flush an entire trie and restart the counters
-					bc.triedb.Commit(header.Root, true)
+					err := bc.triedb.Commit(header.Root, true)
+					if err != nil {
+						return err
+					}
 					bc.lastWrite = chosen
 					bc.gcproc = 0
 				}

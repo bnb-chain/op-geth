@@ -1874,11 +1874,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		proctime := time.Since(start) // processing + validation
 
 		// pre-cache the block and receipts, so that it can be retrieved quickly by rcp
-		bc.CacheBlock(block.Hash(), block)
 		err = types.Receipts(receipts).DeriveFields(bc.chainConfig, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), block.Transactions())
 		if err != nil {
 			log.Warn("Failed to derive receipt fields", "block", block.Hash(), "err", err)
+			bc.reportBlock(block, receipts, err)
+			close(interruptCh)
+			return it.index, err
 		}
+		bc.CacheBlock(block.Hash(), block)
 		bc.CacheReceipts(block.Hash(), receipts)
 
 		// Update the metrics touched during block processing and validation

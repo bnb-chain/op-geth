@@ -662,10 +662,12 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 		numDirect := int(math.Sqrt(float64(len(peers))))
 		for _, peer := range peers[:numDirect] {
 			txset[peer] = append(txset[peer], tx.Hash())
+			log.Trace("Broadcast transaction", "peer", peer.ID(), "hash", tx.Hash())
 		}
 		// For the remaining peers, send announcement only
 		for _, peer := range peers[numDirect:] {
 			annos[peer] = append(annos[peer], tx.Hash())
+			log.Trace("Announce transaction", "peer", peer.ID(), "hash", tx.Hash())
 		}
 	}
 	for peer, hashes := range txset {

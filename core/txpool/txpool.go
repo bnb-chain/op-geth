@@ -1113,10 +1113,10 @@ func (pool *TxPool) addTxsLocked(txs []*types.Transaction, local bool) ([]error,
 		replaced, err := pool.add(tx, local)
 		errs[i] = err
 		if err == nil && !replaced {
+			validTxMeter.Mark(1)
 			dirty.addTx(tx)
 		}
 	}
-	validTxMeter.Mark(int64(len(dirty.accounts)))
 	return errs, dirty
 }
 
@@ -1539,6 +1539,7 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			if pool.promoteTx(addr, hash, tx) {
 				promoted = append(promoted, tx)
 			}
+			log.Trace("Promoted queued transaction", "hash", hash)
 		}
 		log.Trace("Promoted queued transactions", "count", len(promoted))
 		queuedGauge.Dec(int64(len(readies)))

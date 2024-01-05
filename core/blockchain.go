@@ -143,6 +143,8 @@ type CacheConfig struct {
 
 	SnapshotNoBuild bool // Whether the background generation is allowed
 	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+
+	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 }
 
 // defaultCacheConfig are the default caching values if none are specified by the
@@ -227,7 +229,6 @@ type BlockChain struct {
 	quit          chan struct{}  // shutdown signal, closed in Stop.
 	running       int32          // 0 if chain is running, 1 when stopped
 	procInterrupt int32          // interrupt signaler for block processing
-	commitLock    sync.Mutex     // CommitLock is used to protect above field from being modified concurrently
 
 	engine     consensus.Engine
 	validator  Validator // Block and state validator interface
@@ -1395,8 +1396,6 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 
 	postCommitFuncs := []func() error{
 		func() error {
-			bc.commitLock.Lock()
-			defer bc.commitLock.Unlock()
 
 			root := block.Root()
 			// If we're running an archive node, always flush
@@ -1418,13 +1417,16 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 				limit       = common.StorageSize(bc.cacheConfig.TrieDirtyLimit) * 1024 * 1024
 			)
 			if nodes > limit || imgs > 4*1024*1024 {
-				bc.triedb.Cap(limit - ethdb.IdealBatchSize)
+				err := bc.triedb.Cap(limit - ethdb.IdealBatchSize)
+				if err != nil {
+					return err
+				}
 			}
 			// Find the next state trie we need to commit
 			chosen := current - bc.cacheConfig.TriesInMemory
 			flushInterval := time.Duration(atomic.LoadInt64(&bc.flushInterval))
 			// If we exceeded time allowance, flush an entire trie to disk
-			if bc.gcproc > flushInterval {
+			if bc.gcproc > flushInterval || (bc.cacheConfig.TrieCommitInterval != 0 && chosen%bc.cacheConfig.TrieCommitInterval == 0) {
 				// If the header is missing (canonical chain behind), we're reorging a low
 				// diff sidechain. Suspend committing until this operation is completed.
 				header := bc.GetHeaderByNumber(chosen)
@@ -1437,7 +1439,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 						log.Info("State in memory for too long, committing", "time", bc.gcproc, "allowance", flushInterval, "optimum", float64(chosen-bc.lastWrite)/TriesInMemory)
 					}
 					// Flush an entire trie and restart the counters
-					bc.triedb.Commit(header.Root, true)
+					err := bc.triedb.Commit(header.Root, true)
+					if err != nil {
+						return err
+					}
 					bc.lastWrite = chosen
 					bc.gcproc = 0
 				}
@@ -1868,14 +1873,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
-		// pre-cache the block and receipts, so that it can be retrieved quickly by rcp
-		bc.CacheBlock(block.Hash(), block)
-		err = types.Receipts(receipts).DeriveFields(bc.chainConfig, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), block.Transactions())
-		if err != nil {
-			log.Warn("Failed to derive receipt fields", "block", block.Hash(), "err", err)
-		}
-		bc.CacheReceipts(block.Hash(), receipts)
-
 		// Update the metrics touched during block processing and validation
 		accountReadTimer.Update(statedb.AccountReads)                   // Account reads are complete(in processing)
 		storageReadTimer.Update(statedb.StorageReads)                   // Storage reads are complete(in processing)
@@ -1907,6 +1904,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		if err != nil {
 			return it.index, err
 		}
+
+		// pre-cache the block and receipts, so that it can be retrieved quickly by rcp
+		bc.CacheBlock(block.Hash(), block)
+		err = types.Receipts(receipts).DeriveFields(bc.chainConfig, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), block.Transactions())
+		if err != nil {
+			log.Warn("Failed to derive receipt fields", "block", block.Hash(), "err", err)
+		}
+		bc.CacheReceipts(block.Hash(), receipts)
+
 		// Update the metrics touched during block commit
 		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
 		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them

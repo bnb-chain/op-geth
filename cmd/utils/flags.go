@@ -465,6 +465,12 @@ var (
 		Value:    ethconfig.Defaults.TxPool.ReannounceTime,
 		Category: flags.TxPoolCategory,
 	}
+	TxPoolReannounceRemotesFlag = &cli.BoolFlag{
+		Name:     "txpool.reannounceremotes",
+		Usage:    "Wether reannnounce remote transactions or not(default = false)",
+		Value:    ethconfig.Defaults.TxPool.ReannounceRemotes,
+		Category: flags.TxPoolCategory,
+	}
 
 	// Performance tuning settings
 	CacheFlag = &cli.IntFlag{
@@ -1135,7 +1141,13 @@ func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	urls := params.OpBNBMainnetBootnodes
+	if ctx.IsSet(NetworkIdFlag.Name) {
+		networkId := ctx.Uint64(NetworkIdFlag.Name)
+		if networkId == params.OpBNBTestnet {
+			urls = params.OpBNBTestnetBootnodes
+		}
+	}
 	switch {
 	case ctx.IsSet(BootnodesFlag.Name):
 		urls = SplitAndTrim(ctx.String(BootnodesFlag.Name))
@@ -1662,6 +1674,9 @@ func setTxPool(ctx *cli.Context, cfg *txpool.Config) {
 	}
 	if ctx.IsSet(TxPoolReannounceTimeFlag.Name) {
 		cfg.ReannounceTime = ctx.Duration(TxPoolReannounceTimeFlag.Name)
+	}
+	if ctx.IsSet(TxPoolReannounceRemotesFlag.Name) {
+		cfg.ReannounceRemotes = ctx.Bool(TxPoolReannounceRemotesFlag.Name)
 	}
 }
 

@@ -925,7 +925,7 @@ func rotateHashes(slice []common.Hash, n int) {
 	}
 }
 
-// joinHashes concat hashes into string, for debugging logs; 128 hashes at most, to avoid
+// joinHashes concat hashes into string, for debugging logs; 1024 hashes at most, to avoid
 // too much cost of logging
 func joinHashes(hashes []common.Hash) string {
 	num := len(hashes)

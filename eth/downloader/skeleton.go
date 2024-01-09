@@ -73,6 +73,14 @@ var errTerminated = errors.New("terminated")
 // with a new header, but it does not link up to the existing sync.
 var errReorgDenied = errors.New("non-forced head reorg denied")
 
+var (
+	ErrNoHeadersDelivered         = errors.New("no headers delivered")
+	ErrInvalidHeaderBatchAnchor   = errors.New("invalid header batch anchor")
+	ErrNotEnoughNonGenesisHeaders = errors.New("not enough non-genesis headers delivered")
+	ErrNotEnoughGenesisHeaders    = errors.New("not enough genesis headers delivered")
+	ErrInvalidHashProgression     = errors.New("invalid hash progression")
+)
+
 func init() {
 	// Tuning parameters is nice, but the scratch space must be assignable in
 	// full to peers. It's a useless cornercase to support a dangling half-group.
@@ -786,25 +794,25 @@ func (s *skeleton) executeTask(peer *peerConnection, req *headerRequest) {
 		case len(headers) == 0:
 			// No headers were delivered, reject the response and reschedule
 			peer.log.Debug("No headers delivered")
-			res.Done <- errors.New("no headers delivered")
+			res.Done <- ErrNoHeadersDelivered
 			s.scheduleRevertRequest(req)
 
 		case headers[0].Number.Uint64() != req.head:
 			// Header batch anchored at non-requested number
 			peer.log.Debug("Invalid header response head", "have", headers[0].Number, "want", req.head)
-			res.Done <- errors.New("invalid header batch anchor")
+			res.Done <- ErrInvalidHeaderBatchAnchor
 			s.scheduleRevertRequest(req)
 
 		case req.head >= requestHeaders && len(headers) != requestHeaders:
 			// Invalid number of non-genesis headers delivered, reject the response and reschedule
 			peer.log.Debug("Invalid non-genesis header count", "have", len(headers), "want", requestHeaders)
-			res.Done <- errors.New("not enough non-genesis headers delivered")
+			res.Done <- ErrNotEnoughNonGenesisHeaders
 			s.scheduleRevertRequest(req)
 
 		case req.head < requestHeaders && uint64(len(headers)) != req.head:
 			// Invalid number of genesis headers delivered, reject the response and reschedule
 			peer.log.Debug("Invalid genesis header count", "have", len(headers), "want", headers[0].Number.Uint64())
-			res.Done <- errors.New("not enough genesis headers delivered")
+			res.Done <- ErrNotEnoughGenesisHeaders
 			s.scheduleRevertRequest(req)
 
 		default:
@@ -813,7 +821,7 @@ func (s *skeleton) executeTask(peer *peerConnection, req *headerRequest) {
 			for i := 0; i < len(headers)-1; i++ {
 				if headers[i].ParentHash != headers[i+1].Hash() {
 					peer.log.Debug("Invalid hash progression", "index", i, "wantparenthash", headers[i].ParentHash, "haveparenthash", headers[i+1].Hash())
-					res.Done <- errors.New("invalid hash progression")
+					res.Done <- ErrInvalidHashProgression
 					s.scheduleRevertRequest(req)
 					return
 				}

@@ -199,6 +199,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			TriesInMemory:       config.TriesInMemory,
 			SnapshotLimit:       config.SnapshotCache,
 			Preimages:           config.Preimages,
+			TrieCommitInterval:  config.TrieCommitInterval,
 		}
 	)
 	// Override the chain config with provided settings.

@@ -2113,6 +2113,10 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 	return 0, nil
 }
 
+func (bc *BlockChain) RecoverAncestors(block *types.Block) (common.Hash, error) {
+	return bc.recoverAncestors(block)
+}
+
 // recoverAncestors finds the closest ancestor with available state and re-execute
 // all the ancestor blocks since that.
 // recoverAncestors is only used post-merge.

@@ -488,6 +488,14 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData) (engine.Payloa
 	// return a fake success.
 	if block := api.eth.BlockChain().GetBlockByHash(params.BlockHash); block != nil {
 		log.Warn("Ignoring already known beacon payload", "number", params.Number, "hash", params.BlockHash, "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)))
+		if !api.eth.BlockChain().HasState(params.BlockHash) {
+			log.Info("already known beacon payload has not state,should fix", "number", params.Number, "hash", params.BlockHash, "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)))
+			lastValid, err := api.eth.BlockChain().RecoverAncestors(block)
+			if err != nil {
+				log.Error("recover already known beacon payload ancestors fail", "err", err, "number", params.Number, "hash", params.BlockHash, "age", common.PrettyAge(time.Unix(int64(block.Time()), 0)))
+				return engine.PayloadStatusV1{Status: engine.INVALID, LatestValidHash: &lastValid}, err
+			}
+		}
 		hash := block.Hash()
 		return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 	}

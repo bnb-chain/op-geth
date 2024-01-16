@@ -280,18 +280,8 @@ func (p *Pruner) Prune(root common.Hash) error {
 	// - the probability of this layer being reorg is very low
 	var layers []snapshot.Snapshot
 	if root == (common.Hash{}) {
-		// Retrieve all snapshot layers from the current HEAD.
-		// In theory there are n difflayers + 1 disk layer present,
-		// so n diff layers are expected to be returned.
-		layers = p.snaptree.Snapshots(p.chainHeader.Root, int(p.triesInMemory), true)
-		if len(layers) != int(p.triesInMemory) {
-			// Reject if the accumulated diff layers are less than n. It
-			// means in most of normal cases, there is no associated state
-			// with bottom-most diff layer.
-			return fmt.Errorf("snapshot not old enough yet: need %d more blocks", int(p.triesInMemory)-len(layers))
-		}
-		// Use the bottom-most diff layer as the target
-		root = layers[len(layers)-1].Root()
+		// Use the latest block header root as the target
+		root = p.chainHeader.Root
 	}
 	// Ensure the root is really present. The weak assumption
 	// is the presence of root can indicate the presence of the
@@ -327,7 +317,7 @@ func (p *Pruner) Prune(root common.Hash) error {
 		if len(layers) > 0 {
 			log.Info("Selecting bottom-most difflayer as the pruning target", "root", root, "height", p.chainHeader.Number.Uint64()-(p.triesInMemory-1))
 		} else {
-			log.Info("Selecting user-specified state as the pruning target", "root", root)
+			log.Info("Selecting user-specified state as the pruning target", "root", root, "height", p.chainHeader.Number.Uint64())
 		}
 	}
 	// Before start the pruning, delete the clean trie cache first.

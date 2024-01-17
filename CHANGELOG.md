@@ -13,11 +13,21 @@ Upgrading is optional.
 
 ### Partial Changelog
 
+- [#14](https://github.com/bnb-chain/op-geth/pull/14): fix: add special logic to handle ancestor errors[BNB-3]
 - [#16](https://github.com/bnb-chain/op-geth/pull/16): fix: wrong event log value
+- [#17](https://github.com/bnb-chain/op-geth/pull/17): fix: cache data after successful writing[BNB-12]
+- [#19](https://github.com/bnb-chain/op-geth/pull/19): fix: handle error in state_prefetcher.go and blockchain.go[BNB-16]
+- [#20](https://github.com/bnb-chain/op-geth/pull/20): fix: refraining from using gopool for long-running tasks[BNB-19]
+- [#21](https://github.com/bnb-chain/op-geth/pull/21): fix: remove redundant lock[BNB-20]
+- [#22](https://github.com/bnb-chain/op-geth/pull/22): fix: remove unnecessary newRPCTransactionFromBlockHash function[BNB-21]
 - [#31](https://github.com/bnb-chain/op-geth/pull/31): ci: fix blst error and unknown architecture
 - [#32](https://github.com/bnb-chain/op-geth/pull/32): feature: add opBNB bootnodes
 - [#33](https://github.com/bnb-chain/op-geth/pull/33): feat: add option to reannounce remote transactions
 - [#34](https://github.com/bnb-chain/op-geth/pull/34): fix: clear underpriced buffer
+- [#41](https://github.com/bnb-chain/op-geth/pull/41): txpool: enhance some logs and metrics on broadcasting and annoucing
+- [#43](https://github.com/bnb-chain/op-geth/pull/43): chore: add reannounce metric for txpool
+- [#44](https://github.com/bnb-chain/op-geth/pull/44): chore: impr/add some metrics txpool
+- [#45](https://github.com/bnb-chain/op-geth/pull/45): feat: add TrieCommitInterval configuration, commit trie every TrieCommitInterval blocks
 
 ### Docker Images
 

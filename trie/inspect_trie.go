@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
-
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -22,6 +21,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"golang.org/x/sync/semaphore"
+)
+
+const (
+	DEFAULT_TRIEDBCACHE_SIZE = 1024 * 1024 * 1024
 )
 
 type Account struct {

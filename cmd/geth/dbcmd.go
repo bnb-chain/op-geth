@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/console/prompt"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
@@ -38,7 +39,6 @@ import (
 	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/trie"
-	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 	"github.com/olekukonko/tablewriter"
 	"github.com/urfave/cli/v2"
 )
@@ -286,7 +286,7 @@ func inspectTrie(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	db := utils.MakeChainDatabase(ctx, stack, true)
 	defer db.Close()
 
 	var headerBlockHash common.Hash
@@ -328,17 +328,7 @@ func inspectTrie(ctx *cli.Context) error {
 		}
 		fmt.Printf("ReadBlockHeader, root: %v, blocknum: %v\n", trieRootHash, blockNumber)
 
-		dbScheme := rawdb.ReadStateScheme(db)
-		var config *trie.Config
-		if dbScheme == rawdb.PathScheme {
-			config = &trie.Config{
-				PathDB: pathdb.ReadOnly,
-			}
-		} else if dbScheme == rawdb.HashScheme {
-			config = trie.HashDefaults
-		}
-
-		triedb := trie.NewDatabase(db, config)
+		triedb := trie.NewDatabase(db)
 		theTrie, err := trie.New(trie.TrieID(trieRootHash), triedb)
 		if err != nil {
 			fmt.Printf("fail to new trie tree, err: %v, rootHash: %v\n", err, trieRootHash.String())

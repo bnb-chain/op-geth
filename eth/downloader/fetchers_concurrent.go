@@ -143,9 +143,6 @@ func (d *Downloader) concurrentFetch(queue typedQueue, beaconMode bool) error {
 				return nil
 			}
 		} else {
-			if requestRetried > 0 {
-				log.Debug("Krish: step into retry logic else...")
-			}
 			// Send a download request to all idle peers, until throttled
 			var (
 				idles []*peerConnection
@@ -168,10 +165,6 @@ func (d *Downloader) concurrentFetch(queue typedQueue, beaconMode bool) error {
 			}
 			sort.Sort(&peerCapacitySort{idles, caps})
 
-			if requestRetried > 0 {
-				log.Info("Krish: idles num", "idles count = ", len(idles))
-			}
-
 			var (
 				progressed bool
 				throttled  bool
@@ -181,11 +174,9 @@ func (d *Downloader) concurrentFetch(queue typedQueue, beaconMode bool) error {
 				// Short circuit if throttling activated or there are no more
 				// queued tasks to be retrieved
 				if throttled {
-					log.Info("Krish: throttled")
 					break
 				}
 				if queued = queue.pending(); queued == 0 {
-					log.Info("Krish: queued == 0")
 					break
 				}
 				// Reserve a chunk of fetches for a peer. A nil can mean either that
@@ -202,16 +193,9 @@ func (d *Downloader) concurrentFetch(queue typedQueue, beaconMode bool) error {
 				if request == nil {
 					continue
 				}
-
-				if requestRetried > 0 {
-					log.Info("Krish: queue reserve success", "request header", request.Headers[0].Number)
-				}
-
 				// Fetch the chunk and make sure any errors return the hashes to the queue
 				req, err := queue.request(peer, request, responses)
 				if err != nil {
-					log.Info("Krish: queue.request error", "request header", request.Headers[0].Number, "err is", err)
-
 					// Sending the request failed, which generally means the peer
 					// was disconnected in between assignment and network send.
 					// Although all peer removal operations return allocated tasks
@@ -219,9 +203,9 @@ func (d *Downloader) concurrentFetch(queue typedQueue, beaconMode bool) error {
 					// immediately pushing the unfulfilled requests.
 					queue.unreserve(peer.id) // TODO(karalabe): This needs a non-expiration method
 					//reset progressed
-					//if len(pending) == 0 {
-					//	progressed = false
-					//}
+					if len(pending) == 0 {
+						progressed = false
+					}
 					continue
 				}
 				pending[peer.id] = req

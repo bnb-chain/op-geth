@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/holiman/uint256"
 	"github.com/kylelemons/godebug/diff"
 	"github.com/stretchr/testify/require"
 )
@@ -102,9 +103,10 @@ var (
 	}
 	nonce                   = uint64(1234)
 	depositReceiptWithNonce = &Receipt{
-		Status:            ReceiptStatusFailed,
-		CumulativeGasUsed: 1,
-		DepositNonce:      &nonce,
+		Status:                ReceiptStatusFailed,
+		CumulativeGasUsed:     1,
+		DepositNonce:          &nonce,
+		DepositReceiptVersion: nil,
 		Logs: []*Log{
 			{
 				Address: common.BytesToAddress([]byte{0x11}),
@@ -119,25 +121,35 @@ var (
 		},
 		Type: DepositTxType,
 	}
-)
-
-func TestDecodeEmptyTypedReceipt(t *testing.T) {
-	input := []byte{0x80}
-	var r Receipt
-	err := rlp.DecodeBytes(input, &r)
-	if err != errShortTypedReceipt {
-		t.Fatal("wrong error:", err)
+	version                           = CanyonDepositReceiptVersion
+	depositReceiptWithNonceAndVersion = &Receipt{
+		Status:                ReceiptStatusFailed,
+		CumulativeGasUsed:     1,
+		DepositNonce:          &nonce,
+		DepositReceiptVersion: &version,
+		Logs: []*Log{
+			{
+				Address: common.BytesToAddress([]byte{0x11}),
+				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+				Data:    []byte{0x01, 0x00, 0xff},
+			},
+			{
+				Address: common.BytesToAddress([]byte{0x01, 0x11}),
+				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+				Data:    []byte{0x01, 0x00, 0xff},
+			},
+		},
+		Type: DepositTxType,
 	}
-}
 
-// Tests that receipt data can be correctly derived from the contextual infos
-func TestDeriveFields(t *testing.T) {
 	// Create a few transactions to have receipts for
-	to2 := common.HexToAddress("0x2")
-	to3 := common.HexToAddress("0x3")
-	to4 := common.HexToAddress("0x4")
-	to5 := common.HexToAddress("0x5")
-	txs := Transactions{
+	to2 = common.HexToAddress("0x2")
+	to3 = common.HexToAddress("0x3")
+	to4 = common.HexToAddress("0x4")
+	to5 = common.HexToAddress("0x5")
+	to6 = common.HexToAddress("0x6")
+	to7 = common.HexToAddress("0x7")
+	txs = Transactions{
 		NewTx(&LegacyTx{
 			Nonce:    1,
 			Value:    big.NewInt(1),
@@ -165,34 +177,64 @@ func TestDeriveFields(t *testing.T) {
 			Value:     big.NewInt(4),
 			Gas:       4,
 			GasTipCap: big.NewInt(44),
-			GasFeeCap: big.NewInt(1045),
+			GasFeeCap: big.NewInt(1044),
 		}),
 		NewTx(&DynamicFeeTx{
 			To:        &to5,
 			Nonce:     5,
 			Value:     big.NewInt(5),
 			Gas:       5,
-			GasTipCap: big.NewInt(56),
+			GasTipCap: big.NewInt(55),
 			GasFeeCap: big.NewInt(1055),
+		}),
+		// EIP-4844 transactions.
+		NewTx(&BlobTx{
+			To:         to6,
+			Nonce:      6,
+			Value:      uint256.NewInt(6),
+			Gas:        6,
+			GasTipCap:  uint256.NewInt(66),
+			GasFeeCap:  uint256.NewInt(1066),
+			BlobFeeCap: uint256.NewInt(100066),
+			BlobHashes: []common.Hash{{}},
+		}),
+		NewTx(&BlobTx{
+			To:         to7,
+			Nonce:      7,
+			Value:      uint256.NewInt(7),
+			Gas:        7,
+			GasTipCap:  uint256.NewInt(77),
+			GasFeeCap:  uint256.NewInt(1077),
+			BlobFeeCap: uint256.NewInt(100077),
+			BlobHashes: []common.Hash{{}, {}, {}},
 		}),
 		NewTx(&DepositTx{
 			To:    nil, // contract creation
 			Value: big.NewInt(6),
 			Gas:   50,
 		}),
+		NewTx(&DepositTx{
+			To:    nil, // contract creation
+			Value: big.NewInt(6),
+			Gas:   60,
+		}),
 	}
-	depNonce := uint64(7)
-	blockNumber := big.NewInt(1)
-	blockHash := common.BytesToHash([]byte{0x03, 0x14})
+	depNonce1                   = uint64(7)
+	depNonce2                   = uint64(8)
+	blockNumber                 = big.NewInt(1)
+	blockTime                   = uint64(2)
+	blockHash                   = common.BytesToHash([]byte{0x03, 0x14})
+	canyonDepositReceiptVersion = CanyonDepositReceiptVersion
 
 	// Create the corresponding receipts
-	receipts := Receipts{
+	receipts = Receipts{
 		&Receipt{
 			Status:            ReceiptStatusFailed,
 			CumulativeGasUsed: 1,
 			Logs: []*Log{
 				{
 					Address: common.BytesToAddress([]byte{0x11}),
+					Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
 					// derived fields:
 					BlockNumber: blockNumber.Uint64(),
 					TxHash:      txs[0].Hash(),
@@ -202,6 +244,7 @@ func TestDeriveFields(t *testing.T) {
 				},
 				{
 					Address: common.BytesToAddress([]byte{0x01, 0x11}),
+					Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
 					// derived fields:
 					BlockNumber: blockNumber.Uint64(),
 					TxHash:      txs[0].Hash(),
@@ -225,6 +268,7 @@ func TestDeriveFields(t *testing.T) {
 			Logs: []*Log{
 				{
 					Address: common.BytesToAddress([]byte{0x22}),
+					Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
 					// derived fields:
 					BlockNumber: blockNumber.Uint64(),
 					TxHash:      txs[1].Hash(),
@@ -234,6 +278,7 @@ func TestDeriveFields(t *testing.T) {
 				},
 				{
 					Address: common.BytesToAddress([]byte{0x02, 0x22}),
+					Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
 					// derived fields:
 					BlockNumber: blockNumber.Uint64(),
 					TxHash:      txs[1].Hash(),
@@ -290,44 +335,126 @@ func TestDeriveFields(t *testing.T) {
 			TransactionIndex:  4,
 		},
 		&Receipt{
+			Type:              BlobTxType,
+			PostState:         common.Hash{6}.Bytes(),
+			CumulativeGasUsed: 21,
+			Logs:              []*Log{},
+			// derived fields:
+			TxHash:            txs[5].Hash(),
+			GasUsed:           6,
+			EffectiveGasPrice: big.NewInt(1066),
+			BlobGasUsed:       params.BlobTxBlobGasPerBlob,
+			BlobGasPrice:      big.NewInt(920),
+			BlockHash:         blockHash,
+			BlockNumber:       blockNumber,
+			TransactionIndex:  5,
+		},
+		&Receipt{
+			Type:              BlobTxType,
+			PostState:         common.Hash{7}.Bytes(),
+			CumulativeGasUsed: 28,
+			Logs:              []*Log{},
+			// derived fields:
+			TxHash:            txs[6].Hash(),
+			GasUsed:           7,
+			EffectiveGasPrice: big.NewInt(1077),
+			BlobGasUsed:       3 * params.BlobTxBlobGasPerBlob,
+			BlobGasPrice:      big.NewInt(920),
+			BlockHash:         blockHash,
+			BlockNumber:       blockNumber,
+			TransactionIndex:  6,
+		},
+		&Receipt{
 			Type:              DepositTxType,
 			PostState:         common.Hash{5}.Bytes(),
-			CumulativeGasUsed: 50 + 15,
+			CumulativeGasUsed: 50 + 28,
 			Logs: []*Log{
 				{
 					Address: common.BytesToAddress([]byte{0x33}),
+					Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
 					// derived fields:
 					BlockNumber: blockNumber.Uint64(),
-					TxHash:      txs[5].Hash(),
-					TxIndex:     5,
+					TxHash:      txs[7].Hash(),
+					TxIndex:     7,
 					BlockHash:   blockHash,
 					Index:       4,
 				},
 				{
 					Address: common.BytesToAddress([]byte{0x03, 0x33}),
+					Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
 					// derived fields:
 					BlockNumber: blockNumber.Uint64(),
-					TxHash:      txs[5].Hash(),
-					TxIndex:     5,
+					TxHash:      txs[7].Hash(),
+					TxIndex:     7,
 					BlockHash:   blockHash,
 					Index:       5,
 				},
 			},
-			TxHash:            txs[5].Hash(),
-			ContractAddress:   common.HexToAddress("0x3bb898b4bbe24f68a4e9be46cfe72d1787fd74f4"),
-			GasUsed:           50,
-			EffectiveGasPrice: big.NewInt(0),
-			BlockHash:         blockHash,
-			BlockNumber:       blockNumber,
-			TransactionIndex:  5,
-			DepositNonce:      &depNonce,
+			TxHash:                txs[7].Hash(),
+			ContractAddress:       common.HexToAddress("0x3bb898b4bbe24f68a4e9be46cfe72d1787fd74f4"),
+			GasUsed:               50,
+			EffectiveGasPrice:     big.NewInt(0),
+			BlockHash:             blockHash,
+			BlockNumber:           blockNumber,
+			TransactionIndex:      7,
+			DepositNonce:          &depNonce1,
+			DepositReceiptVersion: nil,
+		},
+		&Receipt{
+			Type:              DepositTxType,
+			PostState:         common.Hash{5}.Bytes(),
+			CumulativeGasUsed: 60 + 50 + 28,
+			Logs: []*Log{
+				{
+					Address: common.BytesToAddress([]byte{0x33}),
+					Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+					// derived fields:
+					BlockNumber: blockNumber.Uint64(),
+					TxHash:      txs[8].Hash(),
+					TxIndex:     8,
+					BlockHash:   blockHash,
+					Index:       6,
+				},
+				{
+					Address: common.BytesToAddress([]byte{0x03, 0x33}),
+					Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
+					// derived fields:
+					BlockNumber: blockNumber.Uint64(),
+					TxHash:      txs[8].Hash(),
+					TxIndex:     8,
+					BlockHash:   blockHash,
+					Index:       7,
+				},
+			},
+			TxHash:                txs[8].Hash(),
+			ContractAddress:       common.HexToAddress("0x117814af22cb83d8ad6e8489e9477d28265bc105"),
+			GasUsed:               60,
+			EffectiveGasPrice:     big.NewInt(0),
+			BlockHash:             blockHash,
+			BlockNumber:           blockNumber,
+			TransactionIndex:      8,
+			DepositNonce:          &depNonce2,
+			DepositReceiptVersion: &canyonDepositReceiptVersion,
 		},
 	}
+)
 
+func TestDecodeEmptyTypedReceipt(t *testing.T) {
+	input := []byte{0x80}
+	var r Receipt
+	err := rlp.DecodeBytes(input, &r)
+	if err != errShortTypedReceipt {
+		t.Fatal("wrong error:", err)
+	}
+}
+
+// Tests that receipt data can be correctly derived from the contextual infos
+func TestDeriveFields(t *testing.T) {
 	// Re-derive receipts.
 	basefee := big.NewInt(1000)
+	blobGasPrice := big.NewInt(920)
 	derivedReceipts := clearComputedFieldsOnReceipts(receipts)
-	err := Receipts(derivedReceipts).DeriveFields(params.TestChainConfig, blockHash, blockNumber.Uint64(), 0, basefee, txs)
+	err := Receipts(derivedReceipts).DeriveFields(params.TestChainConfig, blockHash, blockNumber.Uint64(), blockTime, basefee, blobGasPrice, txs)
 	if err != nil {
 		t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
 	}
@@ -337,6 +464,7 @@ func TestDeriveFields(t *testing.T) {
 	if err != nil {
 		t.Fatal("error marshaling input receipts:", err)
 	}
+
 	r2, err := json.MarshalIndent(derivedReceipts, "", "  ")
 	if err != nil {
 		t.Fatal("error marshaling derived receipts:", err)
@@ -344,6 +472,50 @@ func TestDeriveFields(t *testing.T) {
 	d := diff.Diff(string(r1), string(r2))
 	if d != "" {
 		t.Fatal("receipts differ:", d)
+	}
+}
+
+// Test that we can marshal/unmarshal receipts to/from json without errors.
+// This also confirms that our test receipts contain all the required fields.
+func TestReceiptJSON(t *testing.T) {
+	for i := range receipts {
+		b, err := receipts[i].MarshalJSON()
+		if err != nil {
+			t.Fatal("error marshaling receipt to json:", err)
+		}
+		r := Receipt{}
+		err = r.UnmarshalJSON(b)
+		if err != nil {
+			t.Fatal("error unmarshaling receipt from json:", err)
+		}
+
+		// Make sure marshal/unmarshal doesn't affect receipt hash root computation by comparing
+		// the output of EncodeIndex
+		rsBefore := Receipts([]*Receipt{receipts[i]})
+		rsAfter := Receipts([]*Receipt{&r})
+
+		encBefore, encAfter := bytes.Buffer{}, bytes.Buffer{}
+		rsBefore.EncodeIndex(0, &encBefore)
+		rsAfter.EncodeIndex(0, &encAfter)
+		if !bytes.Equal(encBefore.Bytes(), encAfter.Bytes()) {
+			t.Errorf("%v: EncodeIndex differs after JSON marshal/unmarshal", i)
+		}
+	}
+}
+
+// Test we can still parse receipt without EffectiveGasPrice for backwards compatibility, even
+// though it is required per the spec.
+func TestEffectiveGasPriceNotRequired(t *testing.T) {
+	r := *receipts[0]
+	r.EffectiveGasPrice = nil
+	b, err := r.MarshalJSON()
+	if err != nil {
+		t.Fatal("error marshaling receipt to json:", err)
+	}
+	r2 := Receipt{}
+	err = r2.UnmarshalJSON(b)
+	if err != nil {
+		t.Fatal("error unmarshaling receipt from json:", err)
 	}
 }
 
@@ -474,6 +646,152 @@ func TestReceiptUnmarshalBinary(t *testing.T) {
 	}
 }
 
+func clearComputedFieldsOnReceipts(receipts []*Receipt) []*Receipt {
+	r := make([]*Receipt, len(receipts))
+	for i, receipt := range receipts {
+		r[i] = clearComputedFieldsOnReceipt(receipt)
+	}
+	return r
+}
+
+func clearComputedFieldsOnReceipt(receipt *Receipt) *Receipt {
+	cpy := *receipt
+	cpy.TxHash = common.Hash{0xff, 0xff, 0x11}
+	cpy.BlockHash = common.Hash{0xff, 0xff, 0x22}
+	cpy.BlockNumber = big.NewInt(math.MaxUint32)
+	cpy.TransactionIndex = math.MaxUint32
+	cpy.ContractAddress = common.Address{0xff, 0xff, 0x33}
+	cpy.GasUsed = 0xffffffff
+	cpy.Logs = clearComputedFieldsOnLogs(receipt.Logs)
+	cpy.EffectiveGasPrice = big.NewInt(0)
+	cpy.BlobGasUsed = 0
+	cpy.BlobGasPrice = nil
+	return &cpy
+}
+
+func clearComputedFieldsOnLogs(logs []*Log) []*Log {
+	l := make([]*Log, len(logs))
+	for i, log := range logs {
+		cpy := *log
+		cpy.BlockNumber = math.MaxUint32
+		cpy.BlockHash = common.Hash{}
+		cpy.TxHash = common.Hash{}
+		cpy.TxIndex = math.MaxUint32
+		cpy.Index = math.MaxUint32
+		l[i] = &cpy
+	}
+	return l
+}
+
+func TestDeriveOptimismTxReceipt(t *testing.T) {
+	to4 := common.HexToAddress("0x4")
+	// Create a few transactions to have receipts for
+	txs := Transactions{
+		NewTx(&DepositTx{
+			To:    nil, // contract creation
+			Value: big.NewInt(6),
+			Gas:   50,
+			// System config with L1Scalar=2_000_000 (becomes 2 after division), L1Overhead=2500, L1BaseFee=5000
+			Data: common.Hex2Bytes("015d8eb900000000000000000000000000000000000000000000000026b39534042076f70000000000000000000000000000000000000000000000007e33b7c4995967580000000000000000000000000000000000000000000000000000000000001388547dea8ff339566349ed0ef6384876655d1b9b955e36ac165c6b8ab69b9af5cd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000123400000000000000000000000000000000000000000000000000000000000009c400000000000000000000000000000000000000000000000000000000001e8480"),
+		}),
+		NewTx(&DynamicFeeTx{
+			To:        &to4,
+			Nonce:     4,
+			Value:     big.NewInt(4),
+			Gas:       4,
+			GasTipCap: big.NewInt(44),
+			GasFeeCap: big.NewInt(1045),
+			Data:      []byte{0, 1, 255, 0},
+		}),
+	}
+	depNonce := uint64(7)
+	blockNumber := big.NewInt(1)
+	blockHash := common.BytesToHash([]byte{0x03, 0x14})
+
+	// Create the corresponding receipts
+	receipts := Receipts{
+		&Receipt{
+			Type:              DepositTxType,
+			PostState:         common.Hash{5}.Bytes(),
+			CumulativeGasUsed: 50 + 15,
+			Logs: []*Log{
+				{
+					Address: common.BytesToAddress([]byte{0x33}),
+					// derived fields:
+					BlockNumber: blockNumber.Uint64(),
+					TxHash:      txs[0].Hash(),
+					TxIndex:     0,
+					BlockHash:   blockHash,
+					Index:       0,
+				},
+				{
+					Address: common.BytesToAddress([]byte{0x03, 0x33}),
+					// derived fields:
+					BlockNumber: blockNumber.Uint64(),
+					TxHash:      txs[0].Hash(),
+					TxIndex:     0,
+					BlockHash:   blockHash,
+					Index:       1,
+				},
+			},
+			TxHash:            txs[0].Hash(),
+			ContractAddress:   common.HexToAddress("0x3bb898b4bbe24f68a4e9be46cfe72d1787fd74f4"),
+			GasUsed:           65,
+			EffectiveGasPrice: big.NewInt(0),
+			BlockHash:         blockHash,
+			BlockNumber:       blockNumber,
+			TransactionIndex:  0,
+			DepositNonce:      &depNonce,
+		},
+		&Receipt{
+			Type:              DynamicFeeTxType,
+			PostState:         common.Hash{4}.Bytes(),
+			CumulativeGasUsed: 10,
+			Logs:              []*Log{},
+			// derived fields:
+			TxHash:            txs[1].Hash(),
+			GasUsed:           18446744073709551561,
+			EffectiveGasPrice: big.NewInt(1044),
+			BlockHash:         blockHash,
+			BlockNumber:       blockNumber,
+			TransactionIndex:  1,
+			L1GasPrice:        big.NewInt(5000),
+			L1GasUsed:         big.NewInt(3976),
+			L1Fee:             big.NewInt(39760000),
+			FeeScalar:         big.NewFloat(2),
+		},
+	}
+
+	// Re-derive receipts.
+	basefee := big.NewInt(1000)
+	derivedReceipts := clearComputedFieldsOnReceipts(receipts)
+	err := Receipts(derivedReceipts).DeriveFields(params.OptimismTestConfig, blockHash, blockNumber.Uint64(), 0, basefee, nil, txs)
+	if err != nil {
+		t.Fatalf("DeriveFields(...) = %v, want <nil>", err)
+	}
+
+	// Check diff of receipts against derivedReceipts.
+	r1, err := json.MarshalIndent(receipts, "", "  ")
+	if err != nil {
+		t.Fatal("error marshaling input receipts:", err)
+	}
+	r2, err := json.MarshalIndent(derivedReceipts, "", "  ")
+	if err != nil {
+		t.Fatal("error marshaling derived receipts:", err)
+	}
+	d := diff.Diff(string(r1), string(r2))
+	if d != "" {
+		t.Fatal("receipts differ:", d)
+	}
+
+	// Check that we preserved the invariant: l1Fee = l1GasPrice * l1GasUsed * l1FeeScalar
+	// but with more difficult int math...
+	l2Rcpt := derivedReceipts[1]
+	l1GasCost := new(big.Int).Mul(l2Rcpt.L1GasPrice, l2Rcpt.L1GasUsed)
+	l1Fee := new(big.Float).Mul(new(big.Float).SetInt(l1GasCost), l2Rcpt.FeeScalar)
+	require.Equal(t, new(big.Float).SetInt(l2Rcpt.L1Fee), l1Fee)
+}
+
 func TestBedrockDepositReceiptUnchanged(t *testing.T) {
 	expectedRlp := common.FromHex("7EF90156A003000000000000000000000000000000000000000000000000000000000000000AB9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000F0D7940000000000000000000000000000000000000033C001D7940000000000000000000000000000000000000333C002")
 	// Deposit receipt with no nonce
@@ -504,40 +822,53 @@ func TestBedrockDepositReceiptUnchanged(t *testing.T) {
 	require.EqualValues(t, receipt.Logs, parsed.Logs)
 	// And still shouldn't have a nonce
 	require.Nil(t, parsed.DepositNonce)
+	// ..or a deposit nonce
+	require.Nil(t, parsed.DepositReceiptVersion)
 }
 
-func clearComputedFieldsOnReceipts(receipts []*Receipt) []*Receipt {
-	r := make([]*Receipt, len(receipts))
-	for i, receipt := range receipts {
-		r[i] = clearComputedFieldsOnReceipt(receipt)
-	}
-	return r
-}
+// Regolith introduced an inconsistency in behavior between EncodeIndex and MarshalBinary for a
+// deposit transaction receipt. TestReceiptEncodeIndexBugIsEnshrined makes sure this difference is
+// preserved for backwards compatibility purposes, but also that there is no discrepancy for the
+// post-Canyon encoding.
+func TestReceiptEncodeIndexBugIsEnshrined(t *testing.T) {
+	// Check that a post-Regolith, pre-Canyon receipt produces the expected difference between
+	// EncodeIndex and MarshalBinary.
+	buf := new(bytes.Buffer)
+	receipts := Receipts{depositReceiptWithNonce}
+	receipts.EncodeIndex(0, buf)
+	indexBytes := buf.Bytes()
 
-func clearComputedFieldsOnReceipt(receipt *Receipt) *Receipt {
-	cpy := *receipt
-	cpy.TxHash = common.Hash{0xff, 0xff, 0x11}
-	cpy.BlockHash = common.Hash{0xff, 0xff, 0x22}
-	cpy.BlockNumber = big.NewInt(math.MaxUint32)
-	cpy.TransactionIndex = math.MaxUint32
-	cpy.ContractAddress = common.Address{0xff, 0xff, 0x33}
-	cpy.GasUsed = 0xffffffff
-	cpy.Logs = clearComputedFieldsOnLogs(receipt.Logs)
-	return &cpy
-}
+	regularBytes, _ := receipts[0].MarshalBinary()
 
-func clearComputedFieldsOnLogs(logs []*Log) []*Log {
-	l := make([]*Log, len(logs))
-	for i, log := range logs {
-		cpy := *log
-		cpy.BlockNumber = math.MaxUint32
-		cpy.BlockHash = common.Hash{}
-		cpy.TxHash = common.Hash{}
-		cpy.TxIndex = math.MaxUint32
-		cpy.Index = math.MaxUint32
-		l[i] = &cpy
-	}
-	return l
+	require.NotEqual(t, indexBytes, regularBytes)
+
+	// Confirm the buggy encoding is as expected, which means it should encode as if it had no
+	// nonce specified (like that of a non-deposit receipt, whose encoding would differ only in the
+	// type byte).
+	buf.Reset()
+	tempReceipt := *depositReceiptWithNonce
+	tempReceipt.Type = eip1559Receipt.Type
+	buggyBytes, _ := tempReceipt.MarshalBinary()
+
+	require.Equal(t, indexBytes[1:], buggyBytes[1:])
+
+	// check that the post-Canyon encoding has no differences between EncodeIndex and
+	// MarshalBinary.
+	buf.Reset()
+	receipts = Receipts{depositReceiptWithNonceAndVersion}
+	receipts.EncodeIndex(0, buf)
+	indexBytes = buf.Bytes()
+
+	regularBytes, _ = receipts[0].MarshalBinary()
+
+	require.Equal(t, indexBytes, regularBytes)
+
+	// Check that bumping the nonce post-canyon changes the hash
+	bumpedReceipt := *depositReceiptWithNonceAndVersion
+	bumpedNonce := nonce + 1
+	bumpedReceipt.DepositNonce = &bumpedNonce
+	bumpedBytes, _ := bumpedReceipt.MarshalBinary()
+	require.NotEqual(t, regularBytes, bumpedBytes)
 }
 
 func TestRoundTripReceipt(t *testing.T) {
@@ -550,6 +881,7 @@ func TestRoundTripReceipt(t *testing.T) {
 		{name: "EIP1559", rcpt: eip1559Receipt},
 		{name: "DepositNoNonce", rcpt: depositReceiptNoNonce},
 		{name: "DepositWithNonce", rcpt: depositReceiptWithNonce},
+		{name: "DepositWithNonceAndVersion", rcpt: depositReceiptWithNonceAndVersion},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -560,6 +892,8 @@ func TestRoundTripReceipt(t *testing.T) {
 			err = d.UnmarshalBinary(data)
 			require.NoError(t, err)
 			require.Equal(t, test.rcpt, d)
+			require.Equal(t, test.rcpt.DepositNonce, d.DepositNonce)
+			require.Equal(t, test.rcpt.DepositReceiptVersion, d.DepositReceiptVersion)
 		})
 
 		t.Run(fmt.Sprintf("%sRejectExtraData", test.name), func(t *testing.T) {
@@ -583,6 +917,7 @@ func TestRoundTripReceiptForStorage(t *testing.T) {
 		{name: "EIP1559", rcpt: eip1559Receipt},
 		{name: "DepositNoNonce", rcpt: depositReceiptNoNonce},
 		{name: "DepositWithNonce", rcpt: depositReceiptWithNonce},
+		{name: "DepositWithNonceAndVersion", rcpt: depositReceiptWithNonceAndVersion},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -597,6 +932,7 @@ func TestRoundTripReceiptForStorage(t *testing.T) {
 			require.Equal(t, test.rcpt.CumulativeGasUsed, d.CumulativeGasUsed)
 			require.Equal(t, test.rcpt.Logs, d.Logs)
 			require.Equal(t, test.rcpt.DepositNonce, d.DepositNonce)
+			require.Equal(t, test.rcpt.DepositReceiptVersion, d.DepositReceiptVersion)
 		})
 	}
 }

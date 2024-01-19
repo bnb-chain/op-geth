@@ -87,7 +87,7 @@ func TestBodyStorage(t *testing.T) {
 	WriteBody(db, hash, 0, body)
 	if entry := ReadBody(db, hash, 0); entry == nil {
 		t.Fatalf("Stored body not found")
-	} else if types.DeriveSha(types.Transactions(entry.Transactions), newHasher()) != types.DeriveSha(types.Transactions(body.Transactions), newHasher()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
+	} else if types.DeriveSha(types.Transactions(entry.Transactions), newTestHasher()) != types.DeriveSha(types.Transactions(body.Transactions), newTestHasher()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
 	if entry := ReadBodyRLP(db, hash, 0); entry == nil {
@@ -141,7 +141,7 @@ func TestBlockStorage(t *testing.T) {
 	}
 	if entry := ReadBody(db, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored body not found")
-	} else if types.DeriveSha(types.Transactions(entry.Transactions), newHasher()) != types.DeriveSha(block.Transactions(), newHasher()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(block.Uncles()) {
+	} else if types.DeriveSha(types.Transactions(entry.Transactions), newTestHasher()) != types.DeriveSha(block.Transactions(), newTestHasher()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(block.Uncles()) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
 	}
 	// Delete the block and verify the execution
@@ -384,7 +384,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	// Check that no receipt entries are in a pristine database
 	hash := header.Hash()
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) != 0 {
+	if rs := ReadReceipts(db, hash, 0, 0, params.TestChainConfig); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
@@ -395,7 +395,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 
 	// Insert the receipt slice into the database and check presence
 	WriteReceipts(db, hash, 0, receipts)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) == 0 {
+	if rs := ReadReceipts(db, hash, 0, 0, params.TestChainConfig); len(rs) == 0 {
 		t.Fatalf("no receipts returned")
 	} else {
 		if err := checkReceiptsRLP(rs, receipts); err != nil {
@@ -404,7 +404,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	}
 	// Delete the body and ensure that the receipts are no longer returned (metadata can't be recomputed)
 	DeleteBody(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); rs != nil {
+	if rs := ReadReceipts(db, hash, 0, 0, params.TestChainConfig); rs != nil {
 		t.Fatalf("receipts returned when body was deleted: %v", rs)
 	}
 	// Ensure that receipts without metadata can be returned without the block body too
@@ -415,7 +415,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	WriteBody(db, hash, 0, body)
 
 	DeleteReceipts(db, hash, 0)
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) != 0 {
+	if rs := ReadReceipts(db, hash, 0, 0, params.TestChainConfig); len(rs) != 0 {
 		t.Fatalf("deleted receipts returned: %v", rs)
 	}
 }
@@ -443,12 +443,12 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 func TestAncientStorage(t *testing.T) {
 	// Freezer style fast import the chain.
 	frdir := t.TempDir()
-
 	db, err := NewDatabaseWithFreezer(NewMemoryDatabase(), frdir, "", false)
 	if err != nil {
 		t.Fatalf("failed to create database with ancient backend")
 	}
 	defer db.Close()
+
 	// Create a test block
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:      big.NewInt(0),
@@ -702,42 +702,60 @@ func TestReadLogs(t *testing.T) {
 	// Create a live block since we need metadata to reconstruct the receipt
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), big.NewInt(1), 1, big.NewInt(1), nil)
 	tx2 := types.NewTransaction(2, common.HexToAddress("0x2"), big.NewInt(2), 2, big.NewInt(2), nil)
+	tx3 := types.NewTransaction(3, common.HexToAddress("0x3"), big.NewInt(3), 3, big.NewInt(3), nil)
 
-	body := &types.Body{Transactions: types.Transactions{tx1, tx2}}
+	body := &types.Body{Transactions: types.Transactions{tx1, tx2, tx3}}
 
-	// Create the two receipts to manage afterwards
+	// Create the three receipts to manage afterwards
 	depositNonce := uint64(math.MaxUint64)
-	receipt1 := &types.Receipt{
+	depositReceipt := types.Receipt{
 		Status:            types.ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
 		Logs: []*types.Log{
 			{Address: common.BytesToAddress([]byte{0x11})},
 			{Address: common.BytesToAddress([]byte{0x01, 0x11})},
 		},
-		TxHash:          tx1.Hash(),
-		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
-		GasUsed:         111111,
-		DepositNonce:    &depositNonce,
+		TxHash:                tx1.Hash(),
+		ContractAddress:       common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+		GasUsed:               111111,
+		DepositNonce:          &depositNonce,
+		DepositReceiptVersion: nil,
 	}
-	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
+	depositReceipt.Bloom = types.CreateBloom(types.Receipts{&depositReceipt})
 
-	receipt2 := &types.Receipt{
-		PostState:         common.Hash{2}.Bytes(),
+	receiptVersion := types.CanyonDepositReceiptVersion
+	versionedDepositReceipt := types.Receipt{
+		Status:            types.ReceiptStatusFailed,
 		CumulativeGasUsed: 2,
 		Logs: []*types.Log{
 			{Address: common.BytesToAddress([]byte{0x22})},
-			{Address: common.BytesToAddress([]byte{0x02, 0x22})},
+			{Address: common.BytesToAddress([]byte{0x01, 0x11})},
 		},
-		TxHash:          tx2.Hash(),
-		ContractAddress: common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
-		GasUsed:         222222,
+		TxHash:                tx2.Hash(),
+		ContractAddress:       common.BytesToAddress([]byte{0x02, 0x22, 0x22}),
+		GasUsed:               222222,
+		DepositNonce:          &depositNonce,
+		DepositReceiptVersion: &receiptVersion,
 	}
-	receipt2.Bloom = types.CreateBloom(types.Receipts{receipt2})
-	receipts := []*types.Receipt{receipt1, receipt2}
+	versionedDepositReceipt.Bloom = types.CreateBloom(types.Receipts{&versionedDepositReceipt})
+
+	receipt := types.Receipt{
+		PostState:         common.Hash{3}.Bytes(),
+		CumulativeGasUsed: 3,
+		Logs: []*types.Log{
+			{Address: common.BytesToAddress([]byte{0x33})},
+			{Address: common.BytesToAddress([]byte{0x03, 0x33})},
+		},
+		TxHash:          tx3.Hash(),
+		ContractAddress: common.BytesToAddress([]byte{0x03, 0x33, 0x33}),
+		GasUsed:         333333,
+	}
+	receipt.Bloom = types.CreateBloom(types.Receipts{&receipt})
+	receipts := []*types.Receipt{&receipt, &depositReceipt, &versionedDepositReceipt}
 
 	hash := common.BytesToHash([]byte{0x03, 0x14})
 	// Check that no receipt entries are in a pristine database
-	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) != 0 {
+	if rs := ReadReceipts(db, hash, 0, 0, params.TestChainConfig); len(rs) != 0 {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
@@ -746,18 +764,17 @@ func TestReadLogs(t *testing.T) {
 	// Insert the receipt slice into the database and check presence
 	WriteReceipts(db, hash, 0, receipts)
 
-	logs := ReadLogs(db, hash, 0, params.TestChainConfig)
+	logs := ReadLogs(db, hash, 0)
 	if len(logs) == 0 {
 		t.Fatalf("no logs returned")
 	}
-	if have, want := len(logs), 2; have != want {
+	if have, want := len(logs), 3; have != want {
 		t.Fatalf("unexpected number of logs returned, have %d want %d", have, want)
 	}
-	if have, want := len(logs[0]), 2; have != want {
-		t.Fatalf("unexpected number of logs[0] returned, have %d want %d", have, want)
-	}
-	if have, want := len(logs[1]), 2; have != want {
-		t.Fatalf("unexpected number of logs[1] returned, have %d want %d", have, want)
+	for i := range logs {
+		if have, want := len(logs[i]), 2; have != want {
+			t.Fatalf("unexpected number of logs[%d] returned, have %d want %d", i, have, want)
+		}
 	}
 
 	for i, pr := range receipts {

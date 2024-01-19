@@ -608,8 +608,3 @@ func (t *Trie) Reset() {
 	t.unhashed = 0
 	t.tracer.reset()
 }
-
-// Size returns the number of nodes in the trie.
-func (t *Trie) Size() int {
-	return estimateSize(t.root)
-}

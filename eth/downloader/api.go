@@ -21,7 +21,6 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/rpc"
 )
@@ -99,7 +98,7 @@ func (api *DownloaderAPI) Syncing(ctx context.Context) (*rpc.Subscription, error
 
 	rpcSub := notifier.CreateSubscription()
 
-	gopool.Submit(func() {
+	go func() {
 		statuses := make(chan interface{})
 		sub := api.SubscribeSyncStatus(statuses)
 
@@ -115,7 +114,7 @@ func (api *DownloaderAPI) Syncing(ctx context.Context) (*rpc.Subscription, error
 				return
 			}
 		}
-	})
+	}()
 
 	return rpcSub, nil
 }

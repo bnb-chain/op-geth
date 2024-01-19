@@ -176,7 +176,6 @@ type newPayloadResult struct {
 	err   error
 	block *types.Block
 	fees  *big.Int
-	env   *environment
 }
 
 // getWorkReq represents a request for getting a new sealing work with provided parameters.
@@ -199,7 +198,6 @@ type worker struct {
 	engine      consensus.Engine
 	eth         Backend
 	chain       *core.BlockChain
-	prefetcher  core.Prefetcher
 
 	// Feeds
 	pendingLogsFeed event.Feed
@@ -281,7 +279,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		engine:             engine,
 		eth:                eth,
 		chain:              eth.BlockChain(),
-		prefetcher:         core.NewStatePrefetcher(chainConfig, eth.BlockChain(), engine),
 		mux:                mux,
 		isLocalBlock:       isLocalBlock,
 		localUncles:        make(map[common.Hash]*types.Block),
@@ -327,9 +324,8 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	}
 	worker.newpayloadTimeout = newpayloadTimeout
 
-	worker.wg.Add(5)
+	worker.wg.Add(4)
 	go worker.mainLoop()
-	go worker.opLoop()
 	go worker.newWorkLoop(recommit)
 	go worker.resultLoop()
 	go worker.taskLoop()
@@ -388,9 +384,6 @@ func (w *worker) enablePreseal() {
 
 // pending returns the pending state and corresponding block.
 func (w *worker) pending() (*types.Block, *state.StateDB) {
-	if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
-		return nil, nil // when not computing the pending block, there is never a pending state
-	}
 	// return a snapshot to avoid contention on currentMu mutex
 	w.snapshotMu.RLock()
 	defer w.snapshotMu.RUnlock()
@@ -402,12 +395,6 @@ func (w *worker) pending() (*types.Block, *state.StateDB) {
 
 // pendingBlock returns pending block.
 func (w *worker) pendingBlock() *types.Block {
-	if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
-		// For compatibility when not computing a pending block, we serve the latest block as "pending"
-		headHeader := w.eth.BlockChain().CurrentHeader()
-		headBlock := w.eth.BlockChain().GetBlock(headHeader.Hash(), headHeader.Number.Uint64())
-		return headBlock
-	}
 	// return a snapshot to avoid contention on currentMu mutex
 	w.snapshotMu.RLock()
 	defer w.snapshotMu.RUnlock()
@@ -416,9 +403,6 @@ func (w *worker) pendingBlock() *types.Block {
 
 // pendingBlockAndReceipts returns pending block and corresponding receipts.
 func (w *worker) pendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
-		return nil, nil // when not computing the pending block, there are no pending receipts, and thus no pending logs
-	}
 	// return a snapshot to avoid contention on currentMu mutex
 	w.snapshotMu.RLock()
 	defer w.snapshotMu.RUnlock()
@@ -474,19 +458,6 @@ func recalcRecommit(minRecommit, prev time.Duration, target float64, inc bool) t
 // newWorkLoop is a standalone goroutine to submit new sealing work upon received events.
 func (w *worker) newWorkLoop(recommit time.Duration) {
 	defer w.wg.Done()
-	if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
-		for { // do not update the pending-block, instead drain work without doing it, to keep producers from blocking.
-			select {
-			case <-w.startCh:
-			case <-w.chainHeadCh:
-			case <-w.resubmitIntervalCh:
-			case <-w.resubmitAdjustCh:
-			case <-w.exitCh:
-				return
-			}
-		}
-	}
-
 	var (
 		interrupt   *int32
 		minRecommit = recommit // minimal resubmit interval specified by user.
@@ -582,28 +553,6 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 	}
 }
 
-// opLoop is responsible for generating and submitting sealing work based on
-// the received event(building_payload).
-func (w *worker) opLoop() {
-	defer w.wg.Done()
-
-	for {
-		select {
-		case req := <-w.getWorkCh:
-			block, fees, env, err := w.generateWork(req.params)
-			req.result <- &newPayloadResult{
-				err:   err,
-				block: block,
-				fees:  fees,
-				env:   env,
-			}
-			// System stopped
-		case <-w.exitCh:
-			return
-		}
-	}
-}
-
 // mainLoop is responsible for generating and submitting sealing work based on
 // the received event. It can support two modes: automatically generate task and
 // submit it or return task according to given parameters for various proposes.
@@ -626,6 +575,13 @@ func (w *worker) mainLoop() {
 		case req := <-w.newWorkCh:
 			w.commitWork(req.interrupt, req.noempty, req.timestamp)
 
+		case req := <-w.getWorkCh:
+			block, fees, err := w.generateWork(req.params)
+			req.result <- &newPayloadResult{
+				err:   err,
+				block: block,
+				fees:  fees,
+			}
 		case ev := <-w.chainSideCh:
 			// Short circuit for duplicate side blocks
 			if _, exist := w.localUncles[ev.Block.Hash()]; exist {
@@ -664,9 +620,6 @@ func (w *worker) mainLoop() {
 			}
 
 		case ev := <-w.txsCh:
-			if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
-				continue // don't update the pending-block snapshot if we are not computing the pending block
-			}
 			// Apply transactions to the pending state if we're not sealing
 			//
 			// Note all transactions received may not be continuous with transactions
@@ -855,7 +808,6 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 	if err != nil {
 		return nil, err
 	}
-	state.EnableWriteOnSharedStorage()
 	state.StartPrefetcher("miner")
 
 	// Note the passed coinbase may be different with header.Coinbase.
@@ -943,14 +895,6 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 	}
 	var coalescedLogs []*types.Log
 
-	stopPrefetchCh := make(chan struct{})
-	defer close(stopPrefetchCh)
-	//prefetch txs from all pending txs
-	txsPrefetch := txs.Copy()
-	tx := txsPrefetch.Peek()
-	txCurr := &tx
-	w.prefetcher.PrefetchMining(txsPrefetch, env.header, env.gasPool.Gas(), env.state.CopyDoPrefetch(), *w.chain.GetVMConfig(), stopPrefetchCh, txCurr)
-
 	for {
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
@@ -964,7 +908,7 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 			break
 		}
 		// Retrieve the next transaction and abort if all done.
-		tx = txs.Peek()
+		tx := txs.Peek()
 		if tx == nil {
 			break
 		}
@@ -1170,16 +1114,12 @@ func (w *worker) fillTransactions(interrupt *int32, env *environment) error {
 }
 
 // generateWork generates a sealing block based on the given parameters.
-func (w *worker) generateWork(genParams *generateParams) (*types.Block, *big.Int, *environment, error) {
+func (w *worker) generateWork(genParams *generateParams) (*types.Block, *big.Int, error) {
 	work, err := w.prepareWork(genParams)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	defer work.discard()
-
-	if w.chainConfig.PreContractForkBlock != nil && work.header.Number.Cmp(w.chainConfig.PreContractForkBlock) == 0 {
-		misc.ApplyPreContractHardFork(work.state)
-	}
 	if work.gasPool == nil {
 		work.gasPool = new(core.GasPool).AddGas(work.header.GasLimit)
 	}
@@ -1189,7 +1129,7 @@ func (w *worker) generateWork(genParams *generateParams) (*types.Block, *big.Int
 		work.state.SetTxContext(tx.Hash(), work.tcount)
 		_, err := w.commitTransaction(work, tx)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to force-include tx: %s type: %d sender: %s nonce: %d, err: %w", tx.Hash(), tx.Type(), from, tx.Nonce(), err)
+			return nil, nil, fmt.Errorf("failed to force-include tx: %s type: %d sender: %s nonce: %d, err: %w", tx.Hash(), tx.Type(), from, tx.Nonce(), err)
 		}
 		work.tcount++
 	}
@@ -1209,9 +1149,9 @@ func (w *worker) generateWork(genParams *generateParams) (*types.Block, *big.Int
 	}
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, work.unclelist(), work.receipts, genParams.withdrawals)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-	return block, totalFees(block, work.receipts), work, nil
+	return block, totalFees(block, work.receipts), nil
 }
 
 // commitWork generates several new sealing tasks based on the parent block
@@ -1324,7 +1264,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 // getSealingBlock generates the sealing block based on the given parameters.
 // The generation result will be passed back via the given channel no matter
 // the generation itself succeeds or not.
-func (w *worker) getSealingBlock(parent common.Hash, timestamp uint64, coinbase common.Address, random common.Hash, withdrawals types.Withdrawals, noTxs bool, transactions types.Transactions, gasLimit *uint64) (*types.Block, *big.Int, *environment, error) {
+func (w *worker) getSealingBlock(parent common.Hash, timestamp uint64, coinbase common.Address, random common.Hash, withdrawals types.Withdrawals, noTxs bool, transactions types.Transactions, gasLimit *uint64) (*types.Block, *big.Int, error) {
 	req := &getWorkReq{
 		params: &generateParams{
 			timestamp:   timestamp,
@@ -1344,11 +1284,11 @@ func (w *worker) getSealingBlock(parent common.Hash, timestamp uint64, coinbase 
 	case w.getWorkCh <- req:
 		result := <-req.result
 		if result.err != nil {
-			return nil, nil, nil, result.err
+			return nil, nil, result.err
 		}
-		return result.block, result.fees, result.env, nil
+		return result.block, result.fees, nil
 	case <-w.exitCh:
-		return nil, nil, nil, errors.New("miner closed")
+		return nil, nil, errors.New("miner closed")
 	}
 }
 

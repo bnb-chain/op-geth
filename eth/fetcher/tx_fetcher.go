@@ -22,12 +22,10 @@ import (
 	"fmt"
 	mrand "math/rand"
 	"sort"
-	"strings"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
-	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -54,9 +52,6 @@ const (
 	// is used to track recent transactions that have been dropped so we don't
 	// re-request them.
 	maxTxUnderpricedSetSize = 32768
-
-	// maxTxUnderpricedTimeout is the max time a transaction should be stuck in the underpriced set.
-	maxTxUnderpricedTimeout = 5 * time.Minute
 
 	// txArriveTimeout is the time allowance before an announced transaction is
 	// explicitly requested.
@@ -153,7 +148,7 @@ type TxFetcher struct {
 	drop    chan *txDrop
 	quit    chan struct{}
 
-	underpriced *lru.Cache[common.Hash, time.Time] // Transactions discarded as too cheap (don't re-fetch)
+	underpriced mapset.Set[common.Hash] // Transactions discarded as too cheap (don't re-fetch)
 
 	// Stage 1: Waiting lists for newly discovered transactions that might be
 	// broadcast without needing explicit request/reply round trips.
@@ -207,7 +202,7 @@ func NewTxFetcherForTests(
 		fetching:    make(map[common.Hash]string),
 		requests:    make(map[string]*txRequest),
 		alternates:  make(map[common.Hash]map[string]struct{}),
-		underpriced: lru.NewCache[common.Hash, time.Time](maxTxUnderpricedSetSize),
+		underpriced: mapset.NewSet[common.Hash](),
 		hasTx:       hasTx,
 		addTxs:      addTxs,
 		fetchTxs:    fetchTxs,
@@ -228,17 +223,16 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	// still valuable to check here because it runs concurrent  to the internal
 	// loop, so anything caught here is time saved internally.
 	var (
-		unknowns    = make([]common.Hash, 0, len(hashes))
-		duplicate   int64
-		underpriced int64
+		unknowns               = make([]common.Hash, 0, len(hashes))
+		duplicate, underpriced int64
 	)
 	for _, hash := range hashes {
 		switch {
 		case f.hasTx(hash):
 			duplicate++
-		case f.isKnownUnderpriced(hash):
+
+		case f.underpriced.Contains(hash):
 			underpriced++
-			log.Info("announced transaction is underpriced", "hash", hash.String())
 
 		default:
 			unknowns = append(unknowns, hash)
@@ -251,23 +245,16 @@ func (f *TxFetcher) Notify(peer string, hashes []common.Hash) error {
 	if len(unknowns) == 0 {
 		return nil
 	}
-	announce := &txAnnounce{origin: peer, hashes: unknowns}
+	announce := &txAnnounce{
+		origin: peer,
+		hashes: unknowns,
+	}
 	select {
 	case f.notify <- announce:
 		return nil
 	case <-f.quit:
 		return errTerminated
 	}
-}
-
-// isKnownUnderpriced reports whether a transaction hash was recently found to be underpriced.
-func (f *TxFetcher) isKnownUnderpriced(hash common.Hash) bool {
-	prevTime, ok := f.underpriced.Peek(hash)
-	if ok && prevTime.Before(time.Now().Add(-maxTxUnderpricedTimeout)) {
-		f.underpriced.Remove(hash)
-		return false
-	}
-	return ok
 }
 
 // Enqueue imports a batch of received transaction into the transaction pool
@@ -312,7 +299,10 @@ func (f *TxFetcher) Enqueue(peer string, txs []*types.Transaction, direct bool) 
 			// Avoid re-request this transaction when we receive another
 			// announcement.
 			if errors.Is(err, txpool.ErrUnderpriced) || errors.Is(err, txpool.ErrReplaceUnderpriced) {
-				f.underpriced.Add(batch[j].Hash(), batch[j].Time())
+				for f.underpriced.Cardinality() >= maxTxUnderpricedSetSize {
+					f.underpriced.Pop()
+				}
+				f.underpriced.Add(batch[j].Hash())
 			}
 			// Track a few interesting failure types
 			switch {
@@ -326,7 +316,6 @@ func (f *TxFetcher) Enqueue(peer string, txs []*types.Transaction, direct bool) 
 
 			default:
 				otherreject++
-				log.Warn("Peer's transaction rejected", "peer", peer, "txHash", batch[j].Hash().String(), "err", err.Error())
 			}
 			added = append(added, batch[j].Hash())
 		}
@@ -393,13 +382,11 @@ func (f *TxFetcher) loop() {
 				// check. Should be fine as the limit is in the thousands and the
 				// request size in the hundreds.
 				txAnnounceDOSMeter.Mark(int64(len(ann.hashes)))
-				log.Info("announced transaction DOS overflow", "hashes", joinHashes(ann.hashes), "num", len(ann.hashes))
 				break
 			}
 			want := used + len(ann.hashes)
 			if want > maxTxAnnounces {
 				txAnnounceDOSMeter.Mark(int64(want - maxTxAnnounces))
-				log.Info("announced transaction DOS overflow", "hashes", joinHashes(ann.hashes[want-maxTxAnnounces:]), "num", len(ann.hashes))
 				ann.hashes = ann.hashes[:want-maxTxAnnounces]
 			}
 			// All is well, schedule the remainder of the transactions
@@ -511,7 +498,6 @@ func (f *TxFetcher) loop() {
 			for peer, req := range f.requests {
 				if time.Duration(f.clock.Now()-req.time)+txGatherSlack > txFetchTimeout {
 					txRequestTimeoutMeter.Mark(int64(len(req.hashes)))
-					log.Info("announced transaction request timeout", "hashes", joinHashes(req.hashes), "num", len(req.hashes))
 
 					// Reschedule all the not-yet-delivered fetches to alternate peers
 					for _, hash := range req.hashes {
@@ -826,15 +812,14 @@ func (f *TxFetcher) scheduleFetches(timer *mclock.Timer, timeout chan struct{}, 
 			f.requests[peer] = &txRequest{hashes: hashes, time: f.clock.Now()}
 			txRequestOutMeter.Mark(int64(len(hashes)))
 
-			gopool.Submit(func() {
+			go func(peer string, hashes []common.Hash) {
 				// Try to fetch the transactions, but in case of a request
 				// failure (e.g. peer disconnected), reschedule the hashes.
 				if err := f.fetchTxs(peer, hashes); err != nil {
 					txRequestFailMeter.Mark(int64(len(hashes)))
-					log.Info("announced transaction request failed", "hashes", joinHashes(hashes), "num", len(hashes))
 					f.Drop(peer)
 				}
-			})
+			}(peer, hashes)
 		}
 	})
 	// If a new request was fired, schedule a timeout timer
@@ -923,20 +908,4 @@ func rotateHashes(slice []common.Hash, n int) {
 	for i := 0; i < len(orig); i++ {
 		slice[i] = orig[(i+n)%len(orig)]
 	}
-}
-
-// joinHashes concat hashes into string, for debugging logs; 1024 hashes at most, to avoid
-// too much cost of logging
-func joinHashes(hashes []common.Hash) string {
-	num := len(hashes)
-	if num > 1024 {
-		num = 1024
-	}
-	strs := make([]string, num)
-	for i, h := range hashes {
-		if i < num {
-			strs[i] = h.String()
-		}
-	}
-	return strings.Join(strs, ",")
 }

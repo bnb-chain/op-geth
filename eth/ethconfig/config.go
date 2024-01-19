@@ -83,8 +83,6 @@ var Defaults = Config{
 	TrieCleanCacheRejournal: 60 * time.Minute,
 	TrieDirtyCache:          256,
 	TrieTimeout:             60 * time.Minute,
-	TriesInMemory:           128,
-	TrieCommitInterval:      0,
 	SnapshotCache:           102,
 	FilterLogCacheSize:      32,
 	Miner:                   miner.DefaultConfig,
@@ -168,8 +166,6 @@ type Config struct {
 	TrieCleanCacheRejournal time.Duration `toml:",omitempty"` // Time interval to regenerate the journal for clean cache
 	TrieDirtyCache          int
 	TrieTimeout             time.Duration
-	TriesInMemory           uint64 // How many tries keeps in memory
-	TrieCommitInterval      uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 	SnapshotCache           int
 	Preimages               bool
 

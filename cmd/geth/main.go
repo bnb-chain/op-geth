@@ -88,13 +88,10 @@ var (
 		utils.TxPoolAccountQueueFlag,
 		utils.TxPoolGlobalQueueFlag,
 		utils.TxPoolLifetimeFlag,
-		utils.TxPoolReannounceTimeFlag,
-		utils.TxPoolReannounceRemotesFlag,
 		utils.SyncModeFlag,
 		utils.SyncTargetFlag,
 		utils.ExitWhenSyncedFlag,
 		utils.GCModeFlag,
-		utils.TriesInMemoryFlag,
 		utils.SnapshotFlag,
 		utils.TxLookupLimitFlag,
 		utils.LightServeFlag,
@@ -159,7 +156,6 @@ var (
 		utils.RollupHistoricalRPCFlag,
 		utils.RollupHistoricalRPCTimeoutFlag,
 		utils.RollupDisableTxPoolGossipFlag,
-		utils.RollupComputePendingBlock,
 		configFileFlag,
 	}, utils.NetworkFlags, utils.DatabasePathFlags)
 

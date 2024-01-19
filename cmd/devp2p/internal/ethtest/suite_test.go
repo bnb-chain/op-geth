@@ -117,9 +117,7 @@ func setupGeth(stack *node.Node) error {
 		TrieCleanCacheRejournal: 60 * time.Minute,
 		TrieDirtyCache:          16,
 		TrieTimeout:             60 * time.Minute,
-		TriesInMemory:           128,
 		SnapshotCache:           10,
-		Preimages:               true,
 	})
 	if err != nil {
 		return err

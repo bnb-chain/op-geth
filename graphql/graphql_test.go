@@ -345,7 +345,6 @@ func newGQLService(t *testing.T, stack *node.Node, gspec *core.Genesis, genBlock
 		TrieCleanCacheRejournal: 60 * time.Minute,
 		TrieDirtyCache:          5,
 		TrieTimeout:             60 * time.Minute,
-		TriesInMemory:           128,
 		SnapshotCache:           5,
 	}
 	ethBackend, err := eth.New(stack, ethConf)

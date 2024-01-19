@@ -228,7 +228,6 @@ func startLesService(t *testing.T, genesis *core.Genesis, headers []*types.Heade
 		TrieDirtyCache: 256,
 		TrieCleanCache: 256,
 		LightPeers:     10,
-		TriesInMemory:  128,
 	}
 	lesService, err := les.New(n, ethcfg)
 	if err != nil {

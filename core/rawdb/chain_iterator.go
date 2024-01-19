@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -165,7 +164,7 @@ func iterateTransactions(db ethdb.Database, from uint64, to uint64, reverse bool
 	}
 	go lookup() // start the sequential db accessor
 	for i := 0; i < int(threads); i++ {
-		gopool.Submit(func() { process() })
+		go process()
 	}
 	return hashesCh
 }

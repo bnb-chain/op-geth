@@ -52,9 +52,6 @@ const (
 	// more expensive to propagate; larger transactions also take more resources
 	// to validate whether they fit into the pool or not.
 	txMaxSize = 4 * txSlotSize // 128KB
-
-	// txReannoMaxNum is the maximum number of transactions a reannounce action can include.
-	txReannoMaxNum = 1024
 )
 
 var (
@@ -102,17 +99,9 @@ var (
 var (
 	evictionInterval    = time.Minute     // Time interval to check for evictable transactions
 	statsReportInterval = 8 * time.Second // Time interval to report transaction pool stats
-
-	// L1 Info Gas Overhead is the amount of gas the the L1 info deposit consumes.
-	// It is removed from the tx pool max gas to better indicate that L2 transactions
-	// are not able to consume all of the gas in a L2 block as the L1 info deposit is always present.
-	l1InfoGasOverhead  = uint64(70_000)
-	reannounceInterval = time.Minute // Time interval to check for reannounce transactions
 )
 
 var (
-	staledMeter = metrics.NewRegisteredMeter("txpool/staled/count", nil) // staled transactions
-
 	// Metrics for the pending pool
 	pendingDiscardMeter   = metrics.NewRegisteredMeter("txpool/pending/discard", nil)
 	pendingReplaceMeter   = metrics.NewRegisteredMeter("txpool/pending/replace", nil)
@@ -185,9 +174,7 @@ type Config struct {
 	AccountQueue uint64 // Maximum number of non-executable transaction slots permitted per account
 	GlobalQueue  uint64 // Maximum number of non-executable transaction slots for all accounts
 
-	Lifetime          time.Duration // Maximum amount of time non-executable transaction are queued
-	ReannounceTime    time.Duration // Duration for announcing local pending transactions again
-	ReannounceRemotes bool          // Wether reannounce remote transactions or not
+	Lifetime time.Duration // Maximum amount of time non-executable transaction are queued
 }
 
 // DefaultConfig contains the default configurations for the transaction
@@ -204,8 +191,7 @@ var DefaultConfig = Config{
 	AccountQueue: 64,
 	GlobalQueue:  1024,
 
-	Lifetime:       3 * time.Hour,
-	ReannounceTime: 10 * 365 * 24 * time.Hour,
+	Lifetime: 3 * time.Hour,
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -244,10 +230,6 @@ func (config *Config) sanitize() Config {
 		log.Warn("Sanitizing invalid txpool lifetime", "provided", conf.Lifetime, "updated", DefaultConfig.Lifetime)
 		conf.Lifetime = DefaultConfig.Lifetime
 	}
-	if conf.ReannounceTime < time.Minute {
-		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", time.Minute)
-		conf.ReannounceTime = time.Minute
-	}
 	return conf
 }
 
@@ -259,15 +241,14 @@ func (config *Config) sanitize() Config {
 // current state) and future transactions. Transactions move between those
 // two states over time as they are received and processed.
 type TxPool struct {
-	config       Config
-	chainconfig  *params.ChainConfig
-	chain        blockChain
-	gasPrice     *big.Int
-	txFeed       event.Feed
-	reannoTxFeed event.Feed // Event feed for announcing transactions again
-	scope        event.SubscriptionScope
-	signer       types.Signer
-	mu           sync.RWMutex
+	config      Config
+	chainconfig *params.ChainConfig
+	chain       blockChain
+	gasPrice    *big.Int
+	txFeed      event.Feed
+	scope       event.SubscriptionScope
+	signer      types.Signer
+	mu          sync.RWMutex
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
 	eip2718  bool // Fork indicator whether we are using EIP-2718 type transactions.
@@ -372,16 +353,14 @@ func (pool *TxPool) loop() {
 	var (
 		prevPending, prevQueued, prevStales int
 		// Start the stats reporting and transaction eviction tickers
-		report     = time.NewTicker(statsReportInterval)
-		evict      = time.NewTicker(evictionInterval)
-		reannounce = time.NewTicker(reannounceInterval)
-		journal    = time.NewTicker(pool.config.Rejournal)
+		report  = time.NewTicker(statsReportInterval)
+		evict   = time.NewTicker(evictionInterval)
+		journal = time.NewTicker(pool.config.Rejournal)
 		// Track the previous head headers for transaction reorgs
 		head = pool.chain.CurrentBlock()
 	)
 	defer report.Stop()
 	defer evict.Stop()
-	defer reannounce.Stop()
 	defer journal.Stop()
 
 	// Notify tests that the init phase is done
@@ -431,34 +410,6 @@ func (pool *TxPool) loop() {
 			}
 			pool.mu.Unlock()
 
-		case <-reannounce.C:
-			pool.mu.RLock()
-			reannoTxs := func() []*types.Transaction {
-				txs := make([]*types.Transaction, 0)
-				for addr, list := range pool.pending {
-					if !pool.config.ReannounceRemotes && !pool.locals.contains(addr) {
-						continue
-					}
-
-					for _, tx := range list.Flatten() {
-						// Default ReannounceTime is 10 years, won't announce by default.
-						if time.Since(tx.Time()) < pool.config.ReannounceTime {
-							break
-						}
-						txs = append(txs, tx)
-						if len(txs) >= txReannoMaxNum {
-							return txs
-						}
-					}
-				}
-				return txs
-			}()
-			pool.mu.RUnlock()
-			staledMeter.Mark(int64(len(reannoTxs)))
-			if len(reannoTxs) > 0 {
-				pool.reannoTxFeed.Send(core.ReannoTxsEvent{reannoTxs})
-			}
-
 		// Handle local transaction journal rotation
 		case <-journal.C:
 			if pool.journal != nil {
@@ -491,12 +442,6 @@ func (pool *TxPool) Stop() {
 // starts sending event to the given channel.
 func (pool *TxPool) SubscribeNewTxsEvent(ch chan<- core.NewTxsEvent) event.Subscription {
 	return pool.scope.Track(pool.txFeed.Subscribe(ch))
-}
-
-// SubscribeReannoTxsEvent registers a subscription of ReannoTxsEvent and
-// starts sending event to the given channel.
-func (pool *TxPool) SubscribeReannoTxsEvent(ch chan<- core.ReannoTxsEvent) event.Subscription {
-	return pool.scope.Track(pool.reannoTxFeed.Subscribe(ch))
 }
 
 // GasPrice returns the current gas price enforced by the transaction pool.
@@ -656,68 +601,55 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	// This is for spam protection, not consensus,
 	// as the external engine-API user authenticates deposits.
 	if tx.Type() == types.DepositTxType {
-		meter(TypeNotSupportDeposit).Mark(1)
 		return core.ErrTxTypeNotSupported
 	}
 	// Accept only legacy transactions until EIP-2718/2930 activates.
 	if !pool.eip2718 && tx.Type() != types.LegacyTxType {
-		meter(TypeNotSupport2718).Mark(1)
 		return core.ErrTxTypeNotSupported
 	}
 	// Reject dynamic fee transactions until EIP-1559 activates.
 	if !pool.eip1559 && tx.Type() == types.DynamicFeeTxType {
-		meter(TypeNotSupport1559).Mark(1)
 		return core.ErrTxTypeNotSupported
 	}
 	// Reject transactions over defined size to prevent DOS attacks
 	if tx.Size() > txMaxSize {
-		meter(OversizedData).Mark(1)
 		return ErrOversizedData
 	}
 	// Check whether the init code size has been exceeded.
 	if pool.shanghai && tx.To() == nil && len(tx.Data()) > params.MaxInitCodeSize {
-		meter(MaxInitCodeSizeExceeded).Mark(1)
 		return fmt.Errorf("%w: code size %v limit %v", core.ErrMaxInitCodeSizeExceeded, len(tx.Data()), params.MaxInitCodeSize)
 	}
 	// Transactions can't be negative. This may never happen using RLP decoded
 	// transactions but may occur if you create a transaction using the RPC.
 	if tx.Value().Sign() < 0 {
-		meter(NegativeValue).Mark(1)
 		return ErrNegativeValue
 	}
 	// Ensure the transaction doesn't exceed the current block limit gas.
 	if pool.currentMaxGas < tx.Gas() {
-		meter(GasLimit).Mark(1)
 		return ErrGasLimit
 	}
 	// Sanity check for extremely large numbers
 	if tx.GasFeeCap().BitLen() > 256 {
-		meter(FeeCapVeryHigh).Mark(1)
 		return core.ErrFeeCapVeryHigh
 	}
 	if tx.GasTipCap().BitLen() > 256 {
-		meter(TipVeryHigh).Mark(1)
 		return core.ErrTipVeryHigh
 	}
 	// Ensure gasFeeCap is greater than or equal to gasTipCap.
 	if tx.GasFeeCapIntCmp(tx.GasTipCap()) < 0 {
-		meter(TipAboveFeeCap).Mark(1)
 		return core.ErrTipAboveFeeCap
 	}
 	// Make sure the transaction is signed properly.
 	from, err := types.Sender(pool.signer, tx)
 	if err != nil {
-		meter(InvalidSender).Mark(1)
 		return ErrInvalidSender
 	}
 	// Drop non-local transactions under our own minimal accepted gas price or tip
 	if !local && tx.GasTipCapIntCmp(pool.gasPrice) < 0 {
-		meter(Underpriced).Mark(1)
 		return ErrUnderpriced
 	}
 	// Ensure the transaction adheres to nonce ordering
 	if pool.currentState.GetNonce(from) > tx.Nonce() {
-		meter(NonceTooLow).Mark(1)
 		return core.ErrNonceTooLow
 	}
 	// Transactor should have enough funds to cover the costs
@@ -728,7 +660,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	}
 	balance := pool.currentState.GetBalance(from)
 	if balance.Cmp(cost) < 0 {
-		meter(InsufficientFunds).Mark(1)
 		return core.ErrInsufficientFunds
 	}
 
@@ -746,7 +677,6 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 		}
 		if balance.Cmp(sum) < 0 {
 			log.Trace("Replacing transactions would overdraft", "sender", from, "balance", pool.currentState.GetBalance(from), "required", sum)
-			meter(Overdraft).Mark(1)
 			return ErrOverdraft
 		}
 	}
@@ -754,11 +684,9 @@ func (pool *TxPool) validateTx(tx *types.Transaction, local bool) error {
 	// Ensure the transaction has more gas than the basic tx fee.
 	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, pool.istanbul, pool.shanghai)
 	if err != nil {
-		meter(GasUnitOverflow).Mark(1)
 		return err
 	}
 	if tx.Gas() < intrGas {
-		meter(IntrinsicGas).Mark(1)
 		return core.ErrIntrinsicGas
 	}
 	return nil
@@ -777,7 +705,6 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 	if pool.all.Get(hash) != nil {
 		log.Trace("Discarding already known transaction", "hash", hash)
 		knownTxMeter.Mark(1)
-		meter(AlreadyKnown).Mark(1)
 		return false, ErrAlreadyKnown
 	}
 	// Make the local flag. If it's from local source or it's from the network but
@@ -800,7 +727,6 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		if !isLocal && pool.priced.Underpriced(tx) {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "gasTipCap", tx.GasTipCap(), "gasFeeCap", tx.GasFeeCap())
 			underpricedTxMeter.Mark(1)
-			meter(Underpriced).Mark(1)
 			return false, ErrUnderpriced
 		}
 
@@ -810,7 +736,6 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		// replacements to 25% of the slots
 		if pool.changesSinceReorg > int(pool.config.GlobalSlots/4) {
 			throttleTxMeter.Mark(1)
-			meter(Throttle).Mark(1)
 			return false, ErrTxPoolOverflow
 		}
 
@@ -823,7 +748,6 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		if !isLocal && !success {
 			log.Trace("Discarding overflown transaction", "hash", hash)
 			overflowedTxMeter.Mark(1)
-			meter(Overflow).Mark(1)
 			return false, ErrTxPoolOverflow
 		}
 
@@ -843,7 +767,6 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 					pool.priced.Put(dropTx, false)
 				}
 				log.Trace("Discarding future transaction replacing pending tx", "hash", hash)
-				meter(FutureReplacePending).Mark(1)
 				return false, ErrFutureReplacePending
 			}
 		}
@@ -863,7 +786,6 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		inserted, old := list.Add(tx, pool.config.PriceBump)
 		if !inserted {
 			pendingDiscardMeter.Mark(1)
-			meter(ReplaceUnderpriced).Mark(1)
 			return false, ErrReplaceUnderpriced
 		}
 		// New transaction is better, replace old one
@@ -929,7 +851,6 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction, local boo
 	if !inserted {
 		// An older transaction was better, discard this
 		queuedDiscardMeter.Mark(1)
-		meter(QueuedDiscard).Mark(1)
 		return false, ErrReplaceUnderpriced
 	}
 	// Discard any previous transaction and mark this
@@ -944,7 +865,6 @@ func (pool *TxPool) enqueueTx(hash common.Hash, tx *types.Transaction, local boo
 	// If the transaction isn't in lookup set but it's expected to be there,
 	// show the error log.
 	if pool.all.Get(hash) == nil && !addAll {
-		meter(MissingTransaction).Mark(1)
 		log.Error("Missing transaction in lookup set, please report the issue", "hash", hash)
 	}
 	if addAll {
@@ -1063,7 +983,6 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		if pool.all.Get(tx.Hash()) != nil {
 			errs[i] = ErrAlreadyKnown
 			knownTxMeter.Mark(1)
-			meter(AlreadyKnown).Mark(1)
 			continue
 		}
 		// Exclude transactions with invalid signatures as soon as
@@ -1073,7 +992,6 @@ func (pool *TxPool) addTxs(txs []*types.Transaction, local, sync bool) []error {
 		if err != nil {
 			errs[i] = ErrInvalidSender
 			invalidTxMeter.Mark(1)
-			meter(InvalidSender).Mark(1)
 			continue
 		}
 		// Accumulate all unknown transactions for deeper processing
@@ -1113,10 +1031,10 @@ func (pool *TxPool) addTxsLocked(txs []*types.Transaction, local bool) ([]error,
 		replaced, err := pool.add(tx, local)
 		errs[i] = err
 		if err == nil && !replaced {
-			validTxMeter.Mark(1)
 			dirty.addTx(tx)
 		}
 	}
+	validTxMeter.Mark(int64(len(dirty.accounts)))
 	return errs, dirty
 }
 
@@ -1473,9 +1391,6 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	pool.currentState = statedb
 	pool.pendingNonces = newNoncer(statedb)
 	pool.currentMaxGas = newHead.GasLimit
-	if pool.chainconfig.IsOptimism() {
-		pool.currentMaxGas -= l1InfoGasOverhead
-	}
 
 	costFn := types.NewL1CostFunc(pool.chainconfig, statedb)
 	pool.l1CostFn = func(dataGas types.RollupGasData, isDepositTx bool) *big.Int {
@@ -1539,7 +1454,6 @@ func (pool *TxPool) promoteExecutables(accounts []common.Address) []*types.Trans
 			if pool.promoteTx(addr, hash, tx) {
 				promoted = append(promoted, tx)
 			}
-			log.Trace("Promoted queued transaction", "hash", hash)
 		}
 		log.Trace("Promoted queued transactions", "count", len(promoted))
 		queuedGauge.Dec(int64(len(readies)))

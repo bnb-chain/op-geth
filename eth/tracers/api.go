@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core"
@@ -252,11 +251,11 @@ func (api *API) TraceChain(ctx context.Context, start, end rpc.BlockNumber, conf
 	sub := notifier.CreateSubscription()
 
 	resCh := api.traceChain(from, to, config, notifier.Closed())
-	gopool.Submit(func() {
+	go func() {
 		for result := range resCh {
 			notifier.Notify(sub.ID, result)
 		}
-	})
+	}()
 	return sub, nil
 }
 
@@ -284,7 +283,7 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 	)
 	for th := 0; th < threads; th++ {
 		pend.Add(1)
-		gopool.Submit(func() {
+		go func() {
 			defer pend.Done()
 
 			// Fetch and execute the block trace taskCh
@@ -324,10 +323,10 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 					return
 				}
 			}
-		})
+		}()
 	}
 	// Start a goroutine to feed all the blocks into the tracers
-	gopool.Submit(func() {
+	go func() {
 		var (
 			logged  time.Time
 			begin   = time.Now()
@@ -418,11 +417,11 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 			}
 			traced += uint64(len(txs))
 		}
-	})
+	}()
 
 	// Keep reading the trace results and stream them to result channel.
 	retCh := make(chan *blockTraceResult)
-	gopool.Submit(func() {
+	go func() {
 		defer close(retCh)
 		var (
 			next = start.NumberU64() + 1
@@ -450,7 +449,7 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 				next++
 			}
 		}
-	})
+	}()
 	return retCh
 }
 
@@ -697,7 +696,7 @@ func (api *API) traceBlockParallel(ctx context.Context, block *types.Block, stat
 	jobs := make(chan *txTraceTask, threads)
 	for th := 0; th < threads; th++ {
 		pend.Add(1)
-		gopool.Submit(func() {
+		go func() {
 			defer pend.Done()
 			// Fetch and execute the next transaction trace tasks
 			for task := range jobs {
@@ -716,7 +715,7 @@ func (api *API) traceBlockParallel(ctx context.Context, block *types.Block, stat
 				}
 				results[task.index] = &txTraceResult{Result: res}
 			}
-		})
+		}()
 	}
 
 	// Feed the transactions into the tracers and return
@@ -1022,14 +1021,14 @@ func (api *API) traceTx(ctx context.Context, message *core.Message, txctx *Conte
 		}
 	}
 	deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
-	gopool.Submit(func() {
+	go func() {
 		<-deadlineCtx.Done()
 		if errors.Is(deadlineCtx.Err(), context.DeadlineExceeded) {
 			tracer.Stop(errors.New("execution timeout"))
 			// Stop evm execution. Note cancellation is not necessarily immediate.
 			vmenv.Cancel()
 		}
-	})
+	}()
 	defer cancel()
 
 	// Call Prepare to clear out the statedb access list

@@ -242,11 +242,6 @@ var (
 		Value:    true,
 		Category: flags.EthCategory,
 	}
-	TriesInMemoryFlag = &cli.Uint64Flag{
-		Name:  "triesInMemory",
-		Usage: "The layer of tries trees that keep in memory",
-		Value: 128,
-	}
 	TxLookupLimitFlag = &cli.Uint64Flag{
 		Name:     "txlookuplimit",
 		Usage:    "Number of recent blocks to maintain transactions index for (default = about one year, 0 = entire chain)",
@@ -459,18 +454,6 @@ var (
 		Value:    ethconfig.Defaults.TxPool.Lifetime,
 		Category: flags.TxPoolCategory,
 	}
-	TxPoolReannounceTimeFlag = &cli.DurationFlag{
-		Name:     "txpool.reannouncetime",
-		Usage:    "Duration for announcing local pending transactions again (default = 10 years, minimum = 1 minute)",
-		Value:    ethconfig.Defaults.TxPool.ReannounceTime,
-		Category: flags.TxPoolCategory,
-	}
-	TxPoolReannounceRemotesFlag = &cli.BoolFlag{
-		Name:     "txpool.reannounceremotes",
-		Usage:    "Wether reannnounce remote transactions or not(default = false)",
-		Value:    ethconfig.Defaults.TxPool.ReannounceRemotes,
-		Category: flags.TxPoolCategory,
-	}
 
 	// Performance tuning settings
 	CacheFlag = &cli.IntFlag{
@@ -482,7 +465,7 @@ var (
 	CacheDatabaseFlag = &cli.IntFlag{
 		Name:     "cache.database",
 		Usage:    "Percentage of cache memory allowance to use for database io",
-		Value:    40,
+		Value:    50,
 		Category: flags.PerfCategory,
 	}
 	CacheTrieFlag = &cli.IntFlag{
@@ -958,11 +941,6 @@ var (
 		Usage:    "Disable transaction pool gossip.",
 		Category: flags.RollupCategory,
 	}
-	RollupComputePendingBlock = &cli.BoolFlag{
-		Name:     "rollup.computependingblock",
-		Usage:    "By default the pending block equals the latest block to save resources and not leak txs from the tx-pool, this flag enables computing of the pending block from the tx-pool instead.",
-		Category: flags.RollupCategory,
-	}
 
 	// Metrics flags
 	MetricsEnabledFlag = &cli.BoolFlag{
@@ -1141,13 +1119,7 @@ func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
 // setBootstrapNodes creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.OpBNBMainnetBootnodes
-	if ctx.IsSet(NetworkIdFlag.Name) {
-		networkId := ctx.Uint64(NetworkIdFlag.Name)
-		if networkId == params.OpBNBTestnet {
-			urls = params.OpBNBTestnetBootnodes
-		}
-	}
+	urls := params.MainnetBootnodes
 	switch {
 	case ctx.IsSet(BootnodesFlag.Name):
 		urls = SplitAndTrim(ctx.String(BootnodesFlag.Name))
@@ -1672,12 +1644,6 @@ func setTxPool(ctx *cli.Context, cfg *txpool.Config) {
 	if ctx.IsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.Duration(TxPoolLifetimeFlag.Name)
 	}
-	if ctx.IsSet(TxPoolReannounceTimeFlag.Name) {
-		cfg.ReannounceTime = ctx.Duration(TxPoolReannounceTimeFlag.Name)
-	}
-	if ctx.IsSet(TxPoolReannounceRemotesFlag.Name) {
-		cfg.ReannounceRemotes = ctx.Bool(TxPoolReannounceRemotesFlag.Name)
-	}
 }
 
 func setEthash(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -1729,9 +1695,6 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 	if ctx.IsSet(MinerNewPayloadTimeout.Name) {
 		cfg.NewPayloadTimeout = ctx.Duration(MinerNewPayloadTimeout.Name)
-	}
-	if ctx.IsSet(RollupComputePendingBlock.Name) {
-		cfg.RollupComputePendingBlock = ctx.Bool(RollupComputePendingBlock.Name)
 	}
 }
 
@@ -1888,9 +1851,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(CacheFlag.Name) || ctx.IsSet(CacheGCFlag.Name) {
 		cfg.TrieDirtyCache = ctx.Int(CacheFlag.Name) * ctx.Int(CacheGCFlag.Name) / 100
-	}
-	if ctx.IsSet(TriesInMemoryFlag.Name) {
-		cfg.TriesInMemory = ctx.Uint64(TriesInMemoryFlag.Name)
 	}
 	if ctx.IsSet(CacheFlag.Name) || ctx.IsSet(CacheSnapshotFlag.Name) {
 		cfg.SnapshotCache = ctx.Int(CacheFlag.Name) * ctx.Int(CacheSnapshotFlag.Name) / 100
@@ -2336,7 +2296,6 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readonly bool) (*core.BlockCh
 		TrieDirtyLimit:      ethconfig.Defaults.TrieDirtyCache,
 		TrieDirtyDisabled:   ctx.String(GCModeFlag.Name) == "archive",
 		TrieTimeLimit:       ethconfig.Defaults.TrieTimeout,
-		TriesInMemory:       ethconfig.Defaults.TriesInMemory,
 		SnapshotLimit:       ethconfig.Defaults.SnapshotCache,
 		Preimages:           ctx.Bool(CachePreimagesFlag.Name),
 	}

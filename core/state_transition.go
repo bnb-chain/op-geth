@@ -175,15 +175,6 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 	return msg, err
 }
 
-// ToMessageNoNonceCheck returns the transaction with checkNonce field set to be false.
-func ToMessageNoNonceCheck(tx *types.Transaction, s types.Signer, baseFee *big.Int) (*Message, error) {
-	msg, err := TransactionToMessage(tx, s, baseFee)
-	if err == nil {
-		msg.SkipAccountChecks = true
-	}
-	return msg, err
-}
-
 // ApplyMessage computes the new state by applying the given message
 // against the old state within the environment.
 //

@@ -468,7 +468,7 @@ func dump(ctx *cli.Context) error {
 	config := &trie.Config{
 		Preimages: true, // always enable preimage lookup
 	}
-	state, err := state.New(root, state.NewDatabaseWithConfigAndCache(db, config), nil)
+	state, err := state.New(root, state.NewDatabaseWithConfig(db, config), nil)
 	if err != nil {
 		return err
 	}

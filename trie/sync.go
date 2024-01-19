@@ -22,7 +22,6 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/prque"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -467,27 +466,26 @@ func (s *Sync) children(req *nodeRequest, object node) ([]*nodeRequest, error) {
 			}
 			// Check the presence of children concurrently
 			pending.Add(1)
-			copiedChild := child // copy for closure
-			gopool.Submit(func() {
+			go func(child childNode) {
 				defer pending.Done()
 
 				// If database says duplicate, then at least the trie node is present
 				// and we hold the assumption that it's NOT legacy contract code.
 				var (
 					chash        = common.BytesToHash(node)
-					owner, inner = ResolvePath(copiedChild.path)
+					owner, inner = ResolvePath(child.path)
 				)
 				if rawdb.HasTrieNode(s.database, owner, inner, chash, s.scheme) {
 					return
 				}
 				// Locally unknown node, schedule for retrieval
 				missing <- &nodeRequest{
-					path:     copiedChild.path,
+					path:     child.path,
 					hash:     chash,
 					parent:   req,
 					callback: req.callback,
 				}
-			})
+			}(child)
 		}
 	}
 	pending.Wait()

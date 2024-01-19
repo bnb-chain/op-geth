@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/mclock"
 )
 
@@ -49,7 +48,7 @@ type Subscription interface {
 // error, it is sent on the subscription's error channel.
 func NewSubscription(producer func(<-chan struct{}) error) Subscription {
 	s := &funcSub{unsub: make(chan struct{}), err: make(chan error, 1)}
-	gopool.Submit(func() {
+	go func() {
 		defer close(s.err)
 		err := producer(s.unsub)
 		s.mu.Lock()
@@ -60,7 +59,7 @@ func NewSubscription(producer func(<-chan struct{}) error) Subscription {
 			}
 			s.unsubscribed = true
 		}
-	})
+	}()
 	return s
 }
 
@@ -172,11 +171,11 @@ func (s *resubscribeSub) subscribe() Subscription {
 	for {
 		s.lastTry = mclock.Now()
 		ctx, cancel := context.WithCancel(context.Background())
-		gopool.Submit(func() {
+		go func() {
 			rsub, err := s.fn(ctx, s.lastSubErr)
 			sub = rsub
 			subscribed <- err
-		})
+		}()
 		select {
 		case err := <-subscribed:
 			cancel()

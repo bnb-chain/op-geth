@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/common/prque"
@@ -83,23 +82,21 @@ var (
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
 	blockReorgDropMeter = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
 
-	blockPrefetchExecuteTimer = metrics.NewRegisteredTimer("chain/prefetch/executes", nil)
+	blockPrefetchExecuteTimer   = metrics.NewRegisteredTimer("chain/prefetch/executes", nil)
+	blockPrefetchInterruptMeter = metrics.NewRegisteredMeter("chain/prefetch/interrupts", nil)
 
 	errInsertionInterrupted = errors.New("insertion is interrupted")
 	errChainStopped         = errors.New("blockchain is stopped")
 )
 
 const (
-	bodyCacheLimit      = 512
-	blockCacheLimit     = 512
-	receiptsCacheLimit  = 512
-	txLogsCacheLimit    = 512
+	bodyCacheLimit      = 256
+	blockCacheLimit     = 256
+	receiptsCacheLimit  = 32
 	txLookupCacheLimit  = 1024
 	maxFutureBlocks     = 256
 	maxTimeFutureBlocks = 30
-
-	miningStateCacheLimit = 128
-	TriesInMemory         = 128 // default number of recent trie roots to keep in memory
+	TriesInMemory       = 128
 
 	// BlockChainVersion ensures that an incompatible database forces a resync from scratch.
 	//
@@ -137,14 +134,11 @@ type CacheConfig struct {
 	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
 	TrieDirtyDisabled   bool          // Whether to disable trie write caching and GC altogether (archive node)
 	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
-	TriesInMemory       uint64        // How many tries keeps in memory
 	SnapshotLimit       int           // Memory allowance (MB) to use for caching snapshot entries in memory
 	Preimages           bool          // Whether to store preimage of trie key to the disk
 
 	SnapshotNoBuild bool // Whether the background generation is allowed
 	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
-
-	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 }
 
 // defaultCacheConfig are the default caching values if none are specified by the
@@ -153,7 +147,6 @@ var defaultCacheConfig = &CacheConfig{
 	TrieCleanLimit: 256,
 	TrieDirtyLimit: 256,
 	TrieTimeLimit:  5 * time.Minute,
-	TriesInMemory:  TriesInMemory,
 	SnapshotLimit:  256,
 	SnapshotWait:   true,
 }
@@ -215,11 +208,6 @@ type BlockChain struct {
 	bodyRLPCache  *lru.Cache[common.Hash, rlp.RawValue]
 	receiptsCache *lru.Cache[common.Hash, []*types.Receipt]
 	blockCache    *lru.Cache[common.Hash, *types.Block]
-
-	miningReceiptsCache *lru.Cache[common.Hash, []*types.Receipt]
-	miningTxLogsCache   *lru.Cache[common.Hash, []*types.Log]
-	miningStateCache    *lru.Cache[common.Hash, *state.StateDB]
-
 	txLookupCache *lru.Cache[common.Hash, *rawdb.LegacyTxLookupEntry]
 
 	// future blocks are blocks added for later processing
@@ -244,9 +232,6 @@ type BlockChain struct {
 func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis, overrides *ChainOverrides, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(header *types.Header) bool, txLookupLimit *uint64) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = defaultCacheConfig
-	}
-	if cacheConfig.TriesInMemory == 0 {
-		cacheConfig.TriesInMemory = TriesInMemory
 	}
 
 	// Open trie database with provided config
@@ -275,31 +260,27 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 
 	bc := &BlockChain{
-		chainConfig:         chainConfig,
-		cacheConfig:         cacheConfig,
-		db:                  db,
-		triedb:              triedb,
-		flushInterval:       int64(cacheConfig.TrieTimeLimit),
-		triegc:              prque.New[int64, common.Hash](nil),
-		quit:                make(chan struct{}),
-		chainmu:             syncx.NewClosableMutex(),
-		bodyCache:           lru.NewCache[common.Hash, *types.Body](bodyCacheLimit),
-		bodyRLPCache:        lru.NewCache[common.Hash, rlp.RawValue](bodyCacheLimit),
-		receiptsCache:       lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
-		blockCache:          lru.NewCache[common.Hash, *types.Block](blockCacheLimit),
-		miningReceiptsCache: lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
-		miningTxLogsCache:   lru.NewCache[common.Hash, []*types.Log](txLogsCacheLimit),
-		miningStateCache:    lru.NewCache[common.Hash, *state.StateDB](miningStateCacheLimit),
-		txLookupCache:       lru.NewCache[common.Hash, *rawdb.LegacyTxLookupEntry](txLookupCacheLimit),
-		futureBlocks:        lru.NewCache[common.Hash, *types.Block](maxFutureBlocks),
-		engine:              engine,
-		vmConfig:            vmConfig,
+		chainConfig:   chainConfig,
+		cacheConfig:   cacheConfig,
+		db:            db,
+		triedb:        triedb,
+		flushInterval: int64(cacheConfig.TrieTimeLimit),
+		triegc:        prque.New[int64, common.Hash](nil),
+		quit:          make(chan struct{}),
+		chainmu:       syncx.NewClosableMutex(),
+		bodyCache:     lru.NewCache[common.Hash, *types.Body](bodyCacheLimit),
+		bodyRLPCache:  lru.NewCache[common.Hash, rlp.RawValue](bodyCacheLimit),
+		receiptsCache: lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
+		blockCache:    lru.NewCache[common.Hash, *types.Block](blockCacheLimit),
+		txLookupCache: lru.NewCache[common.Hash, *rawdb.LegacyTxLookupEntry](txLookupCacheLimit),
+		futureBlocks:  lru.NewCache[common.Hash, *types.Block](maxFutureBlocks),
+		engine:        engine,
+		vmConfig:      vmConfig,
 	}
 	bc.forker = NewForkChoice(bc, shouldPreserve)
-	bc.stateCache = state.NewDatabaseWithNodeDBAndCache(bc.db, bc.triedb)
-
+	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
-	bc.prefetcher = NewStatePrefetcher(chainConfig, bc, engine)
+	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	var err error
@@ -426,7 +407,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			NoBuild:    bc.cacheConfig.SnapshotNoBuild,
 			AsyncBuild: !bc.cacheConfig.SnapshotWait,
 		}
-		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root, snapshot.SetCapLimit(int(bc.cacheConfig.TriesInMemory)))
+		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
 	}
 
 	// Start future block processor.
@@ -785,9 +766,6 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.bodyRLPCache.Purge()
 	bc.receiptsCache.Purge()
 	bc.blockCache.Purge()
-	bc.miningReceiptsCache.Purge()
-	bc.miningTxLogsCache.Purge()
-	bc.miningStateCache.Purge()
 	bc.txLookupCache.Purge()
 	bc.futureBlocks.Purge()
 
@@ -985,7 +963,7 @@ func (bc *BlockChain) Stop() {
 	if !bc.cacheConfig.TrieDirtyDisabled {
 		triedb := bc.triedb
 
-		for _, offset := range []uint64{0, 1, bc.cacheConfig.TriesInMemory - 1} {
+		for _, offset := range []uint64{0, 1, TriesInMemory - 1} {
 			if number := bc.CurrentBlock().Number.Uint64(); number > offset {
 				recent := bc.GetBlockByNumber(number - offset)
 
@@ -1048,33 +1026,6 @@ func (bc *BlockChain) procFutureBlocks() {
 			bc.InsertChain(blocks[i : i+1])
 		}
 	}
-}
-
-// CacheBlock cache block in memory
-func (bc *BlockChain) CacheBlock(hash common.Hash, block *types.Block) {
-	bc.hc.numberCache.Add(hash, block.NumberU64())
-	bc.hc.headerCache.Add(hash, block.Header())
-	bc.blockCache.Add(hash, block)
-}
-
-// CacheReceipts cache receipts in memory
-func (bc *BlockChain) CacheReceipts(hash common.Hash, receipts types.Receipts) {
-	bc.receiptsCache.Add(hash, receipts)
-}
-
-// CacheMiningReceipts cache receipts in memory
-func (bc *BlockChain) CacheMiningReceipts(hash common.Hash, receipts types.Receipts) {
-	bc.miningReceiptsCache.Add(hash, receipts)
-}
-
-// CacheMiningTxLogs cache tx logs in memory
-func (bc *BlockChain) CacheMiningTxLogs(hash common.Hash, logs []*types.Log) {
-	bc.miningTxLogsCache.Add(hash, logs)
-}
-
-// CacheMiningState cache mining state in memory
-func (bc *BlockChain) CacheMiningState(hash common.Hash, state *state.StateDB) {
-	bc.miningStateCache.Add(hash, state)
 }
 
 // WriteStatus status of write
@@ -1390,121 +1341,80 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
-		state.StopPrefetcher()
 		return consensus.ErrUnknownAncestor
 	}
+	// Make sure no inconsistent state is leaked during insertion
+	externTd := new(big.Int).Add(block.Difficulty(), ptd)
 
-	postCommitFuncs := []func() error{
-		func() error {
-
-			root := block.Root()
-			// If we're running an archive node, always flush
-			if bc.cacheConfig.TrieDirtyDisabled {
-				return bc.triedb.Commit(root, false)
-			}
-			// Full but not archive node, do proper garbage collection
-			bc.triedb.Reference(root, common.Hash{}) // metadata reference to keep trie alive
-			bc.triegc.Push(root, -int64(block.NumberU64()))
-
-			current := block.NumberU64()
-			// Flush limits are not considered for the first TriesInMemory blocks.
-			if current <= bc.cacheConfig.TriesInMemory {
-				return nil
-			}
-			// If we exceeded our memory allowance, flush matured singleton nodes to disk
-			var (
-				nodes, imgs = bc.triedb.Size()
-				limit       = common.StorageSize(bc.cacheConfig.TrieDirtyLimit) * 1024 * 1024
-			)
-			if nodes > limit || imgs > 4*1024*1024 {
-				err := bc.triedb.Cap(limit - ethdb.IdealBatchSize)
-				if err != nil {
-					return err
-				}
-			}
-			// Find the next state trie we need to commit
-			chosen := current - bc.cacheConfig.TriesInMemory
-			flushInterval := time.Duration(atomic.LoadInt64(&bc.flushInterval))
-			// If we exceeded time allowance, flush an entire trie to disk
-			if bc.gcproc > flushInterval || (bc.cacheConfig.TrieCommitInterval != 0 && chosen%bc.cacheConfig.TrieCommitInterval == 0) {
-				// If the header is missing (canonical chain behind), we're reorging a low
-				// diff sidechain. Suspend committing until this operation is completed.
-				header := bc.GetHeaderByNumber(chosen)
-				if header == nil {
-					log.Warn("Reorg in progress, trie commit postponed", "number", chosen)
-				} else {
-					// If we're exceeding limits but haven't reached a large enough memory gap,
-					// warn the user that the system is becoming unstable.
-					if chosen < bc.lastWrite+bc.cacheConfig.TriesInMemory && bc.gcproc >= 2*flushInterval {
-						log.Info("State in memory for too long, committing", "time", bc.gcproc, "allowance", flushInterval, "optimum", float64(chosen-bc.lastWrite)/TriesInMemory)
-					}
-					// Flush an entire trie and restart the counters
-					err := bc.triedb.Commit(header.Root, true)
-					if err != nil {
-						return err
-					}
-					bc.lastWrite = chosen
-					bc.gcproc = 0
-				}
-			}
-			// Garbage collect anything below our required write retention
-			for !bc.triegc.Empty() {
-				root, number := bc.triegc.Pop()
-				if uint64(-number) > chosen {
-					bc.triegc.Push(root, number)
-					break
-				}
-				bc.triedb.Dereference(root)
-			}
-			return nil
-		},
+	// Irrelevant of the canonical status, write the block itself to the database.
+	//
+	// Note all the components of block(td, hash->number map, header, body, receipts)
+	// should be written atomically. BlockBatch is used for containing all components.
+	blockBatch := bc.db.NewBatch()
+	rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
+	rawdb.WriteBlock(blockBatch, block)
+	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
+	rawdb.WritePreimages(blockBatch, state.Preimages())
+	if err := blockBatch.Write(); err != nil {
+		log.Crit("Failed to write block into disk", "err", err)
 	}
-
-	commitFuncs := []func() error{
-		func() error {
-			// Make sure no inconsistent state is leaked during insertion
-			externTd := new(big.Int).Add(block.Difficulty(), ptd)
-
-			// Irrelevant of the canonical status, write the block itself to the database.
-			//
-			// Note all the components of block(td, hash->number map, header, body, receipts)
-			// should be written atomically. BlockBatch is used for containing all components.
-			blockBatch := bc.db.NewBatch()
-			rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
-			rawdb.WriteBlock(blockBatch, block)
-			rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
-			rawdb.WritePreimages(blockBatch, state.Preimages())
-			if err := blockBatch.Write(); err != nil {
-				log.Crit("Failed to write block into disk", "err", err)
-			}
-			return nil
-		},
-		func() error {
-			// Commit all cached state changes into underlying memory database.
-			_, err := state.Commit(bc.chainConfig.IsEIP158(block.Number()), postCommitFuncs...)
-			if err != nil {
-				return err
-			}
-			return nil
-		},
+	// Commit all cached state changes into underlying memory database.
+	root, err := state.Commit(bc.chainConfig.IsEIP158(block.Number()))
+	if err != nil {
+		return err
 	}
-
-	// commit all the data to the database
-	commitRes := make(chan error, len(commitFuncs))
-	for i := 0; i < len(commitFuncs); i++ {
-		commitFunc := commitFuncs[i]
-		gopool.Submit(func() {
-			commitRes <- commitFunc()
-		})
+	// If we're running an archive node, always flush
+	if bc.cacheConfig.TrieDirtyDisabled {
+		return bc.triedb.Commit(root, false)
 	}
-	// wait for the block to be written to disk and state to be committed
-	for i := 0; i < len(commitFuncs); i++ {
-		err := <-commitRes
-		if err != nil {
-			return err
+	// Full but not archive node, do proper garbage collection
+	bc.triedb.Reference(root, common.Hash{}) // metadata reference to keep trie alive
+	bc.triegc.Push(root, -int64(block.NumberU64()))
+
+	current := block.NumberU64()
+	// Flush limits are not considered for the first TriesInMemory blocks.
+	if current <= TriesInMemory {
+		return nil
+	}
+	// If we exceeded our memory allowance, flush matured singleton nodes to disk
+	var (
+		nodes, imgs = bc.triedb.Size()
+		limit       = common.StorageSize(bc.cacheConfig.TrieDirtyLimit) * 1024 * 1024
+	)
+	if nodes > limit || imgs > 4*1024*1024 {
+		bc.triedb.Cap(limit - ethdb.IdealBatchSize)
+	}
+	// Find the next state trie we need to commit
+	chosen := current - TriesInMemory
+	flushInterval := time.Duration(atomic.LoadInt64(&bc.flushInterval))
+	// If we exceeded time allowance, flush an entire trie to disk
+	if bc.gcproc > flushInterval {
+		// If the header is missing (canonical chain behind), we're reorging a low
+		// diff sidechain. Suspend committing until this operation is completed.
+		header := bc.GetHeaderByNumber(chosen)
+		if header == nil {
+			log.Warn("Reorg in progress, trie commit postponed", "number", chosen)
+		} else {
+			// If we're exceeding limits but haven't reached a large enough memory gap,
+			// warn the user that the system is becoming unstable.
+			if chosen < bc.lastWrite+TriesInMemory && bc.gcproc >= 2*flushInterval {
+				log.Info("State in memory for too long, committing", "time", bc.gcproc, "allowance", flushInterval, "optimum", float64(chosen-bc.lastWrite)/TriesInMemory)
+			}
+			// Flush an entire trie and restart the counters
+			bc.triedb.Commit(header.Root, true)
+			bc.lastWrite = chosen
+			bc.gcproc = 0
 		}
 	}
-
+	// Garbage collect anything below our required write retention
+	for !bc.triegc.Empty() {
+		root, number := bc.triegc.Pop()
+		if uint64(-number) > chosen {
+			bc.triegc.Push(root, number)
+			break
+		}
+		bc.triedb.Dereference(root)
+	}
 	return nil
 }
 
@@ -1812,62 +1722,53 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 			continue
 		}
 
-		var (
-			err                    error
-			receipts, receiptExist = bc.miningReceiptsCache.Get(block.Hash())
-			logs, logExist         = bc.miningTxLogsCache.Get(block.Hash())
-			statedb, stateExist    = bc.miningStateCache.Get(block.Hash())
-			usedGas                = block.GasUsed()
-			start                  = time.Now()
-		)
+		// Retrieve the parent block and it's state to execute on top
+		start := time.Now()
+		parent := it.previous()
+		if parent == nil {
+			parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
+		}
+		statedb, err := state.New(parent.Root, bc.stateCache, bc.snaps)
+		if err != nil {
+			return it.index, err
+		}
 
-		interruptCh := make(chan struct{})
-		pstart := time.Now()
+		// Enable prefetching to pull in trie node paths while processing transactions
+		statedb.StartPrefetcher("chain")
+		activeState = statedb
 
-		// skip block process if we already have the state, receipts and logs from mining work
-		if !(receiptExist && logExist && stateExist) {
-			// Retrieve the parent block and it's state to execute on top
-			parent := it.previous()
-			if parent == nil {
-				parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
-			}
-			statedb, err = state.NewWithSharedPool(parent.Root, bc.stateCache, bc.snaps)
-			if err != nil {
-				return it.index, err
-			}
+		// If we have a followup block, run that against the current state to pre-cache
+		// transactions and probabilistically some of the account/storage trie nodes.
+		var followupInterrupt uint32
+		if !bc.cacheConfig.TrieCleanNoPrefetch {
+			if followup, err := it.peek(); followup != nil && err == nil {
+				throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
 
-			// Enable prefetching to pull in trie node paths while processing transactions
-			statedb.StartPrefetcher("chain")
-			activeState = statedb
+				go func(start time.Time, followup *types.Block, throwaway *state.StateDB) {
+					bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, &followupInterrupt)
 
-			// If we have a followup block, run that against the current state to pre-cache
-			// transactions and probabilistically some of the account/storage trie nodes.
-
-			if !bc.cacheConfig.TrieCleanNoPrefetch {
-				if followup, err := it.peek(); followup != nil && err == nil {
-					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
-
-					go func(start time.Time, followup *types.Block, throwaway *state.StateDB) {
-						bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, interruptCh)
-
-						blockPrefetchExecuteTimer.Update(time.Since(start))
-					}(time.Now(), followup, throwaway)
-				}
-			}
-			// Process block using the parent state as reference point
-			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
-			if err != nil {
-				bc.reportBlock(block, receipts, err)
-				close(interruptCh)
-				return it.index, err
+					blockPrefetchExecuteTimer.Update(time.Since(start))
+					if atomic.LoadUint32(&followupInterrupt) == 1 {
+						blockPrefetchInterruptMeter.Mark(1)
+					}
+				}(time.Now(), followup, throwaway)
 			}
 		}
 
+		// Process block using the parent state as reference point
+		pstart := time.Now()
+		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+		if err != nil {
+			bc.reportBlock(block, receipts, err)
+			atomic.StoreUint32(&followupInterrupt, 1)
+			return it.index, err
+		}
 		ptime := time.Since(pstart)
+
 		vstart := time.Now()
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
 			bc.reportBlock(block, receipts, err)
-			close(interruptCh)
+			atomic.StoreUint32(&followupInterrupt, 1)
 			return it.index, err
 		}
 		vtime := time.Since(vstart)
@@ -1900,19 +1801,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		} else {
 			status, err = bc.writeBlockAndSetHead(block, receipts, logs, statedb, false)
 		}
-		close(interruptCh)
+		atomic.StoreUint32(&followupInterrupt, 1)
 		if err != nil {
 			return it.index, err
 		}
-
-		// pre-cache the block and receipts, so that it can be retrieved quickly by rcp
-		bc.CacheBlock(block.Hash(), block)
-		err = types.Receipts(receipts).DeriveFields(bc.chainConfig, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), block.Transactions())
-		if err != nil {
-			log.Warn("Failed to derive receipt fields", "block", block.Hash(), "err", err)
-		}
-		bc.CacheReceipts(block.Hash(), receipts)
-
 		// Update the metrics touched during block commit
 		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
 		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them

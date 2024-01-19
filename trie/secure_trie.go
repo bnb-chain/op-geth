@@ -242,19 +242,6 @@ func (t *StateTrie) Copy() *StateTrie {
 	}
 }
 
-// ResetCopy returns a copy of StateTrie with the secKeyCache cleared.
-func (t *SecureTrie) ResetCopy() *SecureTrie {
-	cpy := *t
-	cpy.secKeyCacheOwner = nil
-	cpy.secKeyCache = nil
-	return &cpy
-}
-
-// GetRawTrie returns the underlying trie.
-func (t *SecureTrie) GetRawTrie() Trie {
-	return t.trie
-}
-
 // NodeIterator returns an iterator that returns nodes of the underlying trie. Iteration
 // starts at the key after the given start key.
 func (t *StateTrie) NodeIterator(start []byte) NodeIterator {

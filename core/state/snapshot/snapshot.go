@@ -166,25 +166,14 @@ type Config struct {
 // storage data to avoid expensive multi-level trie lookups; and to allow sorted,
 // cheap iteration of the account/storage tries for sync aid.
 type Tree struct {
-	config   Config                   // Snapshots configurations
-	diskdb   ethdb.KeyValueStore      // Persistent database to store the snapshot
-	triedb   *trie.Database           // In-memory cache to access the trie through
-	layers   map[common.Hash]snapshot // Collection of all known layers
-	lock     sync.RWMutex
-	capLimit int // Maximum number of layers permitted to keep in memory
+	config Config                   // Snapshots configurations
+	diskdb ethdb.KeyValueStore      // Persistent database to store the snapshot
+	triedb *trie.Database           // In-memory cache to access the trie through
+	layers map[common.Hash]snapshot // Collection of all known layers
+	lock   sync.RWMutex
 
 	// Test hooks
 	onFlatten func() // Hook invoked when the bottom most diff layers are flattened
-}
-
-// SnapshotOption is a function that can be passed to New to configure the snapshot.
-type SnapshotOption func(*Tree)
-
-// SetCapLimit sets the maximum number of layers permitted to keep in memory.
-func SetCapLimit(capLimit int) SnapshotOption {
-	return func(tree *Tree) {
-		tree.capLimit = capLimit
-	}
 }
 
 // New attempts to load an already existing snapshot from a persistent key-value
@@ -203,21 +192,14 @@ func SetCapLimit(capLimit int) SnapshotOption {
 //     state trie.
 //   - otherwise, the entire snapshot is considered invalid and will be recreated on
 //     a background thread.
-func New(config Config, diskdb ethdb.KeyValueStore, triedb *trie.Database, root common.Hash, opts ...SnapshotOption) (*Tree, error) {
+func New(config Config, diskdb ethdb.KeyValueStore, triedb *trie.Database, root common.Hash) (*Tree, error) {
 	// Create a new, empty snapshot tree
 	snap := &Tree{
-		config:   config,
-		diskdb:   diskdb,
-		triedb:   triedb,
-		capLimit: 128,
-		layers:   make(map[common.Hash]snapshot),
+		config: config,
+		diskdb: diskdb,
+		triedb: triedb,
+		layers: make(map[common.Hash]snapshot),
 	}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(snap)
-		}
-	}
-
 	// Attempt to load a previously persisted snapshot and rebuild one if failed
 	head, disabled, err := loadSnapshot(diskdb, triedb, root, config.CacheSize, config.Recovery, config.NoBuild)
 	if disabled {
@@ -869,9 +851,4 @@ func (t *Tree) DiskRoot() common.Hash {
 	defer t.lock.Unlock()
 
 	return t.diskRoot()
-}
-
-// CapLimit returns the cap limit of the snapshot.
-func (t *Tree) CapLimit() int {
-	return t.capLimit
 }

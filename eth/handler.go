@@ -72,10 +72,6 @@ type txPool interface {
 	// SubscribeNewTxsEvent should return an event subscription of
 	// NewTxsEvent and send events to the given channel.
 	SubscribeNewTxsEvent(chan<- core.NewTxsEvent) event.Subscription
-
-	// SubscribeReannoTxsEvent should return an event subscription of
-	// ReannoTxsEvent and send events to the given channel.
-	SubscribeReannoTxsEvent(chan<- core.ReannoTxsEvent) event.Subscription
 }
 
 // handlerConfig is the collection of initialization parameters to create a full
@@ -120,8 +116,6 @@ type handler struct {
 	eventMux      *event.TypeMux
 	txsCh         chan core.NewTxsEvent
 	txsSub        event.Subscription
-	reannoTxsCh   chan core.ReannoTxsEvent
-	reannoTxsSub  event.Subscription
 	minedBlockSub *event.TypeMuxSubscription
 
 	requiredBlocks map[uint64]common.Hash
@@ -168,10 +162,8 @@ func newHandler(config *handlerConfig) (*handler, error) {
 			log.Warn("Switch sync mode from full sync to snap sync")
 		}
 	} else {
-		blockNumber := h.chain.CurrentBlock().Number
-		if blockNumber.Uint64() > 0 && (!config.Chain.Config().IsOptimism() || blockNumber.Cmp(config.Chain.Config().BedrockBlock) != 0) {
+		if h.chain.CurrentBlock().Number.Uint64() > 0 {
 			// Print warning log if database is not empty to run snap sync.
-			// For OP chains, snap sync from bedrock block is allowed.
 			log.Warn("Switch sync mode from snap sync to full sync")
 		} else {
 			// If snap sync was requested and our database is empty, grant it
@@ -560,12 +552,6 @@ func (h *handler) Start(maxPeers int) {
 	h.txsSub = h.txpool.SubscribeNewTxsEvent(h.txsCh)
 	go h.txBroadcastLoop()
 
-	// announce local pending transactions again
-	h.wg.Add(1)
-	h.reannoTxsCh = make(chan core.ReannoTxsEvent, txChanSize)
-	h.reannoTxsSub = h.txpool.SubscribeReannoTxsEvent(h.reannoTxsCh)
-	go h.txReannounceLoop()
-
 	// broadcast mined blocks
 	h.wg.Add(1)
 	h.minedBlockSub = h.eventMux.Subscribe(core.NewMinedBlockEvent{})
@@ -578,7 +564,6 @@ func (h *handler) Start(maxPeers int) {
 
 func (h *handler) Stop() {
 	h.txsSub.Unsubscribe()        // quits txBroadcastLoop
-	h.reannoTxsSub.Unsubscribe()  // quits txReannounceLoop
 	h.minedBlockSub.Unsubscribe() // quits blockBroadcastLoop
 
 	// Quit chainSync and txsync64.
@@ -662,51 +647,25 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 		numDirect := int(math.Sqrt(float64(len(peers))))
 		for _, peer := range peers[:numDirect] {
 			txset[peer] = append(txset[peer], tx.Hash())
-			log.Trace("Broadcast transaction", "peer", peer.ID(), "hash", tx.Hash())
 		}
 		// For the remaining peers, send announcement only
 		for _, peer := range peers[numDirect:] {
 			annos[peer] = append(annos[peer], tx.Hash())
-			log.Trace("Announce transaction", "peer", peer.ID(), "hash", tx.Hash())
 		}
 	}
 	for peer, hashes := range txset {
 		directPeers++
 		directCount += len(hashes)
 		peer.AsyncSendTransactions(hashes)
-		log.Trace("Transaction broadcast bodies", "txs", len(hashes),
-			"peer.id", peer.Node().ID().String(), "peer.IP", peer.Node().IP().String(),
-		)
 	}
 	for peer, hashes := range annos {
 		annoPeers++
 		annoCount += len(hashes)
 		peer.AsyncSendPooledTransactionHashes(hashes)
-		log.Trace("Transaction broadcast hashes", "txs", len(hashes),
-			"peer.id", peer.Node().ID().String(), "peer.IP", peer.Node().IP().String(),
-		)
 	}
 	log.Debug("Transaction broadcast", "txs", len(txs),
 		"announce packs", annoPeers, "announced hashes", annoCount,
 		"tx packs", directPeers, "broadcast txs", directCount)
-}
-
-// ReannounceTransactions will announce a batch of local pending transactions
-// to a square root of all peers.
-func (h *handler) ReannounceTransactions(txs types.Transactions) {
-	hashes := make([]common.Hash, 0, txs.Len())
-	for _, tx := range txs {
-		hashes = append(hashes, tx.Hash())
-	}
-
-	// Announce transactions hash to a batch of peers
-	peersCount := uint(math.Sqrt(float64(h.peers.len())))
-	peers := h.peers.headPeers(peersCount)
-	for _, peer := range peers {
-		peer.AsyncSendPooledTransactionHashes(hashes)
-	}
-	log.Debug("Transaction reannounce", "txs", len(txs),
-		"announce packs", peersCount, "announced hashes", peersCount*uint(len(hashes)))
 }
 
 // minedBroadcastLoop sends mined blocks to connected peers.
@@ -729,19 +688,6 @@ func (h *handler) txBroadcastLoop() {
 		case event := <-h.txsCh:
 			h.BroadcastTransactions(event.Txs)
 		case <-h.txsSub.Err():
-			return
-		}
-	}
-}
-
-// txReannounceLoop announces local pending transactions to connected peers again.
-func (h *handler) txReannounceLoop() {
-	defer h.wg.Done()
-	for {
-		select {
-		case event := <-h.reannoTxsCh:
-			h.ReannounceTransactions(event.Txs)
-		case <-h.reannoTxsSub.Err():
 			return
 		}
 	}

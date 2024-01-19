@@ -158,7 +158,6 @@ func newTestBackend(t *testing.T, n int, gspec *core.Genesis, generator func(i i
 		TrieDirtyLimit:    256,
 		TrieTimeLimit:     5 * time.Minute,
 		SnapshotLimit:     0,
-		TriesInMemory:     core.TriesInMemory,
 		TrieDirtyDisabled: true, // Archive mode
 	}
 	chain, err := core.NewBlockChain(backend.chaindb, cacheConfig, gspec, nil, backend.engine, vm.Config{}, nil, nil)

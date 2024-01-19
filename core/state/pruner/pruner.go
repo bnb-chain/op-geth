@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -62,16 +61,6 @@ type Config struct {
 	BloomSize uint64 // The Megabytes of memory allocated to bloom-filter
 }
 
-// PrunerOption is the option for pruner.
-type PrunerOption func(*Pruner)
-
-// WithTriesInMemory sets the number of tries to keep in memory.
-func WithTriesInMemory(triesInMemory uint64) PrunerOption {
-	return func(p *Pruner) {
-		p.triesInMemory = triesInMemory
-	}
-}
-
 // Pruner is an offline tool to prune the stale state with the
 // help of the snapshot. The workflow of pruner is very simple:
 //
@@ -84,21 +73,15 @@ func WithTriesInMemory(triesInMemory uint64) PrunerOption {
 // periodically in order to release the disk usage and improve the
 // disk read performance to some extent.
 type Pruner struct {
-	config        Config
-	chainHeader   *types.Header
-	db            ethdb.Database
-	stateBloom    *stateBloom
-	snaptree      *snapshot.Tree
-	triesInMemory uint64
-}
-
-type CombinedOptions struct {
-	PrunerOptions   []PrunerOption
-	SnapshotOptions []snapshot.SnapshotOption
+	config      Config
+	chainHeader *types.Header
+	db          ethdb.Database
+	stateBloom  *stateBloom
+	snaptree    *snapshot.Tree
 }
 
 // NewPruner creates the pruner instance.
-func NewPruner(db ethdb.Database, config Config, opts CombinedOptions) (*Pruner, error) {
+func NewPruner(db ethdb.Database, config Config) (*Pruner, error) {
 	headBlock := rawdb.ReadHeadBlock(db)
 	if headBlock == nil {
 		return nil, errors.New("failed to load head block")
@@ -110,11 +93,6 @@ func NewPruner(db ethdb.Database, config Config, opts CombinedOptions) (*Pruner,
 		AsyncBuild: false,
 	}
 	snaptree, err := snapshot.New(snapconfig, db, trie.NewDatabase(db), headBlock.Root())
-	for _, snapshotOption := range opts.SnapshotOptions {
-		if snapshotOption != nil {
-			snapshotOption(snaptree)
-		}
-	}
 	if err != nil {
 		return nil, err // The relevant snapshot(s) might not exist
 	}
@@ -127,20 +105,13 @@ func NewPruner(db ethdb.Database, config Config, opts CombinedOptions) (*Pruner,
 	if err != nil {
 		return nil, err
 	}
-	pruner := &Pruner{
-		config:        config,
-		chainHeader:   headBlock.Header(),
-		db:            db,
-		stateBloom:    stateBloom,
-		snaptree:      snaptree,
-		triesInMemory: core.TriesInMemory,
-	}
-	for _, prunerOption := range opts.PrunerOptions {
-		if prunerOption != nil {
-			prunerOption(pruner)
-		}
-	}
-	return pruner, nil
+	return &Pruner{
+		config:      config,
+		chainHeader: headBlock.Header(),
+		db:          db,
+		stateBloom:  stateBloom,
+		snaptree:    snaptree,
+	}, nil
 }
 
 func prune(snaptree *snapshot.Tree, root common.Hash, maindb ethdb.Database, stateBloom *stateBloom, bloomPath string, middleStateRoots map[common.Hash]struct{}, start time.Time) error {
@@ -272,23 +243,23 @@ func (p *Pruner) Prune(root common.Hash) error {
 		return err
 	}
 	if stateBloomRoot != (common.Hash{}) {
-		return RecoverPruning(p.config.Datadir, p.db, p.config.Cachedir, p.triesInMemory)
+		return RecoverPruning(p.config.Datadir, p.db, p.config.Cachedir)
 	}
-	// If the target state root is not specified, use the HEAD-(n-1) as the
+	// If the target state root is not specified, use the HEAD-127 as the
 	// target. The reason for picking it is:
 	// - in most of the normal cases, the related state is available
 	// - the probability of this layer being reorg is very low
 	var layers []snapshot.Snapshot
 	if root == (common.Hash{}) {
 		// Retrieve all snapshot layers from the current HEAD.
-		// In theory there are n difflayers + 1 disk layer present,
-		// so n diff layers are expected to be returned.
-		layers = p.snaptree.Snapshots(p.chainHeader.Root, int(p.triesInMemory), true)
-		if len(layers) != int(p.triesInMemory) {
-			// Reject if the accumulated diff layers are less than n. It
+		// In theory there are 128 difflayers + 1 disk layer present,
+		// so 128 diff layers are expected to be returned.
+		layers = p.snaptree.Snapshots(p.chainHeader.Root, 128, true)
+		if len(layers) != 128 {
+			// Reject if the accumulated diff layers are less than 128. It
 			// means in most of normal cases, there is no associated state
 			// with bottom-most diff layer.
-			return fmt.Errorf("snapshot not old enough yet: need %d more blocks", int(p.triesInMemory)-len(layers))
+			return fmt.Errorf("snapshot not old enough yet: need %d more blocks", 128-len(layers))
 		}
 		// Use the bottom-most diff layer as the target
 		root = layers[len(layers)-1].Root()
@@ -300,8 +271,8 @@ func (p *Pruner) Prune(root common.Hash) error {
 		// The special case is for clique based networks(rinkeby, goerli
 		// and some other private networks), it's possible that two
 		// consecutive blocks will have same root. In this case snapshot
-		// difflayer won't be created. So HEAD-(n-1) may not paired with
-		// head-(n-1) layer. Instead the paired layer is higher than the
+		// difflayer won't be created. So HEAD-127 may not paired with
+		// head-127 layer. Instead the paired layer is higher than the
 		// bottom-most diff layer. Try to find the bottom-most snapshot
 		// layer with state available.
 		//
@@ -325,7 +296,7 @@ func (p *Pruner) Prune(root common.Hash) error {
 		}
 	} else {
 		if len(layers) > 0 {
-			log.Info("Selecting bottom-most difflayer as the pruning target", "root", root, "height", p.chainHeader.Number.Uint64()-(p.triesInMemory-1))
+			log.Info("Selecting bottom-most difflayer as the pruning target", "root", root, "height", p.chainHeader.Number.Uint64()-127)
 		} else {
 			log.Info("Selecting user-specified state as the pruning target", "root", root)
 		}
@@ -373,7 +344,7 @@ func (p *Pruner) Prune(root common.Hash) error {
 // pruning can be resumed. What's more if the bloom filter is constructed, the
 // pruning **has to be resumed**. Otherwise a lot of dangling nodes may be left
 // in the disk.
-func RecoverPruning(datadir string, db ethdb.Database, trieCachePath string, triesInMemory uint64) error {
+func RecoverPruning(datadir string, db ethdb.Database, trieCachePath string) error {
 	stateBloomPath, stateBloomRoot, err := findBloomFilter(datadir)
 	if err != nil {
 		return err
@@ -399,7 +370,7 @@ func RecoverPruning(datadir string, db ethdb.Database, trieCachePath string, tri
 		NoBuild:    true,
 		AsyncBuild: false,
 	}
-	snaptree, err := snapshot.New(snapconfig, db, trie.NewDatabase(db), headBlock.Root(), snapshot.SetCapLimit(int(triesInMemory)))
+	snaptree, err := snapshot.New(snapconfig, db, trie.NewDatabase(db), headBlock.Root())
 	if err != nil {
 		return err // The relevant snapshot(s) might not exist
 	}
@@ -419,7 +390,7 @@ func RecoverPruning(datadir string, db ethdb.Database, trieCachePath string, tri
 	// otherwise the dangling state will be left.
 	var (
 		found       bool
-		layers      = snaptree.Snapshots(headBlock.Root(), int(triesInMemory), true)
+		layers      = snaptree.Snapshots(headBlock.Root(), 128, true)
 		middleRoots = make(map[common.Hash]struct{})
 	)
 	for _, layer := range layers {

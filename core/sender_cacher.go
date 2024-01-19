@@ -19,7 +19,6 @@ package core
 import (
 	"runtime"
 
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
@@ -53,7 +52,7 @@ func newTxSenderCacher(threads int) *txSenderCacher {
 		threads: threads,
 	}
 	for i := 0; i < threads; i++ {
-		gopool.Submit(func() { cacher.cache() })
+		go cacher.cache()
 	}
 	return cacher
 }

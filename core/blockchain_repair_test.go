@@ -1777,7 +1777,6 @@ func testRepair(t *testing.T, tt *rewindTest, snapshots bool) {
 			TrieDirtyLimit: 256,
 			TrieTimeLimit:  5 * time.Minute,
 			SnapshotLimit:  0, // Disable snapshot by default
-			TriesInMemory:  128,
 		}
 	)
 	defer engine.Close()

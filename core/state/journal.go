@@ -43,8 +43,7 @@ type journal struct {
 // newJournal creates a new initialized journal.
 func newJournal() *journal {
 	return &journal{
-		dirties: make(map[common.Address]int, defaultNumOfSlots),
-		entries: make([]journalEntry, 0, defaultNumOfSlots),
+		dirties: make(map[common.Address]int),
 	}
 }
 
@@ -267,9 +266,7 @@ func (ch accessListAddAccountChange) revert(s *StateDB) {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
-	if s.accessList != nil {
-		s.accessList.DeleteAddress(*ch.address)
-	}
+	s.accessList.DeleteAddress(*ch.address)
 }
 
 func (ch accessListAddAccountChange) dirtied() *common.Address {
@@ -277,9 +274,7 @@ func (ch accessListAddAccountChange) dirtied() *common.Address {
 }
 
 func (ch accessListAddSlotChange) revert(s *StateDB) {
-	if s.accessList != nil {
-		s.accessList.DeleteSlot(*ch.address, *ch.slot)
-	}
+	s.accessList.DeleteSlot(*ch.address, *ch.slot)
 }
 
 func (ch accessListAddSlotChange) dirtied() *common.Address {

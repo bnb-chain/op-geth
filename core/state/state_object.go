@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -71,9 +70,7 @@ type stateObject struct {
 	trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
 
-	sharedOriginStorage *sync.Map // Storage cache of original entries to dedup rewrites, reset for every transaction
-	originStorage       Storage
-
+	originStorage  Storage // Storage cache of original entries to dedup rewrites, reset for every transaction
 	pendingStorage Storage // Storage entries that need to be flushed to disk, at the end of an entire block
 	dirtyStorage   Storage // Storage entries that have been modified in the current transaction execution
 
@@ -101,20 +98,14 @@ func newObject(db *StateDB, address common.Address, data types.StateAccount) *st
 	if data.Root == (common.Hash{}) {
 		data.Root = types.EmptyRootHash
 	}
-	var storageMap *sync.Map
-	// Check whether the storage exist in pool, new originStorage if not exist
-	if db != nil && db.storagePool != nil {
-		storageMap = db.GetStorage(address)
-	}
 	return &stateObject{
-		db:                  db,
-		address:             address,
-		addrHash:            crypto.Keccak256Hash(address[:]),
-		data:                data,
-		sharedOriginStorage: storageMap,
-		originStorage:       make(Storage),
-		pendingStorage:      make(Storage),
-		dirtyStorage:        make(Storage),
+		db:             db,
+		address:        address,
+		addrHash:       crypto.Keccak256Hash(address[:]),
+		data:           data,
+		originStorage:  make(Storage),
+		pendingStorage: make(Storage),
+		dirtyStorage:   make(Storage),
 	}
 }
 
@@ -172,36 +163,13 @@ func (s *stateObject) GetState(db Database, key common.Hash) common.Hash {
 	return s.GetCommittedState(db, key)
 }
 
-func (s *stateObject) getOriginStorage(key common.Hash) (common.Hash, bool) {
-	if value, cached := s.originStorage[key]; cached {
-		return value, true
-	}
-	// if L1 cache miss, try to get it from shared pool
-	if s.sharedOriginStorage != nil {
-		val, ok := s.sharedOriginStorage.Load(key)
-		if !ok {
-			return common.Hash{}, false
-		}
-		s.originStorage[key] = val.(common.Hash)
-		return val.(common.Hash), true
-	}
-	return common.Hash{}, false
-}
-
-func (s *stateObject) setOriginStorage(key common.Hash, value common.Hash) {
-	if s.db.writeOnSharedStorage && s.sharedOriginStorage != nil {
-		s.sharedOriginStorage.Store(key, value)
-	}
-	s.originStorage[key] = value
-}
-
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Hash {
 	// If we have a pending write or clean cached, return that
 	if value, pending := s.pendingStorage[key]; pending {
 		return value
 	}
-	if value, cached := s.getOriginStorage(key); cached {
+	if value, cached := s.originStorage[key]; cached {
 		return value
 	}
 	// If the object was destructed in *this* block (and potentially resurrected),
@@ -250,7 +218,7 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 		}
 		value.SetBytes(content)
 	}
-	s.setOriginStorage(key, value)
+	s.originStorage[key] = value
 	return value
 }
 
@@ -342,7 +310,6 @@ func (s *stateObject) updateTrie(db Database) (Trie, error) {
 		}
 		// If state snapshotting is active, cache the data til commit
 		if s.db.snap != nil {
-			s.db.snapMux.Lock()
 			if storage == nil {
 				// Retrieve the old storage map, if available, create a new one otherwise
 				if storage = s.db.snapStorage[s.addrHash]; storage == nil {
@@ -351,7 +318,6 @@ func (s *stateObject) updateTrie(db Database) (Trie, error) {
 				}
 			}
 			storage[crypto.HashData(hasher, key[:])] = v // v will be nil if it's deleted
-			s.db.snapMux.Unlock()
 		}
 		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
 	}
@@ -391,9 +357,6 @@ func (s *stateObject) commitTrie(db Database) (*trie.NodeSet, error) {
 	}
 	// If nothing changed, don't bother with committing anything
 	if tr == nil {
-		if s.trie != nil && s.data.Root != types.EmptyRootHash {
-			db.CacheStorage(s.addrHash, s.data.Root, s.trie)
-		}
 		return nil, nil
 	}
 	// Track the amount of time wasted on committing the storage trie
@@ -402,9 +365,6 @@ func (s *stateObject) commitTrie(db Database) (*trie.NodeSet, error) {
 	}
 	root, nodes := tr.Commit(false)
 	s.data.Root = root
-	if s.data.Root != types.EmptyRootHash {
-		db.CacheStorage(s.addrHash, s.data.Root, s.trie)
-	}
 	return nodes, nil
 }
 

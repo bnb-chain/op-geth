@@ -443,15 +443,68 @@ func (tab *Table) findnodeByID(target enode.ID, nresults int, preferLive bool) *
 	liveNodes := &nodesByDistance{target: target}
 	for _, b := range &tab.buckets {
 		for _, n := range b.entries {
+			distance := xorDistance(target, n.ID())
 			nodes.push(n, nresults)
 			if preferLive && n.livenessChecks > 0 {
 				liveNodes.push(n, nresults)
 			}
+			log.Trace("Distance", "Node ID", n.ID(), "Target ID", target, "XOR Distance", distance)
+
 		}
 	}
 
 	if preferLive && len(liveNodes.entries) > 0 {
 		return liveNodes
+	}
+	return nodes
+}
+
+func xorDistance(a, b enode.ID) (distance enode.ID) {
+	for i := range a {
+		distance[i] = a[i] ^ b[i]
+	}
+	return distance
+}
+
+// get all nodes ids
+func (tab *Table) getAllNodeIDs() []enode.ID {
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	var ids []enode.ID
+	for _, b := range tab.buckets {
+		for _, n := range b.entries {
+			ids = append(ids, n.ID())
+		}
+	}
+	return ids
+}
+
+// get node by given id
+func (tab *Table) getNodeByID(id enode.ID) enode.Node {
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	for _, b := range tab.buckets {
+		for _, n := range b.entries {
+			if n.ID().String() == id.String() {
+				return n.Node
+			}
+		}
+	}
+	return enode.Node{}
+}
+
+// get all nodes ids
+func (tab *Table) getAllNodes() []enode.Node {
+	tab.mutex.Lock()
+	defer tab.mutex.Unlock()
+
+	var nodes []enode.Node
+	for _, b := range tab.buckets {
+		for _, n := range b.entries {
+			nodes = append(nodes, n.Node)
+		}
 	}
 	return nodes
 }
@@ -535,11 +588,21 @@ func (tab *Table) addSeenNode(n *node) {
 //
 // The caller must not hold tab.mutex.
 func (tab *Table) addVerifiedNode(n *node) {
+	log.Trace("addVerifiedNode", "nodeIP", n.IP().String(), "nodeId", n.ID().String())
 	if !tab.isInitDone() {
 		return
 	}
 	if n.ID() == tab.self().ID() {
 		return
+	}
+	nodes := tab.getAllNodes()
+
+	for i, nodeIndex := range nodes {
+		log.Trace("current tab content", "index", i, "nodeId", nodeIndex.ID(), "nodeIP", nodeIndex.IP().String())
+		for j, pair := range nodeIndex.Record().GetPairs() {
+			log.Trace("current node content", "node index", i, "pair index", j, "pairKey", pair.GetPairKey(), "pairValue", pair.GetPairValue())
+
+		}
 	}
 
 	tab.mutex.Lock()

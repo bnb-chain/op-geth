@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/discover"
+	"github.com/ethereum/go-ethereum/p2p/discover/v4wire"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
@@ -46,10 +47,14 @@ func main() {
 		runv5       = flag.Bool("v5", false, "run a v5 topic discovery bootnode")
 		verbosity   = flag.Int("verbosity", int(log.LvlInfo), "log verbosity (0-5)")
 		vmodule     = flag.String("vmodule", "", "log verbosity pattern")
+		network     = flag.String("network", "", "testnet/mainnet")
 
 		nodeKey *ecdsa.PrivateKey
 		err     error
 	)
+
+	var staticV4Nodes []v4wire.Node
+
 	flag.Parse()
 
 	glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
@@ -85,6 +90,12 @@ func main() {
 		if nodeKey, err = crypto.HexToECDSA(*nodeKeyHex); err != nil {
 			utils.Fatalf("-nodekeyhex: %v", err)
 		}
+	}
+
+	if *network == "testnet" {
+		staticV4Nodes = staticV4NodesTestnet
+	} else {
+		staticV4Nodes = staticV4NodesMainnet
 	}
 
 	if *writeAddr {
@@ -123,8 +134,9 @@ func main() {
 
 	printNotice(&nodeKey.PublicKey, *listenerAddr)
 	cfg := discover.Config{
-		PrivateKey:  nodeKey,
-		NetRestrict: restrictList,
+		PrivateKey:    nodeKey,
+		NetRestrict:   restrictList,
+		StaticV4Nodes: staticV4Nodes,
 	}
 	if *runv5 {
 		if _, err := discover.ListenV5(conn, ln, cfg); err != nil {

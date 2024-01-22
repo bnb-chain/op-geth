@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -663,4 +664,21 @@ func (c *dgramPipe) receive() (dgram, error) {
 	copy(c.queue, c.queue[1:])
 	c.queue = c.queue[:len(c.queue)-1]
 	return p, nil
+}
+
+func TestPubkeyToID(t *testing.T) {
+	hexPubkey := "223488870e492f49873b621c21f3e1302f00993aaa5214a077a1c4eb62dfe96675cc7a3360525c3409480d1ec13cc72f432b4d50f5e70f98e60385dc25d4be6b"
+
+	pubkeyBytes, err := hex.DecodeString(hexPubkey)
+	if err != nil {
+		t.Fatalf("Error decoding public key: %v", err)
+	}
+
+	var pubkey v4wire.Pubkey
+	copy(pubkey[:], pubkeyBytes)
+
+	nodeID := pubkey.ID()
+
+	fmt.Printf("Node ID: %s\n", nodeID.String())
+
 }

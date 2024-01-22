@@ -90,10 +90,22 @@ type Record struct {
 	pairs     []pair // sorted list of all key/value pairs
 }
 
+func (r *Record) GetPairs() []pair {
+	return r.pairs
+}
+
 // pair is a key/value pair in a record.
 type pair struct {
 	k string
 	v rlp.RawValue
+}
+
+func (r *pair) GetPairKey() string {
+	return r.k
+}
+
+func (r *pair) GetPairValue() rlp.RawValue {
+	return r.v
 }
 
 // Size returns the encoded size of the record.

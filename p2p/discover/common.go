@@ -23,6 +23,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/p2p/discover/v4wire"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
@@ -57,6 +58,9 @@ type Config struct {
 	Log          log.Logger         // if set, log messages go here
 	ValidSchemes enr.IdentityScheme // allowed identity schemes
 	Clock        mclock.Clock
+
+	//static v4 nodes
+	StaticV4Nodes []v4wire.Node
 }
 
 func (cfg Config) withDefaults() Config {

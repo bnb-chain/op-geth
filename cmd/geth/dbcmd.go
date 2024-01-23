@@ -318,7 +318,7 @@ func inspectTrie(ctx *cli.Context) error {
 		if blockNumber != math.MaxUint64 {
 			headerBlockHash = rawdb.ReadCanonicalHash(db, blockNumber)
 			if headerBlockHash == (common.Hash{}) {
-				return fmt.Errorf("ReadHeadBlockHash empry hash")
+				return fmt.Errorf("ReadHeadBlockHash empty hash")
 			}
 			blockHeader := rawdb.ReadHeader(db, headerBlockHash, blockNumber)
 			trieRootHash = blockHeader.Root

@@ -103,7 +103,7 @@ type (
 )
 
 // MaxNeighbors is the maximum number of neighbor nodes in a Neighbors packet.
-const MaxNeighbors = 20
+const MaxNeighbors = 12
 
 // This code computes the MaxNeighbors constant value.
 

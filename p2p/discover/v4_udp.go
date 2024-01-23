@@ -835,10 +835,10 @@ func (t *UDPv4) verifyENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID e
 }
 
 func (t *UDPv4) handleENRRequest(h *packetHandlerV4, from *net.UDPAddr, fromID enode.ID, mac []byte) {
-	log.Info("handle ENR reqeust", "from", from, "fromID", fromID)
+	log.Debug("handle ENR reqeust", "from", from, "fromID", fromID)
 	record := t.localNode.Node().Record()
 	for i, p := range record.GetPairs() {
-		log.Info("ENR pairs", "index", i, "key", p.GetPairKey(), "value", p.GetPairValue())
+		log.Trace("ENR pairs", "index", i, "key", p.GetPairKey(), "value", p.GetPairValue())
 	}
 	t.send(from, fromID, &v4wire.ENRResponse{
 		ReplyTok: mac,

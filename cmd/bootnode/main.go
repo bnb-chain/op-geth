@@ -46,7 +46,7 @@ func main() {
 		netrestrict = flag.String("netrestrict", "", "restrict network communication to the given IP networks (CIDR masks)")
 		runv5       = flag.Bool("v5", false, "run a v5 topic discovery bootnode")
 		verbosity   = flag.Int("verbosity", int(log.LvlInfo), "log verbosity (0-5)")
-		vmodule     = flag.String("vmodule", "", "log verbosity pattern")
+		vmodule     = flag.String("logvmodule", "", "log verbosity pattern")
 		network     = flag.String("network", "", "testnet/mainnet")
 
 		nodeKey *ecdsa.PrivateKey

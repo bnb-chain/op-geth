@@ -49,7 +49,7 @@ type Inspector struct {
 }
 
 type TrieTreeStat struct {
-	is_account_trie    bool
+	isAccountTrie      bool
 	theNodeStatByLevel [15]NodeStat
 	totalNodeStat      NodeStat
 }
@@ -144,7 +144,7 @@ func NewInspector(tr *Trie, db *Database, stateRootHash common.Hash, blocknum ui
 // Run statistics, external call
 func (inspect *Inspector) Run() {
 	accountTrieStat := &TrieTreeStat{
-		is_account_trie: true,
+		isAccountTrie: true,
 	}
 	if inspect.db.Scheme() == rawdb.HashScheme {
 		ticker := time.NewTicker(30 * time.Second)
@@ -230,7 +230,7 @@ func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *Tr
 		}
 		contractTrie.tracer.reset()
 		trieStat := &TrieTreeStat{
-			is_account_trie: false,
+			isAccountTrie: false,
 		}
 
 		inspect.statLock.Lock()

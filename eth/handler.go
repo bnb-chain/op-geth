@@ -92,6 +92,7 @@ type handlerConfig struct {
 	Checkpoint     *params.TrustedCheckpoint // Hard coded checkpoint for sync challenges
 	RequiredBlocks map[uint64]common.Hash    // Hard coded map of required block hashes for sync challenges
 	NoTxGossip     bool                      // Disable P2P transaction gossip
+	TriesInMemory  uint64                    // How many tries keeps in memory
 }
 
 type handler struct {
@@ -204,7 +205,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		}
 	}
 	// Construct the downloader (long sync)
-	h.downloader = downloader.New(h.checkpointNumber, config.Database, h.eventMux, h.chain, nil, h.removePeer, success)
+	h.downloader = downloader.New(h.checkpointNumber, config.Database, h.eventMux, h.chain, nil, h.removePeer, success, config.TriesInMemory)
 	if ttd := h.chain.Config().TerminalTotalDifficulty; ttd != nil {
 		if h.chain.Config().TerminalTotalDifficultyPassed {
 			log.Info("Chain post-merge, sync via beacon client")

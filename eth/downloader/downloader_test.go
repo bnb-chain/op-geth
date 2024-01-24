@@ -82,7 +82,7 @@ func newTesterWithNotification(t *testing.T, success func()) *downloadTester {
 		chain:   chain,
 		peers:   make(map[string]*downloadTesterPeer),
 	}
-	tester.downloader = New(0, db, new(event.TypeMux), tester.chain, nil, tester.dropPeer, success)
+	tester.downloader = New(0, db, new(event.TypeMux), tester.chain, nil, tester.dropPeer, success, 128)
 	return tester
 }
 
@@ -889,7 +889,7 @@ func testInvalidHeaderRollback(t *testing.T, protocol uint, mode SyncMode) {
 	defer tester.terminate()
 
 	// Create a small enough block chain to download
-	targetBlocks := 3*fsHeaderSafetyNet + 256 + fsMinFullBlocks
+	targetBlocks := 3*fsHeaderSafetyNet + 256 + int(tester.downloader.fsMinFullBlocks)
 	chain := testChainBase.shorten(targetBlocks)
 
 	// Attempt to sync with an attacker that feeds junk during the fast sync phase.
@@ -1426,7 +1426,7 @@ func testCheckpointEnforcement(t *testing.T, protocol uint, mode SyncMode) {
 	tester := newTester(t)
 	defer tester.terminate()
 
-	tester.downloader.checkpoint = uint64(fsMinFullBlocks) + 256
+	tester.downloader.checkpoint = uint64(tester.downloader.fsMinFullBlocks) + 256
 	chain := testChainBase.shorten(int(tester.downloader.checkpoint) - 1)
 
 	// Attempt to sync with the peer and validate the result
@@ -1460,7 +1460,7 @@ func testBeaconSync(t *testing.T, protocol uint, mode SyncMode) {
 	}{
 		{name: "Beacon sync since genesis", local: 0},
 		{name: "Beacon sync with short local chain", local: 1},
-		{name: "Beacon sync with long local chain", local: blockCacheMaxItems - 15 - fsMinFullBlocks/2},
+		{name: "Beacon sync with long local chain", local: blockCacheMaxItems - 15 - 128/2},
 		{name: "Beacon sync with full local chain", local: blockCacheMaxItems - 15 - 1},
 	}
 	for _, c := range cases {

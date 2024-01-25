@@ -27,7 +27,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
@@ -1072,7 +1071,8 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		work.gasPool = new(core.GasPool).AddGas(work.header.GasLimit)
 	}
 
-	misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
+	// opBNB no need to hard code this contract via hardfork
+	// misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
 
 	for _, tx := range genParams.txs {
 		from, _ := types.Sender(work.signer, tx)

@@ -106,7 +106,7 @@ func newPayload(empty *types.Block, id engine.PayloadID) *Payload {
 }
 
 // update updates the full-block with latest built version.
-func (payload *Payload) update(r *newPayloadResult, elapsed time.Duration) {
+func (payload *Payload) update(r *newPayloadResult, elapsed time.Duration, postFuncs ...func()) {
 	payload.lock.Lock()
 	defer payload.lock.Unlock()
 
@@ -135,6 +135,12 @@ func (payload *Payload) update(r *newPayloadResult, elapsed time.Duration) {
 			"root", r.block.Root(),
 			"elapsed", common.PrettyDuration(elapsed),
 		)
+
+		for _, postFunc := range postFuncs {
+			if postFunc != nil {
+				postFunc()
+			}
+		}
 	}
 	payload.cond.Broadcast() // fire signal for notifying full block
 }
@@ -209,7 +215,9 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 		txs:         args.Transactions,
 		gasLimit:    args.GasLimit,
 	}
+	start := time.Now()
 	empty := w.getSealingBlock(emptyParams)
+	log.Debug("Built initial payload", "id", args.Id(), "number", empty.block.NumberU64(), "hash", empty.block.Hash(), "elapsed", common.PrettyDuration(time.Since(start)))
 	if empty.err != nil {
 		return nil, empty.err
 	}
@@ -254,9 +262,14 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			case <-timer.C:
 				start := time.Now()
 				r := w.getSealingBlock(fullParams)
-				if r.err == nil {
-					payload.update(r, time.Since(start))
+				if r.err != nil {
+					log.Error("Failed to build updated payload", "id", payload.id, "err", r.err)
+					return
 				}
+				log.Debug("Built updated payload", "id", payload.id, "number", r.block.NumberU64(), "hash", r.block.Hash(), "elapsed", common.PrettyDuration(time.Since(start)))
+				payload.update(r, time.Since(start), func() {
+					w.cacheMiningBlock(r.block, r.env)
+				})
 				timer.Reset(w.recommit)
 			case <-payload.stop:
 				log.Info("Stopping work on payload", "id", payload.id, "reason", "delivery")
@@ -268,4 +281,41 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 		}
 	}()
 	return payload, nil
+}
+
+func (w *worker) cacheMiningBlock(block *types.Block, env *environment) {
+	var (
+		start    = time.Now()
+		receipts = make([]*types.Receipt, len(env.receipts))
+		logs     []*types.Log
+		hash     = block.Hash()
+	)
+	for i, taskReceipt := range env.receipts {
+		receipt := new(types.Receipt)
+		receipts[i] = receipt
+		*receipt = *taskReceipt
+
+		// add block location fields
+		receipt.BlockHash = hash
+		receipt.BlockNumber = block.Number()
+		receipt.TransactionIndex = uint(i)
+
+		// Update the block hash in all logs since it is now available and not when the
+		// receipt/log of individual transactions were created.
+		receipt.Logs = make([]*types.Log, len(taskReceipt.Logs))
+		for i, taskLog := range taskReceipt.Logs {
+			log := new(types.Log)
+			receipt.Logs[i] = log
+			*log = *taskLog
+			log.BlockHash = hash
+		}
+		logs = append(logs, receipt.Logs...)
+	}
+
+	w.chain.CacheMiningReceipts(hash, receipts)
+	w.chain.CacheMiningTxLogs(hash, logs)
+	w.chain.CacheMiningState(hash, env.state)
+
+	log.Info("Successfully cached sealed new block", "number", block.Number(), "root", block.Root(), "hash", hash,
+		"elapsed", common.PrettyDuration(time.Since(start)))
 }

@@ -157,6 +157,7 @@ type newPayloadResult struct {
 	block    *types.Block
 	fees     *big.Int               // total block fees
 	sidecars []*types.BlobTxSidecar // collected blobs of blob transactions
+	env      *environment           // to cache state from env after built
 }
 
 // getWorkReq represents a request for getting a new sealing work with provided parameters.
@@ -289,8 +290,9 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	}
 	worker.newpayloadTimeout = newpayloadTimeout
 
-	worker.wg.Add(4)
+	worker.wg.Add(5)
 	go worker.mainLoop()
+	go worker.opLoop()
 	go worker.newWorkLoop(recommit)
 	go worker.resultLoop()
 	go worker.taskLoop()
@@ -551,9 +553,6 @@ func (w *worker) mainLoop() {
 		case req := <-w.newWorkCh:
 			w.commitWork(req.interrupt, req.timestamp)
 
-		case req := <-w.getWorkCh:
-			req.result <- w.generateWork(req.params)
-
 		case ev := <-w.txsCh:
 			if w.chainConfig.Optimism != nil && !w.config.RollupComputePendingBlock {
 				continue // don't update the pending-block snapshot if we are not computing the pending block
@@ -607,6 +606,20 @@ func (w *worker) mainLoop() {
 		case <-w.txsSub.Err():
 			return
 		case <-w.chainHeadSub.Err():
+			return
+		}
+	}
+}
+
+// opLoop is responsible for generating and submitting sealing work based on
+// the received event(building_payload).
+func (w *worker) opLoop() {
+	defer w.wg.Done()
+	for {
+		select {
+		case req := <-w.getWorkCh:
+			req.result <- w.generateWork(req.params)
+		case <-w.exitCh:
 			return
 		}
 	}
@@ -1105,6 +1118,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		block:    block,
 		fees:     totalFees(block, work.receipts),
 		sidecars: work.sidecars,
+		env:      work,
 	}
 }
 

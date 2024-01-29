@@ -50,8 +50,9 @@ var (
 type testTxPool struct {
 	pool map[common.Hash]*types.Transaction // Hash map of collected transactions
 
-	txFeed event.Feed   // Notification feed to allow waiting for inclusion
-	lock   sync.RWMutex // Protects the transaction pool
+	txFeed       event.Feed   // Notification feed to allow waiting for inclusion
+	reannoTxFeed event.Feed   // Notification feed to trigger reannouce
+	lock         sync.RWMutex // Protects the transaction pool
 }
 
 // newTestTxPool creates a mock transaction pool.
@@ -121,10 +122,28 @@ func (p *testTxPool) Pending(enforceTips bool) map[common.Address][]*txpool.Lazy
 	return pending
 }
 
+// ReannouceTransactions announce the transactions to some peers.
+func (p *testTxPool) ReannouceTransactions(txs []*types.Transaction) []error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	for _, tx := range txs {
+		p.pool[tx.Hash()] = tx
+	}
+	p.reannoTxFeed.Send(core.ReannoTxsEvent{Txs: txs})
+	return make([]error, len(txs))
+}
+
 // SubscribeTransactions should return an event subscription of NewTxsEvent and
 // send events to the given channel.
 func (p *testTxPool) SubscribeTransactions(ch chan<- core.NewTxsEvent, reorgs bool) event.Subscription {
 	return p.txFeed.Subscribe(ch)
+}
+
+// SubscribeReannoTxsEvent should return an event subscription of ReannoTxsEvent and
+// send events to the given channel.
+func (p *testTxPool) SubscribeReannoTxsEvent(ch chan<- core.ReannoTxsEvent) event.Subscription {
+	return p.reannoTxFeed.Subscribe(ch)
 }
 
 // testHandler is a live implementation of the Ethereum protocol handler, just

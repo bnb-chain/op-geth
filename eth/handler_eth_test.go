@@ -450,6 +450,59 @@ func testTransactionPropagation(t *testing.T, protocol uint) {
 	}
 }
 
+// Tests that pending transactions get propagated to peers.
+func TestTransactionPendingReannounce(t *testing.T) {
+	t.Parallel()
+
+	// Create a source handler to announce transactions from and a sink handler
+	// to receive them.
+	source := newTestHandler()
+	defer source.close()
+
+	sink := newTestHandler()
+	defer sink.close()
+	sink.handler.acceptTxs = 1 // mark synced to accept transactions
+
+	sourcePipe, sinkPipe := p2p.MsgPipe()
+	defer sourcePipe.Close()
+	defer sinkPipe.Close()
+
+	sourcePeer := eth.NewPeer(eth.ETH66, p2p.NewPeer(enode.ID{0}, "", nil), sourcePipe, source.txpool)
+	sinkPeer := eth.NewPeer(eth.ETH66, p2p.NewPeer(enode.ID{0}, "", nil), sinkPipe, sink.txpool)
+	defer sourcePeer.Close()
+	defer sinkPeer.Close()
+
+	go source.handler.runEthPeer(sourcePeer, func(peer *eth.Peer) error {
+		return eth.Handle((*ethHandler)(source.handler), peer)
+	})
+	go sink.handler.runEthPeer(sinkPeer, func(peer *eth.Peer) error {
+		return eth.Handle((*ethHandler)(sink.handler), peer)
+	})
+
+	// Subscribe transaction pools
+	txCh := make(chan core.NewTxsEvent, 1024)
+	sub := sink.txpool.SubscribeNewTxsEvent(txCh)
+	defer sub.Unsubscribe()
+
+	txs := make([]*types.Transaction, 64)
+	for nonce := range txs {
+		tx := types.NewTransaction(uint64(nonce), common.Address{}, big.NewInt(0), 100000, big.NewInt(0), nil)
+		tx, _ = types.SignTx(tx, types.HomesteadSigner{}, testKey)
+
+		txs[nonce] = tx
+	}
+	source.txpool.ReannouceTransactions(txs)
+
+	for arrived := 0; arrived < len(txs); {
+		select {
+		case event := <-txCh:
+			arrived += len(event.Txs)
+		case <-time.NewTimer(time.Second).C:
+			t.Errorf("sink: transaction propagation timed out: have %d, want %d", arrived, len(txs))
+		}
+	}
+}
+
 // Tests that blocks are broadcast to a sqrt number of peers only.
 func TestBroadcastBlock1Peer(t *testing.T)    { testBroadcastBlock(t, 1, 1) }
 func TestBroadcastBlock2Peers(t *testing.T)   { testBroadcastBlock(t, 2, 1) }

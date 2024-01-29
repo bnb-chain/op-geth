@@ -108,6 +108,8 @@ var (
 	slotsGauge   = metrics.NewRegisteredGauge("txpool/slots", nil)
 
 	reheapTimer = metrics.NewRegisteredTimer("txpool/reheap", nil)
+
+	staledMeter = metrics.NewRegisteredMeter("txpool/staled/count", nil) // staled transactions
 )
 
 // BlockChain defines the minimal set of methods needed to back a tx pool with
@@ -447,8 +449,9 @@ func (pool *LegacyPool) loop() {
 				return txs
 			}()
 			pool.mu.RUnlock()
+			staledMeter.Mark(int64(len(reannoTxs)))
 			if len(reannoTxs) > 0 {
-				pool.reannoTxFeed.Send(core.ReannoTxsEvent{reannoTxs})
+				pool.reannoTxFeed.Send(core.ReannoTxsEvent{Txs: reannoTxs})
 			}
 		}
 	}
@@ -1104,9 +1107,9 @@ func (pool *LegacyPool) addTxsLocked(txs []*types.Transaction, local bool) ([]er
 		errs[i] = err
 		if err == nil && !replaced {
 			dirty.addTx(tx)
+			validTxMeter.Mark(1)
 		}
 	}
-	validTxMeter.Mark(int64(len(dirty.accounts)))
 	return errs, dirty
 }
 
@@ -1554,6 +1557,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 			if pool.promoteTx(addr, hash, tx) {
 				promoted = append(promoted, tx)
 			}
+			log.Trace("Promoted queued transaction", "hash", hash)
 		}
 		log.Trace("Promoted queued transactions", "count", len(promoted))
 		queuedGauge.Dec(int64(len(readies)))

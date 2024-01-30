@@ -359,6 +359,9 @@ type ChainConfig struct {
 	RegolithTime *uint64  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
 	CanyonTime   *uint64  `json:"canyonTime,omitempty"`   // Canyon switch time (nil = no fork, 0 = already on optimism canyon)
 
+	// PreContractForkBlock hard-fork switch block (nil = no fork, 0 = already on preContractForkBlock)
+	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
+
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
 	TerminalTotalDifficulty *big.Int `json:"terminalTotalDifficulty,omitempty"`
@@ -501,6 +504,9 @@ func (c *ChainConfig) Description() string {
 	}
 	if c.RegolithTime != nil {
 		banner += fmt.Sprintf(" - Regolith:                    @%-10v\n", *c.RegolithTime)
+	}
+	if c.PreContractForkBlock != nil {
+		banner += fmt.Sprintf(" - PreContractForkBlock:        @%-10v\n", *c.PreContractForkBlock)
 	}
 	if c.CanyonTime != nil {
 		banner += fmt.Sprintf(" - Canyon:                      @%-10v\n", *c.CanyonTime)

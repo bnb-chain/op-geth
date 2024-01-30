@@ -36,7 +36,8 @@ var timeoutGracePeriod = 2 * time.Minute
 // peersRetryInterval is the retry interval when all peers cannot get the request data.
 var peersRetryInterval = 100 * time.Millisecond
 
-var maxRetries = 10
+// maxRetries is the max retry time for unreserved download task
+var maxRetries = 5
 
 // typedQueue is an interface defining the adaptor needed to translate the type
 // specific downloader/queue schedulers into the type-agnostic general concurrent
@@ -224,7 +225,7 @@ func (d *Downloader) concurrentFetch(queue typedQueue, beaconMode bool) error {
 				return errPeersUnavailable
 			}
 			// Retry the unreserved task in next loop
-			if len(pending) == 0 && queued > 0 && beaconMode {
+			if beaconMode && len(pending) == 0 && queued > 0 && !progressed && !throttled && len(idles) == d.peers.Len() {
 				log.Warn("All idle peers are not valid for current task, will retry ...")
 				requestRetried++
 				if requestRetried > maxRetries {

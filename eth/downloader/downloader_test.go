@@ -1460,7 +1460,7 @@ func testBeaconSync(t *testing.T, protocol uint, mode SyncMode) {
 	}{
 		{name: "Beacon sync since genesis", local: 0},
 		{name: "Beacon sync with short local chain", local: 1},
-		{name: "Beacon sync with long local chain", local: blockCacheMaxItems - 15 - 128/2},
+		{name: "Beacon sync with long local chain", local: blockCacheMaxItems - 15 - 64/2},
 		{name: "Beacon sync with full local chain", local: blockCacheMaxItems - 15 - 1},
 	}
 	for _, c := range cases {

@@ -245,24 +245,17 @@ func (p *Pruner) Prune(root common.Hash) error {
 	if stateBloomRoot != (common.Hash{}) {
 		return RecoverPruning(p.config.Datadir, p.db)
 	}
-	// If the target state root is not specified, use the HEAD-127 as the
+	// If the target state root is not specified, use the HEAD as the
 	// target. The reason for picking it is:
-	// - in most of the normal cases, the related state is available
-	// - the probability of this layer being reorg is very low
+	// - At opBNB, the possibility of reorg is very small, we don't need to roll back the block height,
+	//	 we just need to wait for the block height to be finalized during pruning.
+	// - Rolling back the block height currently causes the node to get stuck after startup.
+	//   Instead of fixing the complex logic that causes the node to get stuck,
+	//   we choose a more gentle way to solve the problem.
 	var layers []snapshot.Snapshot
 	if root == (common.Hash{}) {
-		// Retrieve all snapshot layers from the current HEAD.
-		// In theory there are 128 difflayers + 1 disk layer present,
-		// so 128 diff layers are expected to be returned.
-		layers = p.snaptree.Snapshots(p.chainHeader.Root, 128, true)
-		if len(layers) != 128 {
-			// Reject if the accumulated diff layers are less than 128. It
-			// means in most of normal cases, there is no associated state
-			// with bottom-most diff layer.
-			return fmt.Errorf("snapshot not old enough yet: need %d more blocks", 128-len(layers))
-		}
-		// Use the bottom-most diff layer as the target
-		root = layers[len(layers)-1].Root()
+		// Use the latest block header root as the target
+		root = p.chainHeader.Root
 	}
 	// Ensure the root is really present. The weak assumption
 	// is the presence of root can indicate the presence of the
@@ -298,7 +291,7 @@ func (p *Pruner) Prune(root common.Hash) error {
 		if len(layers) > 0 {
 			log.Info("Selecting bottom-most difflayer as the pruning target", "root", root, "height", p.chainHeader.Number.Uint64()-127)
 		} else {
-			log.Info("Selecting user-specified state as the pruning target", "root", root)
+			log.Info("Selecting user-specified state as the pruning target", "root", root, "height", p.chainHeader.Number.Uint64())
 		}
 	}
 	// All the state roots of the middle layer should be forcibly pruned,

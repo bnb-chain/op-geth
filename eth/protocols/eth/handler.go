@@ -157,12 +157,16 @@ func Handle(backend Backend, peer *Peer) error {
 	for {
 		err := handleMessage(backend, peer)
 		switch {
-		case errors.Is(err, etherror.ErrInvalidHeaderBatchAnchor):
-			// ignore invalid header anchor
-			peer.Log().Warn("Message handling failed with invalid batch request anchor")
-		case errors.Is(err, etherror.ErrNoHeadersDelivered):
-			// ignore no headers delivered
-			peer.Log().Warn("Message handling failed with no headers")
+		// TODO: currently no headers not ignored as it may leads to a dead peer not removing as expected
+		/*
+			case errors.Is(err, etherror.ErrNoHeadersDelivered):
+				// ignore no headers delivered
+				peer.Log().Warn("Message handling failed with no headers")
+		*/
+		case errors.Is(err, etherror.ErrHeaderBatchAnchorLow):
+			// ignore lower header anchor within tolerance
+			peer.Log().Warn("Message handling failed with lower batch anchor")
+
 		case err != nil:
 			peer.Log().Debug("Message handling failed in `eth`", "err", err)
 			return err

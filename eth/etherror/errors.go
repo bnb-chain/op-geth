@@ -8,4 +8,5 @@ var (
 	ErrNotEnoughNonGenesisHeaders = errors.New("not enough non-genesis headers delivered")
 	ErrNotEnoughGenesisHeaders    = errors.New("not enough genesis headers delivered")
 	ErrInvalidHashProgression     = errors.New("invalid hash progression")
+	ErrHeaderBatchAnchorLow       = errors.New("header batch anchor is lower than requested")
 )

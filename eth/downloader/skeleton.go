@@ -74,6 +74,9 @@ var errTerminated = errors.New("terminated")
 // with a new header, but it does not link up to the existing sync.
 var errReorgDenied = errors.New("non-forced head reorg denied")
 
+// maxBlockNumGapTolerance is the max gap tolerance by peer
+var maxBlockNumGapTolerance = uint64(30)
+
 func init() {
 	// Tuning parameters is nice, but the scratch space must be assignable in
 	// full to peers. It's a useless cornercase to support a dangling half-group.
@@ -793,7 +796,11 @@ func (s *skeleton) executeTask(peer *peerConnection, req *headerRequest) {
 		case headers[0].Number.Uint64() != req.head:
 			// Header batch anchored at non-requested number
 			peer.log.Debug("Invalid header response head", "have", headers[0].Number, "want", req.head)
-			res.Done <- etherror.ErrInvalidHeaderBatchAnchor
+			if req.head-headers[0].Number.Uint64() < maxBlockNumGapTolerance {
+				res.Done <- etherror.ErrHeaderBatchAnchorLow
+			} else {
+				res.Done <- etherror.ErrInvalidHeaderBatchAnchor
+			}
 			s.scheduleRevertRequest(req)
 
 		case req.head >= requestHeaders && len(headers) != requestHeaders:

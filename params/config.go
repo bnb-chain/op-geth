@@ -29,6 +29,10 @@ var (
 	HoleskyGenesisHash = common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
 	SepoliaGenesisHash = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
 	GoerliGenesisHash  = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
+
+	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
+	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
+	OPBNBDevNetGenesisHash  = common.HexToHash("0x49d448b8dc98cc95e3968615ff3dbd904d9eec8252c5f52271f029896e6147ee")
 )
 
 const (
@@ -158,6 +162,87 @@ var (
 			Epoch:  30000,
 		},
 	}
+
+	OPBNBMainNetConfig = &ChainConfig{
+		ChainID:                       big.NewInt(204),
+		HomesteadBlock:                big.NewInt(0),
+		EIP150Block:                   big.NewInt(0),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		MergeNetsplitBlock:            big.NewInt(0),
+		BedrockBlock:                  big.NewInt(0),
+		RegolithTime:                  newUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		Optimism: &OptimismConfig{
+			EIP1559Elasticity:  2,
+			EIP1559Denominator: 8,
+		},
+		Fermat: big.NewInt(9397477), // Nov-28-2023 06 AM +UTC
+	}
+	OPBNBTestNetConfig = &ChainConfig{
+		ChainID:                       big.NewInt(5611),
+		HomesteadBlock:                big.NewInt(0),
+		EIP150Block:                   big.NewInt(0),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		MergeNetsplitBlock:            big.NewInt(0),
+		BedrockBlock:                  big.NewInt(0),
+		RegolithTime:                  newUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		Optimism: &OptimismConfig{
+			EIP1559Elasticity:  2,
+			EIP1559Denominator: 8,
+		},
+		PreContractForkBlock: big.NewInt(5805494),
+		Fermat:               big.NewInt(12113000), // Nov-03-2023 06 AM +UTC
+	}
+	OPBNBDevNetConfig = &ChainConfig{
+		ChainID:                       big.NewInt(1320),
+		HomesteadBlock:                big.NewInt(0),
+		EIP150Block:                   big.NewInt(0),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		MergeNetsplitBlock:            big.NewInt(0),
+		BedrockBlock:                  big.NewInt(0),
+		RegolithTime:                  newUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		Optimism: &OptimismConfig{
+			EIP1559Elasticity:  2,
+			EIP1559Denominator: 8,
+		},
+		Fermat: big.NewInt(3615117),
+	}
+
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Ethash consensus.
 	AllEthashProtocolChanges = &ChainConfig{
@@ -178,6 +263,7 @@ var (
 		ArrowGlacierBlock:             big.NewInt(0),
 		GrayGlacierBlock:              big.NewInt(0),
 		MergeNetsplitBlock:            nil,
+		Fermat:                        big.NewInt(0),
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
@@ -203,6 +289,7 @@ var (
 		LondonBlock:                   big.NewInt(0),
 		ArrowGlacierBlock:             big.NewInt(0),
 		GrayGlacierBlock:              big.NewInt(0),
+		Fermat:                        big.NewInt(0),
 		ShanghaiTime:                  newUint64(0),
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
@@ -229,6 +316,7 @@ var (
 		ArrowGlacierBlock:             nil,
 		GrayGlacierBlock:              nil,
 		MergeNetsplitBlock:            nil,
+		Fermat:                        big.NewInt(0),
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
@@ -259,6 +347,7 @@ var (
 		ArrowGlacierBlock:             big.NewInt(0),
 		GrayGlacierBlock:              big.NewInt(0),
 		MergeNetsplitBlock:            nil,
+		Fermat:                        big.NewInt(0),
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
@@ -289,6 +378,7 @@ var (
 		ArrowGlacierBlock:             nil,
 		GrayGlacierBlock:              nil,
 		MergeNetsplitBlock:            nil,
+		Fermat:                        nil,
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
@@ -361,6 +451,8 @@ type ChainConfig struct {
 
 	// PreContractForkBlock hard-fork switch block (nil = no fork, 0 = already on preContractForkBlock)
 	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
+	// Fermat switch block (nil = no fork, 0 = already on Fermat)
+	Fermat *big.Int `json:"fermat,omitempty"`
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -505,12 +597,15 @@ func (c *ChainConfig) Description() string {
 	if c.RegolithTime != nil {
 		banner += fmt.Sprintf(" - Regolith:                    @%-10v\n", *c.RegolithTime)
 	}
-	if c.PreContractForkBlock != nil {
-		banner += fmt.Sprintf(" - PreContractForkBlock:        @%-10v\n", *c.PreContractForkBlock)
-	}
 	if c.CanyonTime != nil {
 		banner += fmt.Sprintf(" - Canyon:                      @%-10v\n", *c.CanyonTime)
 	}
+	banner += "OPBNB hard forks (block based):\n"
+	if c.PreContractForkBlock != nil {
+		banner += fmt.Sprintf(" - PreContractForkBlock:        #%-8v\n", c.PreContractForkBlock)
+	}
+	// TODO: add bep
+	banner += fmt.Sprintf(" - Fermat:              #%-8v\n", c.Fermat)
 	return banner
 }
 
@@ -647,6 +742,11 @@ func (c *ChainConfig) IsOptimismCanyon(time uint64) bool {
 // IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
 func (c *ChainConfig) IsOptimismPreBedrock(num *big.Int) bool {
 	return c.IsOptimism() && !c.IsBedrock(num)
+}
+
+// IsFermat returns whether num is either equal to the Fermat fork block or greater.
+func (c *ChainConfig) IsFermat(num *big.Int) bool {
+	return isBlockForked(c.Fermat, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -810,6 +910,12 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.VerkleTime, newcfg.VerkleTime, headTimestamp) {
 		return newTimestampCompatError("Verkle fork timestamp", c.VerkleTime, newcfg.VerkleTime)
 	}
+	if isForkBlockIncompatible(c.PreContractForkBlock, newcfg.PreContractForkBlock, headNumber) {
+		return newBlockCompatError("PreContract fork block", c.PreContractForkBlock, newcfg.PreContractForkBlock)
+	}
+	if isForkBlockIncompatible(c.Fermat, newcfg.Fermat, headNumber) {
+		return newBlockCompatError("Fermat fork block", c.Fermat, newcfg.Fermat)
+	}
 	return nil
 }
 
@@ -968,6 +1074,7 @@ type Rules struct {
 	IsVerkle                                                bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
 	IsOptimismCanyon                                        bool
+	IsFermat                                                bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -997,5 +1104,7 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
 		IsOptimismCanyon:   c.IsOptimismCanyon(timestamp),
+		// OPBNB
+		IsFermat: c.IsFermat(num),
 	}
 }

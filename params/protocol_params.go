@@ -166,6 +166,10 @@ const (
 	Bls12381MapG1Gas          uint64 = 5500   // Gas price for BLS12-381 mapping field element to G1 operation
 	Bls12381MapG2Gas          uint64 = 110000 // Gas price for BLS12-381 mapping field element to G2 operation
 
+	CometBFTLightBlockValidateGas uint64 = 3000 // Gas for validate cometBFT light block
+	BlsSignatureVerifyBaseGas     uint64 = 1000 // base price for a BLS signature verify operation
+	BlsSignatureVerifyPerKeyGas   uint64 = 3500 // Per-key price for a BLS signature verify operation
+
 	// The Refund Quotient is the cap on how much of the used gas can be refunded. Before EIP-3529,
 	// up to half the consumed gas could be refunded. Redefined as 1/5th in EIP-3529
 	RefundQuotient        uint64 = 2

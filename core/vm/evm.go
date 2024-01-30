@@ -43,6 +43,8 @@ func (evm *EVM) precompile(addr common.Address) (PrecompiledContract, bool) {
 	switch {
 	case evm.chainRules.IsCancun:
 		precompiles = PrecompiledContractsCancun
+	case evm.chainRules.IsFermat:
+		precompiles = PrecompiledContractsFermat
 	case evm.chainRules.IsBerlin:
 		precompiles = PrecompiledContractsBerlin
 	case evm.chainRules.IsIstanbul:

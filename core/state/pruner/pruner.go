@@ -274,10 +274,13 @@ func (p *Pruner) Prune(root common.Hash) error {
 	if stateBloomRoot != (common.Hash{}) {
 		return RecoverPruning(p.config.Datadir, p.db, p.config.Cachedir, p.triesInMemory)
 	}
-	// If the target state root is not specified, use the HEAD-(n-1) as the
+	// If the target state root is not specified, use the HEAD as the
 	// target. The reason for picking it is:
-	// - in most of the normal cases, the related state is available
-	// - the probability of this layer being reorg is very low
+	// - At opBNB, the possibility of reorg is very small, we don't need to roll back the block height,
+	//	 we just need to wait for the block height to be finalized during pruning.
+	// - Rolling back the block height currently causes the node to get stuck after startup.
+	//   Instead of fixing the complex logic that causes the node to get stuck,
+	//   we choose a more gentle way to solve the problem.
 	var layers []snapshot.Snapshot
 	if root == (common.Hash{}) {
 		// Use the latest block header root as the target

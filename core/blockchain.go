@@ -149,6 +149,8 @@ type CacheConfig struct {
 
 	SnapshotNoBuild bool // Whether the background generation is allowed
 	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+
+	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 }
 
 // triedbConfig derives the configures for trie database.
@@ -1473,7 +1475,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	chosen := current - TriesInMemory
 	flushInterval := time.Duration(bc.flushInterval.Load())
 	// If we exceeded time allowance, flush an entire trie to disk
-	if bc.gcproc > flushInterval {
+	if bc.gcproc > flushInterval || (bc.cacheConfig.TrieCommitInterval != 0 && chosen%bc.cacheConfig.TrieCommitInterval == 0) {
 		// If the header is missing (canonical chain behind), we're reorging a low
 		// diff sidechain. Suspend committing until this operation is completed.
 		header := bc.GetHeaderByNumber(chosen)

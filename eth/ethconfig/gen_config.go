@@ -42,6 +42,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TrieCleanCache                          int
 		TrieDirtyCache                          int
 		TrieTimeout                             time.Duration
+		TrieCommitInterval                      uint64
 		SnapshotCache                           int
 		Preimages                               bool
 		FilterLogCacheSize                      int
@@ -91,6 +92,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.TrieCleanCache = c.TrieCleanCache
 	enc.TrieDirtyCache = c.TrieDirtyCache
 	enc.TrieTimeout = c.TrieTimeout
+	enc.TrieCommitInterval = c.TrieCommitInterval
 	enc.SnapshotCache = c.SnapshotCache
 	enc.Preimages = c.Preimages
 	enc.FilterLogCacheSize = c.FilterLogCacheSize
@@ -144,6 +146,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TrieCleanCache                          *int
 		TrieDirtyCache                          *int
 		TrieTimeout                             *time.Duration
+		TrieCommitInterval                      *uint64
 		SnapshotCache                           *int
 		Preimages                               *bool
 		FilterLogCacheSize                      *int
@@ -245,6 +248,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.TrieTimeout != nil {
 		c.TrieTimeout = *dec.TrieTimeout
+	}
+	if dec.TrieCommitInterval != nil {
+		c.TrieCommitInterval = *dec.TrieCommitInterval
 	}
 	if dec.SnapshotCache != nil {
 		c.SnapshotCache = *dec.SnapshotCache

@@ -1114,9 +1114,9 @@ func setNodeUserIdent(ctx *cli.Context, cfg *node.Config) {
 // 1. --bootnodes flag
 // 2. Config file
 // 3. Network preset flags (e.g. --goerli)
-// 4. default to mainnet nodes
+// 4. default to opbnb mainnet nodes
 func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.MainnetBootnodes
+	urls := params.OpBNBMainnetBootnodes
 	if ctx.IsSet(BootnodesFlag.Name) {
 		urls = SplitAndTrim(ctx.String(BootnodesFlag.Name))
 	} else {
@@ -1130,6 +1130,10 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.SepoliaBootnodes
 		case ctx.Bool(GoerliFlag.Name):
 			urls = params.GoerliBootnodes
+		case ctx.Bool(NetworkIdFlag.Name):
+			if ctx.Uint64(NetworkIdFlag.Name) == params.OpBNBTestnet {
+				urls = params.OpBNBTestnetBootnodes
+			}
 		}
 	}
 	cfg.BootstrapNodes = mustParseBootnodes(urls)

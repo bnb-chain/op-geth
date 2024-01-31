@@ -447,6 +447,12 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.SepoliaChainConfig
 	case ghash == params.GoerliGenesisHash:
 		return params.GoerliChainConfig
+	case ghash == params.OPBNBMainNetGenesisHash:
+		return params.OPBNBMainNetConfig
+	case ghash == params.OPBNBTestNetGenesisHash:
+		return params.OPBNBTestNetConfig
+	case ghash == params.OPBNBDevNetGenesisHash:
+		return params.OPBNBDevNetConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}

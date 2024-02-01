@@ -26,6 +26,10 @@ const (
 	GasUnitOverflow         = "GasUnitOverflow"
 )
 
+func Meter(err string) metrics.Meter {
+	return meter(err)
+}
+
 func meter(err string) metrics.Meter {
 	return metrics.GetOrRegisterMeter("txpool/invalid/"+err, nil)
 }

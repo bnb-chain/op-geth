@@ -129,9 +129,11 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 	// the transaction metadata
 	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, opts.Config.IsIstanbul(head.Number), opts.Config.IsShanghai(head.Number, head.Time))
 	if err != nil {
+		meter(GasUnitOverflow).Mark(1)
 		return err
 	}
 	if tx.Gas() < intrGas {
+		meter(IntrinsicGas).Mark(1)
 		return fmt.Errorf("%w: needed %v, allowed %v", core.ErrIntrinsicGas, intrGas, tx.Gas())
 	}
 	// Ensure the gasprice is high enough to cover the requirement of the calling
@@ -271,11 +273,13 @@ func ValidateTransactionWithState(tx *types.Transaction, signer types.Signer, op
 		bump := new(big.Int).Sub(cost, prev)
 		need := new(big.Int).Add(spent, bump)
 		if balance.Cmp(need) < 0 {
+			meter(Overdraft).Mark(1)
 			return fmt.Errorf("%w: balance %v, queued cost %v, tx bumped %v, overshot %v", core.ErrInsufficientFunds, balance, spent, bump, new(big.Int).Sub(need, balance))
 		}
 	} else {
 		need := new(big.Int).Add(spent, cost)
 		if balance.Cmp(need) < 0 {
+			meter(Overdraft).Mark(1)
 			return fmt.Errorf("%w: balance %v, queued cost %v, tx cost %v, overshot %v", core.ErrInsufficientFunds, balance, spent, cost, new(big.Int).Sub(need, balance))
 		}
 		// Transaction takes a new nonce value out of the pool. Ensure it doesn't

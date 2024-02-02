@@ -67,7 +67,7 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 	// This is for spam protection, not consensus,
 	// as the external engine-API user authenticates deposits.
 	if tx.Type() == types.DepositTxType {
-		meter(TypeNotSupportDeposit).Mark(1)
+		Meter(TypeNotSupportDeposit).Mark(1)
 		return core.ErrTxTypeNotSupported
 	}
 	// Ensure transactions not implemented by the calling pool are rejected
@@ -81,11 +81,11 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 	}
 	// Ensure only transactions that have been enabled are accepted
 	if !opts.Config.IsBerlin(head.Number) && tx.Type() != types.LegacyTxType {
-		meter(TypeNotSupport2718).Mark(1)
+		Meter(TypeNotSupport2718).Mark(1)
 		return fmt.Errorf("%w: type %d rejected, pool not yet in Berlin", core.ErrTxTypeNotSupported, tx.Type())
 	}
 	if !opts.Config.IsLondon(head.Number) && tx.Type() == types.DynamicFeeTxType {
-		meter(TypeNotSupport1559).Mark(1)
+		Meter(TypeNotSupport1559).Mark(1)
 		return fmt.Errorf("%w: type %d rejected, pool not yet in London", core.ErrTxTypeNotSupported, tx.Type())
 	}
 	if !opts.Config.IsCancun(head.Number, head.Time) && tx.Type() == types.BlobTxType {
@@ -93,13 +93,13 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 	}
 	// Check whether the init code size has been exceeded
 	if opts.Config.IsShanghai(head.Number, head.Time) && tx.To() == nil && len(tx.Data()) > params.MaxInitCodeSize {
-		meter(MaxInitCodeSizeExceeded).Mark(1)
+		Meter(MaxInitCodeSizeExceeded).Mark(1)
 		return fmt.Errorf("%w: code size %v, limit %v", core.ErrMaxInitCodeSizeExceeded, len(tx.Data()), params.MaxInitCodeSize)
 	}
 	// Transactions can't be negative. This may never happen using RLP decoded
 	// transactions but may occur for transactions created using the RPC.
 	if tx.Value().Sign() < 0 {
-		meter(NegativeValue).Mark(1)
+		Meter(NegativeValue).Mark(1)
 		return ErrNegativeValue
 	}
 	// Ensure the transaction doesn't exceed the current block limit gas
@@ -108,36 +108,38 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 	}
 	// Sanity check for extremely large numbers (supported by RLP or RPC)
 	if tx.GasFeeCap().BitLen() > 256 {
-		meter(FeeCapVeryHigh).Mark(1)
+		Meter(FeeCapVeryHigh).Mark(1)
 		return core.ErrFeeCapVeryHigh
 	}
 	if tx.GasTipCap().BitLen() > 256 {
-		meter(TipVeryHigh).Mark(1)
+		Meter(TipVeryHigh).Mark(1)
 		return core.ErrTipVeryHigh
 	}
 	// Ensure gasFeeCap is greater than or equal to gasTipCap
 	if tx.GasFeeCapIntCmp(tx.GasTipCap()) < 0 {
-		meter(TipAboveFeeCap).Mark(1)
+		Meter(TipAboveFeeCap).Mark(1)
 		return core.ErrTipAboveFeeCap
 	}
 	// Make sure the transaction is signed properly
 	if _, err := types.Sender(signer, tx); err != nil {
-		meter(InvalidSender).Mark(1)
+		Meter(InvalidSender).Mark(1)
 		return ErrInvalidSender
 	}
 	// Ensure the transaction has more gas than the bare minimum needed to cover
 	// the transaction metadata
 	intrGas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, opts.Config.IsIstanbul(head.Number), opts.Config.IsShanghai(head.Number, head.Time))
 	if err != nil {
+		Meter(GasUnitOverflow).Mark(1)
 		return err
 	}
 	if tx.Gas() < intrGas {
+		Meter(IntrinsicGas).Mark(1)
 		return fmt.Errorf("%w: needed %v, allowed %v", core.ErrIntrinsicGas, intrGas, tx.Gas())
 	}
 	// Ensure the gasprice is high enough to cover the requirement of the calling
 	// pool and/or block producer
 	if tx.GasTipCapIntCmp(opts.MinTip) < 0 {
-		meter(Underpriced).Mark(1)
+		Meter(Underpriced).Mark(1)
 		return fmt.Errorf("%w: tip needed %v, tip permitted %v", ErrUnderpriced, opts.MinTip, tx.GasTipCap())
 	}
 	// Ensure blob transactions have valid commitments
@@ -240,7 +242,7 @@ func ValidateTransactionWithState(tx *types.Transaction, signer types.Signer, op
 	}
 	next := opts.State.GetNonce(from)
 	if next > tx.Nonce() {
-		meter(NonceTooLow).Mark(1)
+		Meter(NonceTooLow).Mark(1)
 		return fmt.Errorf("%w: next nonce %v, tx nonce %v", core.ErrNonceTooLow, next, tx.Nonce())
 	}
 	// Ensure the transaction doesn't produce a nonce gap in pools that do not
@@ -261,7 +263,7 @@ func ValidateTransactionWithState(tx *types.Transaction, signer types.Signer, op
 		}
 	}
 	if balance.Cmp(cost) < 0 {
-		meter(InsufficientFunds).Mark(1)
+		Meter(InsufficientFunds).Mark(1)
 		return fmt.Errorf("%w: balance %v, tx cost %v, overshot %v", core.ErrInsufficientFunds, balance, cost, new(big.Int).Sub(cost, balance))
 	}
 	// Ensure the transactor has enough funds to cover for replacements or nonce
@@ -271,11 +273,13 @@ func ValidateTransactionWithState(tx *types.Transaction, signer types.Signer, op
 		bump := new(big.Int).Sub(cost, prev)
 		need := new(big.Int).Add(spent, bump)
 		if balance.Cmp(need) < 0 {
+			Meter(Overdraft).Mark(1)
 			return fmt.Errorf("%w: balance %v, queued cost %v, tx bumped %v, overshot %v", core.ErrInsufficientFunds, balance, spent, bump, new(big.Int).Sub(need, balance))
 		}
 	} else {
 		need := new(big.Int).Add(spent, cost)
 		if balance.Cmp(need) < 0 {
+			Meter(Overdraft).Mark(1)
 			return fmt.Errorf("%w: balance %v, queued cost %v, tx cost %v, overshot %v", core.ErrInsufficientFunds, balance, spent, cost, new(big.Int).Sub(need, balance))
 		}
 		// Transaction takes a new nonce value out of the pool. Ensure it doesn't

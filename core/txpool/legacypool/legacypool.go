@@ -829,6 +829,7 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 					pool.priced.Put(dropTx, false)
 				}
 				log.Trace("Discarding future transaction replacing pending tx", "hash", hash)
+				txpool.Meter(txpool.FutureReplacePending).Mark(1)
 				return false, txpool.ErrFutureReplacePending
 			}
 		}
@@ -940,6 +941,7 @@ func (pool *LegacyPool) enqueueTx(hash common.Hash, tx *types.Transaction, local
 	// If the transaction isn't in lookup set but it's expected to be there,
 	// show the error log.
 	if pool.all.Get(hash) == nil && !addAll {
+		txpool.Meter(txpool.MissingTransaction).Mark(1)
 		log.Error("Missing transaction in lookup set, please report the issue", "hash", hash)
 	}
 	if addAll {

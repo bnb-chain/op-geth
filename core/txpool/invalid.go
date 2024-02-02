@@ -27,10 +27,6 @@ const (
 )
 
 func Meter(err string) metrics.Meter {
-	return meter(err)
-}
-
-func meter(err string) metrics.Meter {
 	return metrics.GetOrRegisterMeter("txpool/invalid/"+err, nil)
 }
 
@@ -57,6 +53,6 @@ func init() {
 		FutureReplacePending,
 		GasUnitOverflow,
 	} {
-		meter(err).Mark(0)
+		Meter(err).Mark(0)
 	}
 }

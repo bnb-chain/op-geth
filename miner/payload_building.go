@@ -217,10 +217,11 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	}
 	start := time.Now()
 	empty := w.getSealingBlock(emptyParams)
-	log.Debug("Built initial payload", "id", args.Id(), "number", empty.block.NumberU64(), "hash", empty.block.Hash(), "elapsed", common.PrettyDuration(time.Since(start)))
 	if empty.err != nil {
+		log.Error("Built initial payload error", "id", args.Id(), "error", empty.err)
 		return nil, empty.err
 	}
+	log.Debug("Built initial payload", "id", args.Id(), "number", empty.block.NumberU64(), "hash", empty.block.Hash(), "elapsed", common.PrettyDuration(time.Since(start)))
 
 	// Construct a payload object for return.
 	payload := newPayload(empty.block, args.Id())

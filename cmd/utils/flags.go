@@ -165,6 +165,22 @@ var (
 		Category: flags.EthCategory,
 	}
 
+	OpBNBMainnetFlag = &cli.BoolFlag{
+		Name:     "opBNBMainnet",
+		Usage:    "opBNB mainnet",
+		Category: flags.EthCategory,
+	}
+	OpBNBTestnetFlag = &cli.BoolFlag{
+		Name:     "opBNBTestnet",
+		Usage:    "opBNB Testnet",
+		Category: flags.EthCategory,
+	}
+	OpBNBDevnetFlag = &cli.BoolFlag{
+		Name:     "opBNBDevnet",
+		Usage:    "opBNB Devnet just for test",
+		Category: flags.EthCategory,
+	}
+
 	// Dev mode
 	DeveloperFlag = &cli.BoolFlag{
 		Name:     "dev",
@@ -1036,9 +1052,10 @@ var (
 		GoerliFlag,
 		SepoliaFlag,
 		HoleskyFlag,
+		OpBNBTestnetFlag,
 	}
 	// NetworkFlags is the flag group of all built-in supported networks.
-	NetworkFlags = append([]cli.Flag{MainnetFlag, OPNetworkFlag}, TestnetFlags...)
+	NetworkFlags = append([]cli.Flag{MainnetFlag, OPNetworkFlag, OpBNBMainnetFlag}, TestnetFlags...)
 
 	// DatabaseFlags is the flag group of all database flags.
 	DatabaseFlags = []cli.Flag{
@@ -1757,7 +1774,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags
-	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, GoerliFlag, SepoliaFlag, HoleskyFlag, OPNetworkFlag)
+	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, GoerliFlag, SepoliaFlag, HoleskyFlag, OPNetworkFlag, OpBNBMainnetFlag, OpBNBTestnetFlag, OpBNBDevnetFlag)
 	CheckExclusive(ctx, LightServeFlag, SyncModeFlag, "light")
 	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 
@@ -2004,6 +2021,21 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkId = genesis.Config.ChainID.Uint64()
 		}
 		cfg.Genesis = genesis
+	case ctx.Bool(OpBNBMainnetFlag.Name):
+		if !ctx.IsSet(NetworkIdFlag.Name) {
+			cfg.NetworkId = 204
+		}
+		cfg.Genesis = MakeGenesis(ctx)
+	case ctx.Bool(OpBNBTestnetFlag.Name):
+		if !ctx.IsSet(NetworkIdFlag.Name) {
+			cfg.NetworkId = 5611
+		}
+		cfg.Genesis = MakeGenesis(ctx)
+	case ctx.Bool(OpBNBDevnetFlag.Name):
+		if !ctx.IsSet(NetworkIdFlag.Name) {
+			cfg.NetworkId = 1322
+		}
+		cfg.Genesis = MakeGenesis(ctx)
 	default:
 		if cfg.NetworkId == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
@@ -2270,6 +2302,27 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		return genesis
 	case ctx.Bool(DeveloperFlag.Name):
 		Fatalf("Developer chains are ephemeral")
+	case ctx.Bool(OpBNBMainnetFlag.Name):
+		genesis, err := core.LoadOpBNBGenesis(params.OPBNBMainnetChainID)
+		if err != nil {
+			Fatalf("failed to load genesis for opBNB mainnet: %v", err)
+		}
+		genesis.Config = params.OPBNBMainNetConfig
+		return genesis
+	case ctx.Bool(OpBNBTestnetFlag.Name):
+		genesis, err := core.LoadOpBNBGenesis(params.OPBNBTestNetChainID)
+		if err != nil {
+			Fatalf("failed to load genesis for opBNB testnet: %v", err)
+		}
+		genesis.Config = params.OPBNBTestNetConfig
+		return genesis
+	case ctx.Bool(OpBNBDevnetFlag.Name):
+		genesis, err := core.LoadOpBNBGenesis(params.OPBNBDevNetChainID)
+		if err != nil {
+			Fatalf("failed to load genesis for opBNB devnet: %v", err)
+		}
+		genesis.Config = params.OPBNBDevNetConfig
+		return genesis
 	}
 	return genesis
 }

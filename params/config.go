@@ -32,7 +32,7 @@ var (
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBDevNetGenesisHash  = common.HexToHash("0x49d448b8dc98cc95e3968615ff3dbd904d9eec8252c5f52271f029896e6147ee")
+	OPBNBDevNetGenesisHash  = common.HexToHash("0x1cba296441b55cf9b5b306b6aef43e68e9aeff2450d68c391dec448604cf3baf")
 )
 
 const (
@@ -45,6 +45,12 @@ const (
 	pgnSepoliaChainID       = 58008
 	devnetChainID           = 997
 	chaosnetChainID         = 888
+)
+
+const (
+	OPBNBMainnetChainID = 204
+	OPBNBTestNetChainID = 5611
+	OPBNBDevNetChainID  = 1322
 )
 
 // OP Stack chain config
@@ -217,7 +223,7 @@ var (
 		Fermat:               big.NewInt(12113000), // Nov-03-2023 06 AM +UTC
 	}
 	OPBNBDevNetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(1320),
+		ChainID:                       big.NewInt(1322),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
 		EIP155Block:                   big.NewInt(0),
@@ -240,7 +246,7 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		Fermat: big.NewInt(3615117),
+		// Fermat: big.NewInt(3615117),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -407,6 +413,9 @@ var NetworkNames = map[string]string{
 	GoerliChainConfig.ChainID.String():  "goerli",
 	SepoliaChainConfig.ChainID.String(): "sepolia",
 	HoleskyChainConfig.ChainID.String(): "holesky",
+	OPBNBMainNetConfig.ChainID.String(): "opBNBMainnet",
+	OPBNBTestNetConfig.ChainID.String(): "opBNBTestnet",
+	OPBNBDevNetConfig.ChainID.String():  "opBNBDevnet",
 }
 
 // ChainConfig is the core config which determines the blockchain settings.

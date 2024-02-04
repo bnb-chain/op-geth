@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ethereum-optimism/superchain-registry/superchain"
@@ -674,4 +676,31 @@ func decodePrealloc(data string) GenesisAlloc {
 		ga[common.BigToAddress(account.Addr)] = acc
 	}
 	return ga
+}
+
+func LoadOpBNBGenesis(chainID uint64) (*Genesis, error) {
+	var genesisPath string
+	switch chainID {
+	case params.OPBNBMainnetChainID:
+		genesisPath = filepath.Join("assets", "mainnet", "genesis.json")
+		// genesisPath = filepath.Join("assets/mainnet/genesis.json")
+	case params.OPBNBTestNetChainID:
+		// genesisPath = filepath.Join("assets/testnet/genesis.json")
+		genesisPath = filepath.Join("assets", "testnet", "genesis.json")
+	case params.OPBNBDevNetChainID:
+		// genesisPath = filepath.Join("assets/devnet/genesis.json")
+		genesisPath = filepath.Join("assets", "devnet", "genesis.json")
+	default:
+		return nil, fmt.Errorf("unknown stateless genesis definition for chain %d", chainID)
+	}
+	file, err := os.Open(genesisPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load genesis for chain %d: %w", chainID, err)
+	}
+	defer file.Close()
+	genesis := new(Genesis)
+	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+		return nil, fmt.Errorf("invalid genesis for chain %d: %w", chainID, err)
+	}
+	return genesis, nil
 }

@@ -683,12 +683,9 @@ func LoadOpBNBGenesis(chainID uint64) (*Genesis, error) {
 	switch chainID {
 	case params.OPBNBMainnetChainID:
 		genesisPath = filepath.Join("assets", "mainnet", "genesis.json")
-		// genesisPath = filepath.Join("assets/mainnet/genesis.json")
 	case params.OPBNBTestNetChainID:
-		// genesisPath = filepath.Join("assets/testnet/genesis.json")
 		genesisPath = filepath.Join("assets", "testnet", "genesis.json")
 	case params.OPBNBDevNetChainID:
-		// genesisPath = filepath.Join("assets/devnet/genesis.json")
 		genesisPath = filepath.Join("assets", "devnet", "genesis.json")
 	default:
 		return nil, fmt.Errorf("unknown stateless genesis definition for chain %d", chainID)

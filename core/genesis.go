@@ -18,13 +18,13 @@ package core
 
 import (
 	"bytes"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
-	"path/filepath"
+	"path"
 	"strings"
 
 	"github.com/ethereum-optimism/superchain-registry/superchain"
@@ -45,6 +45,9 @@ import (
 
 //go:generate go run github.com/fjl/gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate go run github.com/fjl/gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
+
+//go:embed assets/mainnet assets/testnet assets/devnet
+var assetFS embed.FS
 
 var errGenesisNoConfig = errors.New("genesis has no chain configuration")
 
@@ -682,21 +685,21 @@ func LoadOpBNBGenesis(chainID uint64) (*Genesis, error) {
 	var genesisPath string
 	switch chainID {
 	case params.OPBNBMainnetChainID:
-		genesisPath = filepath.Join("assets", "mainnet", "genesis.json")
+		genesisPath = path.Join("assets", "mainnet", "genesis.json")
 	case params.OPBNBTestNetChainID:
-		genesisPath = filepath.Join("assets", "testnet", "genesis.json")
+		genesisPath = path.Join("assets", "testnet", "genesis.json")
 	case params.OPBNBDevNetChainID:
-		genesisPath = filepath.Join("assets", "devnet", "genesis.json")
+		genesisPath = path.Join("assets", "devnet", "genesis.json")
 	default:
 		return nil, fmt.Errorf("unknown stateless genesis definition for chain %d", chainID)
 	}
-	file, err := os.Open(genesisPath)
+	f, err := assetFS.Open(genesisPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load genesis for chain %d: %w", chainID, err)
 	}
-	defer file.Close()
+	defer f.Close()
 	genesis := new(Genesis)
-	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+	if err := json.NewDecoder(f).Decode(genesis); err != nil {
 		return nil, fmt.Errorf("invalid genesis for chain %d: %w", chainID, err)
 	}
 	return genesis, nil

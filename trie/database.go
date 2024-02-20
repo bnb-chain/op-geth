@@ -352,3 +352,14 @@ func (db *Database) SetBufferSize(size int) error {
 	}
 	return pdb.SetBufferSize(size)
 }
+
+// Head return the top non-fork difflayer/disklayer root hash for rewinding.
+// It's only supported by path-based database and will return empty hash for
+// others.
+func (db *Database) Head() common.Hash {
+	pdb, ok := db.backend.(*pathdb.Database)
+	if !ok {
+		return common.Hash{}
+	}
+	return pdb.Head()
+}

@@ -52,6 +52,14 @@ const (
 	// Do not increase the buffer size arbitrarily, otherwise the system
 	// pause time will increase when the database writes happen.
 	DefaultBufferSize = 64 * 1024 * 1024
+
+	// DefaultBackgroundFlushInterval defines the default the wait interval
+	// that background node cache flush disk.
+	DefaultBackgroundFlushInterval = 3
+
+	// DefaultBatchRedundancyRate defines the batch size, compatible write
+	// size calculation is inaccurate
+	DefaultBatchRedundancyRate = 1.1
 )
 
 // layer is the interface implemented by all state layers which includes some
@@ -86,6 +94,7 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
+	SyncFlush      bool   // Flag of trienodebuffer sync flush cache to disk
 	StateHistory   uint64 // Number of recent blocks to maintain state history for
 	CleanCacheSize int    // Maximum memory allowance (in bytes) for caching clean nodes
 	DirtyCacheSize int    // Maximum memory allowance (in bytes) for caching dirty nodes
@@ -186,7 +195,7 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 			log.Crit("Failed to disable database", "err", err) // impossible to happen
 		}
 	}
-	log.Warn("Path-based state scheme is an experimental feature")
+	log.Warn("Path-based state scheme is an experimental feature", "sync", db.config.SyncFlush)
 	return db
 }
 
@@ -303,7 +312,7 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	db.tree.reset(newDiskLayer(root, 0, db, nil, newNodeBuffer(db.bufferSize, nil, 0)))
+	db.tree.reset(newDiskLayer(root, 0, db, nil, NewTrieNodeBuffer(db.config.SyncFlush, db.bufferSize, nil, 0)))
 
 	// Re-enable the database as the final step.
 	db.waitSync = false
@@ -410,16 +419,16 @@ func (db *Database) Close() error {
 
 // Size returns the current storage size of the memory cache in front of the
 // persistent database layer.
-func (db *Database) Size() (diffs common.StorageSize, nodes common.StorageSize) {
+func (db *Database) Size() (diffs common.StorageSize, nodes common.StorageSize, immutableNodes common.StorageSize) {
 	db.tree.forEach(func(layer layer) {
 		if diff, ok := layer.(*diffLayer); ok {
 			diffs += common.StorageSize(diff.memory)
 		}
 		if disk, ok := layer.(*diskLayer); ok {
-			nodes += disk.size()
+			nodes, immutableNodes = disk.size()
 		}
 	})
-	return diffs, nodes
+	return diffs, nodes, immutableNodes
 }
 
 // Initialized returns an indicator if the state data is already

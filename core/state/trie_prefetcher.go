@@ -35,8 +35,9 @@ var (
 //
 // Note, the prefetcher's API is not thread safe.
 type triePrefetcher struct {
-	db       Database               // Database to fetch trie nodes through
-	root     common.Hash            // Root hash of the account trie for metrics
+	db       Database    // Database to fetch trie nodes through
+	root     common.Hash // Root hash of the account trie for metrics
+	lock     sync.RWMutex
 	fetches  map[string]Trie        // Partially or fully fetcher tries
 	fetchers map[string]*subfetcher // Subfetchers for each trie
 

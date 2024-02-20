@@ -29,6 +29,8 @@ import (
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
+var _ trienodebuffer = &nodebuffer{}
+
 // nodebuffer is a collection of modified trie nodes to aggregate the disk
 // write. The content of the nodebuffer must be checked before diving into
 // disk (since it basically is not-yet-written data).
@@ -80,7 +82,7 @@ func (b *nodebuffer) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 // the ownership of the nodes map which belongs to the bottom-most diff layer.
 // It will just hold the node references from the given map which are safe to
 // copy.
-func (b *nodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node) *nodebuffer {
+func (b *nodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer {
 	var (
 		delta         int64
 		overwrite     int64
@@ -273,3 +275,20 @@ func cacheKey(owner common.Hash, path []byte) []byte {
 	}
 	return append(owner.Bytes(), path...)
 }
+
+// getSize return the nodebuffer used size.
+func (b *nodebuffer) getSize() (uint64, uint64) {
+	return b.size, 0
+}
+
+// getAllNodes return all the trie nodes are cached in nodebuffer.
+func (b *nodebuffer) getAllNodes() map[common.Hash]map[string]*trienode.Node {
+	return b.nodes
+}
+
+// getLayers return the size of cached difflayers.
+func (b *nodebuffer) getLayers() uint64 {
+	return b.layers
+}
+
+func (b *nodebuffer) waitAndStopFlushing() {}

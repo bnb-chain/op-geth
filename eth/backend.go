@@ -207,6 +207,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			StateHistory:        config.StateHistory,
 			StateScheme:         scheme,
 			TrieCommitInterval:  config.TrieCommitInterval,
+			PathSyncFlush:       config.PathSyncFlush,
 		}
 	)
 	// Override the chain config with provided settings.

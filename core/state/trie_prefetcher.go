@@ -225,10 +225,9 @@ func (p *triePrefetcher) trie(owner common.Hash, root common.Hash) Trie {
 // used marks a batch of state items used to allow creating statistics as to
 // how useful or wasteful the prefetcher is.
 func (p *triePrefetcher) used(owner common.Hash, root common.Hash, used [][]byte) {
-	p.fetchersLock.Lock()
-	// keep lock until all data updated, make sure no concurrent read/write occurs
-	defer p.fetchersLock.Unlock()
+	p.fetchersLock.RLock()
 	fetcher := p.fetchers[p.trieID(owner, root)]
+	p.fetchersLock.RUnlock()
 	if fetcher != nil {
 		fetcher.used = used
 	}

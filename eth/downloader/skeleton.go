@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/eth/etherror"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -72,6 +73,9 @@ var errTerminated = errors.New("terminated")
 // errReorgDenied is returned if an attempt is made to extend the beacon chain
 // with a new header, but it does not link up to the existing sync.
 var errReorgDenied = errors.New("non-forced head reorg denied")
+
+// maxBlockNumGapTolerance is the max gap tolerance by peer
+var maxBlockNumGapTolerance = uint64(30)
 
 func init() {
 	// Tuning parameters is nice, but the scratch space must be assignable in
@@ -804,25 +808,29 @@ func (s *skeleton) executeTask(peer *peerConnection, req *headerRequest) {
 		case len(headers) == 0:
 			// No headers were delivered, reject the response and reschedule
 			peer.log.Debug("No headers delivered")
-			res.Done <- errors.New("no headers delivered")
+			res.Done <- etherror.ErrNoHeadersDelivered
 			s.scheduleRevertRequest(req)
 
 		case headers[0].Number.Uint64() != req.head:
 			// Header batch anchored at non-requested number
 			peer.log.Debug("Invalid header response head", "have", headers[0].Number, "want", req.head)
-			res.Done <- errors.New("invalid header batch anchor")
+			if req.head-headers[0].Number.Uint64() < maxBlockNumGapTolerance {
+				res.Done <- etherror.ErrHeaderBatchAnchorLow
+			} else {
+				res.Done <- etherror.ErrInvalidHeaderBatchAnchor
+			}
 			s.scheduleRevertRequest(req)
 
 		case req.head >= requestHeaders && len(headers) != requestHeaders:
 			// Invalid number of non-genesis headers delivered, reject the response and reschedule
 			peer.log.Debug("Invalid non-genesis header count", "have", len(headers), "want", requestHeaders)
-			res.Done <- errors.New("not enough non-genesis headers delivered")
+			res.Done <- etherror.ErrNotEnoughNonGenesisHeaders
 			s.scheduleRevertRequest(req)
 
 		case req.head < requestHeaders && uint64(len(headers)) != req.head:
 			// Invalid number of genesis headers delivered, reject the response and reschedule
 			peer.log.Debug("Invalid genesis header count", "have", len(headers), "want", headers[0].Number.Uint64())
-			res.Done <- errors.New("not enough genesis headers delivered")
+			res.Done <- etherror.ErrNotEnoughGenesisHeaders
 			s.scheduleRevertRequest(req)
 
 		default:
@@ -831,7 +839,7 @@ func (s *skeleton) executeTask(peer *peerConnection, req *headerRequest) {
 			for i := 0; i < len(headers)-1; i++ {
 				if headers[i].ParentHash != headers[i+1].Hash() {
 					peer.log.Debug("Invalid hash progression", "index", i, "wantparenthash", headers[i].ParentHash, "haveparenthash", headers[i+1].Hash())
-					res.Done <- errors.New("invalid hash progression")
+					res.Done <- etherror.ErrInvalidHashProgression
 					s.scheduleRevertRequest(req)
 					return
 				}

@@ -153,7 +153,19 @@ func nodeInfo(chain *core.BlockChain, network uint64) *NodeInfo {
 // connection is torn down.
 func Handle(backend Backend, peer *Peer) error {
 	for {
-		if err := handleMessage(backend, peer); err != nil {
+		err := handleMessage(backend, peer)
+		switch {
+		// TODO: currently no headers not ignored as it may leads to a dead peer not removing as expected
+		/*
+			case errors.Is(err, etherror.ErrNoHeadersDelivered):
+				// ignore no headers delivered
+				peer.Log().Warn("Message handling failed with no headers")
+
+			case errors.Is(err, etherror.ErrHeaderBatchAnchorLow):
+				// ignore lower header anchor within tolerance
+				peer.Log().Warn("Message handling failed with lower batch anchor")
+		*/
+		case err != nil:
 			peer.Log().Debug("Message handling failed in `eth`", "err", err)
 			return err
 		}

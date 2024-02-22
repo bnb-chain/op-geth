@@ -238,19 +238,39 @@ func (db *cachingDB) purgeLoop() {
 
 // OpenTrie opens the main account trie at a specific root hash.
 func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
+	//try cache first
+	if db.accountTrieCache != nil {
+		if tr, ok := db.accountTrieCache.Get(root); ok {
+			return tr.(Trie).(*trie.SecureTrie).Copy(), nil
+		}
+	}
+
 	tr, err := trie.NewStateTrie(trie.StateTrieID(root), db.triedb)
 	if err != nil {
 		return nil, err
 	}
+	db.CacheAccount(root, tr)
 	return tr, nil
 }
 
 // OpenStorageTrie opens the storage trie of an account.
 func (db *cachingDB) OpenStorageTrie(stateRoot common.Hash, addrHash, root common.Hash) (Trie, error) {
+	// try cache first
+	if db.storageTrieCache != nil {
+		if tries, exist := db.storageTrieCache.Get(addrHash); exist {
+			for _, triePair := range tries {
+				if triePair != nil && triePair.root == root {
+					return triePair.trie.(*trie.SecureTrie).Copy(), nil
+				}
+			}
+		}
+	}
+
 	tr, err := trie.NewStateTrie(trie.StorageTrieID(stateRoot, addrHash, root), db.triedb)
 	if err != nil {
 		return nil, err
 	}
+	db.CacheStorage(addrHash, root, tr)
 	return tr, nil
 }
 

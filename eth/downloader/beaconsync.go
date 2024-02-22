@@ -283,7 +283,7 @@ func (d *Downloader) fetchBeaconHeaders(from uint64) error {
 	var localHeaders []*types.Header
 	if from < tail.Number.Uint64() {
 		count := tail.Number.Uint64() - from
-		if count > uint64(fsMinFullBlocks) {
+		if count > d.fsMinFullBlocks {
 			return fmt.Errorf("invalid origin (%d) of beacon sync (%d)", from, tail.Number)
 		}
 		localHeaders = d.readHeaderRange(tail, int(count))
@@ -300,10 +300,10 @@ func (d *Downloader) fetchBeaconHeaders(from uint64) error {
 		// move it ahead to HEAD-64
 		d.pivotLock.Lock()
 		if d.pivotHeader != nil {
-			if head.Number.Uint64() > d.pivotHeader.Number.Uint64()+2*uint64(fsMinFullBlocks)-8 {
+			if head.Number.Uint64() > d.pivotHeader.Number.Uint64()+2*d.fsMinFullBlocks-8 {
 				// Retrieve the next pivot header, either from skeleton chain
 				// or the filled chain
-				number := head.Number.Uint64() - uint64(fsMinFullBlocks)
+				number := head.Number.Uint64() - d.fsMinFullBlocks
 
 				log.Warn("Pivot seemingly stale, moving", "old", d.pivotHeader.Number, "new", number)
 				if d.pivotHeader = d.skeleton.Header(number); d.pivotHeader == nil {

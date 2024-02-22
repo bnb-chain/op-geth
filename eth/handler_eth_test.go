@@ -115,22 +115,24 @@ func testForkIDSplit(t *testing.T, protocol uint) {
 		_, blocksProFork, _ = core.GenerateChainWithGenesis(gspecProFork, engine, 2, nil)
 
 		ethNoFork, _ = newHandler(&handlerConfig{
-			Database:   dbNoFork,
-			Chain:      chainNoFork,
-			TxPool:     newTestTxPool(),
-			Merger:     consensus.NewMerger(rawdb.NewMemoryDatabase()),
-			Network:    1,
-			Sync:       downloader.FullSync,
-			BloomCache: 1,
+			Database:      dbNoFork,
+			Chain:         chainNoFork,
+			TxPool:        newTestTxPool(),
+			Merger:        consensus.NewMerger(rawdb.NewMemoryDatabase()),
+			Network:       1,
+			Sync:          downloader.FullSync,
+			BloomCache:    1,
+			TriesInMemory: 128,
 		})
 		ethProFork, _ = newHandler(&handlerConfig{
-			Database:   dbProFork,
-			Chain:      chainProFork,
-			TxPool:     newTestTxPool(),
-			Merger:     consensus.NewMerger(rawdb.NewMemoryDatabase()),
-			Network:    1,
-			Sync:       downloader.FullSync,
-			BloomCache: 1,
+			Database:      dbProFork,
+			Chain:         chainProFork,
+			TxPool:        newTestTxPool(),
+			Merger:        consensus.NewMerger(rawdb.NewMemoryDatabase()),
+			Network:       1,
+			Sync:          downloader.FullSync,
+			BloomCache:    1,
+			TriesInMemory: 128,
 		})
 	)
 	ethNoFork.Start(1000)

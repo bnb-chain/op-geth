@@ -57,7 +57,6 @@ var (
 	fsHeaderSafetyNet      = 2048            // Number of headers to discard in case a chain violation is detected
 	fsHeaderForceVerify    = 24              // Number of headers to verify before and after the pivot to accept it
 	fsHeaderContCheck      = 3 * time.Second // Time interval to check for header continuations during state download
-	fsMinFullBlocks        = 64              // Number of blocks to retrieve fully even in snap sync
 )
 
 var (
@@ -156,9 +155,11 @@ type Downloader struct {
 	chainInsertHook  func([]*fetchResult)  // Method to call upon inserting a chain of blocks (possibly in multiple invocations)
 
 	// Progress reporting metrics
-	syncStartBlock uint64    // Head snap block when Geth was started
-	syncStartTime  time.Time // Time instance when chain sync started
-	syncLogTime    time.Time // Time instance when status was last reported
+	syncStartBlock  uint64    // Head snap block when Geth was started
+	syncStartTime   time.Time // Time instance when chain sync started
+	syncLogTime     time.Time // Time instance when status was last reported
+	triesInMemory   uint64    // How many tries keeps in memory
+	fsMinFullBlocks uint64    //Number of blocks to retrieve fully even in snap sync
 }
 
 // LightChain encapsulates functions required to synchronise a light chain.
@@ -219,24 +220,26 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, success func()) *Downloader {
+func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn, success func(), triesInMemory uint64) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}
 	dl := &Downloader{
-		stateDB:        stateDb,
-		mux:            mux,
-		checkpoint:     checkpoint,
-		queue:          newQueue(blockCacheMaxItems, blockCacheInitialItems),
-		peers:          newPeerSet(),
-		blockchain:     chain,
-		lightchain:     lightchain,
-		dropPeer:       dropPeer,
-		headerProcCh:   make(chan *headerTask, 1),
-		quitCh:         make(chan struct{}),
-		SnapSyncer:     snap.NewSyncer(stateDb, chain.TrieDB().Scheme()),
-		stateSyncStart: make(chan *stateSync),
-		syncStartBlock: chain.CurrentSnapBlock().Number.Uint64(),
+		stateDB:         stateDb,
+		mux:             mux,
+		checkpoint:      checkpoint,
+		queue:           newQueue(blockCacheMaxItems, blockCacheInitialItems),
+		peers:           newPeerSet(),
+		blockchain:      chain,
+		lightchain:      lightchain,
+		dropPeer:        dropPeer,
+		headerProcCh:    make(chan *headerTask, 1),
+		quitCh:          make(chan struct{}),
+		SnapSyncer:      snap.NewSyncer(stateDb, chain.TrieDB().Scheme()),
+		stateSyncStart:  make(chan *stateSync),
+		syncStartBlock:  chain.CurrentSnapBlock().Number.Uint64(),
+		triesInMemory:   triesInMemory,
+		fsMinFullBlocks: triesInMemory / 2,
 	}
 	// Create the post-merge skeleton syncer and start the process
 	dl.skeleton = newSkeleton(stateDb, dl.peers, dropPeer, newBeaconBackfiller(dl, success))
@@ -493,8 +496,8 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td, ttd *
 		if err != nil {
 			return err
 		}
-		if latest.Number.Uint64() > uint64(fsMinFullBlocks) {
-			number := latest.Number.Uint64() - uint64(fsMinFullBlocks)
+		if latest.Number.Uint64() > d.fsMinFullBlocks {
+			number := latest.Number.Uint64() - d.fsMinFullBlocks
 
 			// Retrieve the pivot header from the skeleton chain segment but
 			// fallback to local chain if it's not found in skeleton space.
@@ -550,7 +553,7 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td, ttd *
 
 	// Ensure our origin point is below any snap sync pivot point
 	if mode == SnapSync {
-		if height <= uint64(fsMinFullBlocks) {
+		if height <= d.fsMinFullBlocks {
 			origin = 0
 		} else {
 			pivotNumber := pivot.Number.Uint64()
@@ -734,7 +737,7 @@ func (d *Downloader) fetchHead(p *peerConnection) (head *types.Header, pivot *ty
 	if mode == SnapSync {
 		fetch = 2 // head + pivot headers
 	}
-	headers, hashes, err := d.fetchHeadersByHash(p, latest, fetch, fsMinFullBlocks-1, true)
+	headers, hashes, err := d.fetchHeadersByHash(p, latest, fetch, int(d.fsMinFullBlocks-1), true)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -750,7 +753,7 @@ func (d *Downloader) fetchHead(p *peerConnection) (head *types.Header, pivot *ty
 		return nil, nil, fmt.Errorf("%w: remote head %d below checkpoint %d", errUnsyncedPeer, head.Number, d.checkpoint)
 	}
 	if len(headers) == 1 {
-		if mode == SnapSync && head.Number.Uint64() > uint64(fsMinFullBlocks) {
+		if mode == SnapSync && head.Number.Uint64() > d.fsMinFullBlocks {
 			return nil, nil, fmt.Errorf("%w: no pivot included along head header", errBadPeer)
 		}
 		p.log.Debug("Remote head identified, no pivot", "number", head.Number, "hash", hashes[0])
@@ -759,8 +762,8 @@ func (d *Downloader) fetchHead(p *peerConnection) (head *types.Header, pivot *ty
 	// At this point we have 2 headers in total and the first is the
 	// validated head of the chain. Check the pivot number and return,
 	pivot = headers[1]
-	if pivot.Number.Uint64() != head.Number.Uint64()-uint64(fsMinFullBlocks) {
-		return nil, nil, fmt.Errorf("%w: remote pivot %d != requested %d", errInvalidChain, pivot.Number, head.Number.Uint64()-uint64(fsMinFullBlocks))
+	if pivot.Number.Uint64() != head.Number.Uint64()-d.fsMinFullBlocks {
+		return nil, nil, fmt.Errorf("%w: remote pivot %d != requested %d", errInvalidChain, pivot.Number, head.Number.Uint64()-d.fsMinFullBlocks)
 	}
 	return head, pivot, nil
 }
@@ -1042,8 +1045,8 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, head uint64) e
 			pivot := d.pivotHeader.Number.Uint64()
 			d.pivotLock.RUnlock()
 
-			p.log.Trace("Fetching next pivot header", "number", pivot+uint64(fsMinFullBlocks))
-			headers, hashes, err = d.fetchHeadersByNumber(p, pivot+uint64(fsMinFullBlocks), 2, fsMinFullBlocks-9, false) // move +64 when it's 2x64-8 deep
+			p.log.Trace("Fetching next pivot header", "number", pivot+d.fsMinFullBlocks)
+			headers, hashes, err = d.fetchHeadersByNumber(p, pivot+d.fsMinFullBlocks, 2, int(d.fsMinFullBlocks-9), false) // move +64 when it's 2x64-8 deep
 
 		case skeleton:
 			p.log.Trace("Fetching skeleton headers", "count", MaxHeaderFetch, "from", from)
@@ -1090,11 +1093,11 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, head uint64) e
 
 		if pivoting {
 			if len(headers) == 2 {
-				if have, want := headers[0].Number.Uint64(), pivot+uint64(fsMinFullBlocks); have != want {
+				if have, want := headers[0].Number.Uint64(), pivot+d.fsMinFullBlocks; have != want {
 					log.Warn("Peer sent invalid next pivot", "have", have, "want", want)
 					return fmt.Errorf("%w: next pivot number %d != requested %d", errInvalidChain, have, want)
 				}
-				if have, want := headers[1].Number.Uint64(), pivot+2*uint64(fsMinFullBlocks)-8; have != want {
+				if have, want := headers[1].Number.Uint64(), pivot+2*d.fsMinFullBlocks-8; have != want {
 					log.Warn("Peer sent invalid pivot confirmer", "have", have, "want", want)
 					return fmt.Errorf("%w: next pivot confirmer number %d != requested %d", errInvalidChain, have, want)
 				}
@@ -1678,9 +1681,9 @@ func (d *Downloader) processSnapSyncContent() error {
 			// Note, we have `reorgProtHeaderDelay` number of blocks withheld, Those
 			// need to be taken into account, otherwise we're detecting the pivot move
 			// late and will drop peers due to unavailable state!!!
-			if height := latest.Number.Uint64(); height >= pivot.Number.Uint64()+2*uint64(fsMinFullBlocks)-uint64(reorgProtHeaderDelay) {
-				log.Warn("Pivot became stale, moving", "old", pivot.Number.Uint64(), "new", height-uint64(fsMinFullBlocks)+uint64(reorgProtHeaderDelay))
-				pivot = results[len(results)-1-fsMinFullBlocks+reorgProtHeaderDelay].Header // must exist as lower old pivot is uncommitted
+			if height := latest.Number.Uint64(); height >= pivot.Number.Uint64()+2*d.fsMinFullBlocks-uint64(reorgProtHeaderDelay) {
+				log.Warn("Pivot became stale, moving", "old", pivot.Number.Uint64(), "new", height-d.fsMinFullBlocks+uint64(reorgProtHeaderDelay))
+				pivot = results[len(results)-1-int(d.fsMinFullBlocks)+reorgProtHeaderDelay].Header // must exist as lower old pivot is uncommitted
 
 				d.pivotLock.Lock()
 				d.pivotHeader = pivot

@@ -255,6 +255,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		Checkpoint:     checkpoint,
 		RequiredBlocks: config.RequiredBlocks,
 		NoTxGossip:     config.RollupDisableTxPoolGossip,
+		TriesInMemory:  config.TriesInMemory,
 	}); err != nil {
 		return nil, err
 	}

@@ -165,13 +165,14 @@ func newTestHandlerWithBlocks(blocks int) *testHandler {
 	txpool := newTestTxPool()
 
 	handler, _ := newHandler(&handlerConfig{
-		Database:   db,
-		Chain:      chain,
-		TxPool:     txpool,
-		Merger:     consensus.NewMerger(rawdb.NewMemoryDatabase()),
-		Network:    1,
-		Sync:       downloader.SnapSync,
-		BloomCache: 1,
+		Database:      db,
+		Chain:         chain,
+		TxPool:        txpool,
+		Merger:        consensus.NewMerger(rawdb.NewMemoryDatabase()),
+		Network:       1,
+		Sync:          downloader.SnapSync,
+		BloomCache:    1,
+		TriesInMemory: 128,
 	})
 	handler.Start(1000)
 

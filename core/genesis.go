@@ -46,7 +46,7 @@ import (
 //go:generate go run github.com/fjl/gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
 //go:generate go run github.com/fjl/gencodec -type GenesisAccount -field-override genesisAccountMarshaling -out gen_genesis_account.go
 
-//go:embed assets/mainnet assets/testnet assets/devnet
+//go:embed assets/mainnet assets/testnet assets/qanet
 var assetFS embed.FS
 
 var errGenesisNoConfig = errors.New("genesis has no chain configuration")
@@ -388,7 +388,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 	// on top of an existing private network genesis block). In that case, only
 	// apply the overrides.
 	if genesis == nil && stored != params.MainnetGenesisHash && stored != params.OPBNBMainNetGenesisHash &&
-		stored != params.OPBNBTestNetGenesisHash && stored != params.OPBNBDevNetGenesisHash {
+		stored != params.OPBNBTestNetGenesisHash && stored != params.OPBNBQANetGenesisHash {
 		newcfg = storedcfg
 		applyOverrides(newcfg)
 	}
@@ -456,8 +456,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.OPBNBMainNetConfig
 	case ghash == params.OPBNBTestNetGenesisHash:
 		return params.OPBNBTestNetConfig
-	case ghash == params.OPBNBDevNetGenesisHash:
-		return params.OPBNBDevNetConfig
+	case ghash == params.OPBNBQANetGenesisHash:
+		return params.OPBNBQANetConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -683,13 +683,17 @@ func decodePrealloc(data string) GenesisAlloc {
 
 func LoadOpBNBGenesis(chainID uint64) (*Genesis, error) {
 	var genesisPath string
+	var expectedHash common.Hash
 	switch chainID {
 	case params.OPBNBMainnetChainID:
 		genesisPath = path.Join("assets", "mainnet", "genesis.json")
+		expectedHash = params.OPBNBMainNetGenesisHash
 	case params.OPBNBTestNetChainID:
 		genesisPath = path.Join("assets", "testnet", "genesis.json")
-	case params.OPBNBDevNetChainID:
-		genesisPath = path.Join("assets", "devnet", "genesis.json")
+		expectedHash = params.OPBNBTestNetGenesisHash
+	case params.OPBNBQANetChainID:
+		genesisPath = path.Join("assets", "qanet", "genesis.json")
+		expectedHash = params.OPBNBQANetGenesisHash
 	default:
 		return nil, fmt.Errorf("unknown stateless genesis definition for chain %d", chainID)
 	}
@@ -701,6 +705,11 @@ func LoadOpBNBGenesis(chainID uint64) (*Genesis, error) {
 	genesis := new(Genesis)
 	if err := json.NewDecoder(f).Decode(genesis); err != nil {
 		return nil, fmt.Errorf("invalid genesis for chain %d: %w", chainID, err)
+	}
+	genesisBlock := genesis.ToBlock()
+	genesisBlockHash := genesisBlock.Hash()
+	if expectedHash != genesisBlockHash {
+		return nil, fmt.Errorf("produced genesis with hash %s but expected %s", genesisBlockHash, expectedHash)
 	}
 	return genesis, nil
 }

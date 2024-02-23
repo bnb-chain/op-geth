@@ -175,9 +175,9 @@ var (
 		Usage:    "opBNB Testnet",
 		Category: flags.EthCategory,
 	}
-	OpBNBDevnetFlag = &cli.BoolFlag{
-		Name:     "opBNBDevnet",
-		Usage:    "opBNB Devnet just for test",
+	OpBNBQANetFlag = &cli.BoolFlag{
+		Name:     "opBNBQAnet",
+		Usage:    "opBNB QANet just for internal test",
 		Category: flags.EthCategory,
 	}
 
@@ -1053,6 +1053,7 @@ var (
 		SepoliaFlag,
 		HoleskyFlag,
 		OpBNBTestnetFlag,
+		OpBNBQANetFlag,
 	}
 	// NetworkFlags is the flag group of all built-in supported networks.
 	NetworkFlags = append([]cli.Flag{MainnetFlag, OPNetworkFlag, OpBNBMainnetFlag}, TestnetFlags...)
@@ -1774,7 +1775,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags
-	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, GoerliFlag, SepoliaFlag, HoleskyFlag, OPNetworkFlag, OpBNBMainnetFlag, OpBNBTestnetFlag, OpBNBDevnetFlag)
+	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, GoerliFlag, SepoliaFlag, HoleskyFlag, OPNetworkFlag, OpBNBMainnetFlag, OpBNBTestnetFlag, OpBNBQANetFlag)
 	CheckExclusive(ctx, LightServeFlag, SyncModeFlag, "light")
 	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 
@@ -2031,7 +2032,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkId = 5611
 		}
 		cfg.Genesis = MakeGenesis(ctx)
-	case ctx.Bool(OpBNBDevnetFlag.Name):
+	case ctx.Bool(OpBNBQANetFlag.Name):
 		if !ctx.IsSet(NetworkIdFlag.Name) {
 			cfg.NetworkId = 1322
 		}
@@ -2316,12 +2317,12 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 		}
 		genesis.Config = params.OPBNBTestNetConfig
 		return genesis
-	case ctx.Bool(OpBNBDevnetFlag.Name):
-		genesis, err := core.LoadOpBNBGenesis(params.OPBNBDevNetChainID)
+	case ctx.Bool(OpBNBQANetFlag.Name):
+		genesis, err := core.LoadOpBNBGenesis(params.OPBNBQANetChainID)
 		if err != nil {
-			Fatalf("failed to load genesis for opBNB devnet: %v", err)
+			Fatalf("failed to load genesis for opBNB qanet: %v", err)
 		}
-		genesis.Config = params.OPBNBDevNetConfig
+		genesis.Config = params.OPBNBQANetConfig
 		return genesis
 	}
 	return genesis

@@ -32,7 +32,7 @@ var (
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBDevNetGenesisHash  = common.HexToHash("0x1cba296441b55cf9b5b306b6aef43e68e9aeff2450d68c391dec448604cf3baf")
+	OPBNBQANetGenesisHash   = common.HexToHash("0x1cba296441b55cf9b5b306b6aef43e68e9aeff2450d68c391dec448604cf3baf")
 )
 
 const (
@@ -50,7 +50,7 @@ const (
 const (
 	OPBNBMainnetChainID = 204
 	OPBNBTestNetChainID = 5611
-	OPBNBDevNetChainID  = 1322
+	OPBNBQANetChainID   = 1322
 )
 
 // OP Stack chain config
@@ -168,7 +168,7 @@ var (
 			Epoch:  30000,
 		},
 	}
-
+	// OPBNBMainNetConfig is the chain parameters to run a node on the opBNB main network.
 	OPBNBMainNetConfig = &ChainConfig{
 		ChainID:                       big.NewInt(204),
 		HomesteadBlock:                big.NewInt(0),
@@ -195,6 +195,7 @@ var (
 		},
 		Fermat: big.NewInt(9397477), // Nov-28-2023 06 AM +UTC
 	}
+	// OPBNBTestNetConfig is the chain parameters to run a node on the opBNB testnet network.
 	OPBNBTestNetConfig = &ChainConfig{
 		ChainID:                       big.NewInt(5611),
 		HomesteadBlock:                big.NewInt(0),
@@ -222,7 +223,8 @@ var (
 		PreContractForkBlock: big.NewInt(5805494),
 		Fermat:               big.NewInt(12113000), // Nov-03-2023 06 AM +UTC
 	}
-	OPBNBDevNetConfig = &ChainConfig{
+	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
+	OPBNBQANetConfig = &ChainConfig{
 		ChainID:                       big.NewInt(1322),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
@@ -415,7 +417,7 @@ var NetworkNames = map[string]string{
 	HoleskyChainConfig.ChainID.String(): "holesky",
 	OPBNBMainNetConfig.ChainID.String(): "opBNBMainnet",
 	OPBNBTestNetConfig.ChainID.String(): "opBNBTestnet",
-	OPBNBDevNetConfig.ChainID.String():  "opBNBDevnet",
+	OPBNBQANetConfig.ChainID.String():   "opBNBQAnet",
 }
 
 // ChainConfig is the core config which determines the blockchain settings.

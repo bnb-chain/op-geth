@@ -321,8 +321,8 @@ func prepare(ctx *cli.Context) {
 	case ctx.IsSet(utils.OpBNBTestnetFlag.Name):
 		log.Info("Starting geth on an opBNB Testnet network...", "network", ctx.String(utils.OpBNBTestnetFlag.Name))
 
-	case ctx.IsSet(utils.OpBNBDevnetFlag.Name):
-		log.Info("Starting geth on an opBNB Devnet network...", "network", ctx.String(utils.OpBNBDevnetFlag.Name))
+	case ctx.IsSet(utils.OpBNBQANetFlag.Name):
+		log.Info("Starting geth on an opBNB QAnet network...", "network", ctx.String(utils.OpBNBQANetFlag.Name))
 
 	case !ctx.IsSet(utils.NetworkIdFlag.Name):
 		log.Info("Starting Geth on Ethereum mainnet...")

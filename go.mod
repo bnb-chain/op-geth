@@ -23,7 +23,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/deckarep/golang-set/v2 v2.1.0
 	github.com/dop251/goja v0.0.0-20230806174421-c933cf95e127
-	github.com/ethereum-optimism/superchain-registry/superchain v0.0.0-20240223113841-1203fe72c5dc
+	github.com/ethereum-optimism/superchain-registry/superchain v0.0.0-20240227110823-11c73f54ad9b
 	github.com/ethereum/c-kzg-4844 v0.4.0
 	github.com/fatih/color v1.15.0
 	github.com/fjl/gencodec v0.0.0-20230517082657-f9840df7b83e

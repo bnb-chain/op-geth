@@ -852,10 +852,12 @@ func (w *worker) commitTransactions(env *environment, txs *transactionsByPriceAn
 	}
 	var coalescedLogs []*types.Log
 
+	log.Info("start commitTransactions", "txcount", env.tcount, "parent hash", env.header.ParentHash, "account len", len(txs.txs))
 	for {
 		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
 			if signal := interrupt.Load(); signal != commitInterruptNone {
+				log.Error("commit payload timeout", "txcount", env.tcount, "parent hash", env.header.ParentHash)
 				return signalToErr(signal)
 			}
 		}
@@ -1047,9 +1049,12 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) error {
+	start := time.Now()
 	pending := w.eth.TxPool().Pending(true)
-
+	log.Info("got pending from pool", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+	
 	// Split the pending transactions into locals and remotes.
+	start = time.Now()
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
 	for _, account := range w.eth.TxPool().Locals() {
 		if txs := remoteTxs[account]; len(txs) > 0 {
@@ -1057,26 +1062,42 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 			localTxs[account] = txs
 		}
 	}
+	log.Info("got locals from pool", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+
 
 	// Fill the block with all available pending transactions.
 	if len(localTxs) > 0 {
+		start = time.Now()
 		txs := newTransactionsByPriceAndNonce(env.signer, localTxs, env.header.BaseFee)
+		log.Info("local newTransactionsByPriceAndNonce", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+
+		start = time.Now()
 		if err := w.commitTransactions(env, txs, interrupt); err != nil {
 			return err
 		}
+		log.Info("local commitTransactions", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+
 	}
 	if len(remoteTxs) > 0 {
+		start = time.Now()
 		txs := newTransactionsByPriceAndNonce(env.signer, remoteTxs, env.header.BaseFee)
+		log.Info("remote newTransactionsByPriceAndNonce", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+
+		start = time.Now()
 		if err := w.commitTransactions(env, txs, interrupt); err != nil {
 			return err
 		}
+		log.Info("remote commitTransactions", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+
 	}
 	return nil
 }
 
 // generateWork generates a sealing block based on the given parameters.
 func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
+	start := time.Now()
 	work, err := w.prepareWork(genParams)
+	log.Info("prepared work", "parent hash", genParams.parentHash, "isEmpty", genParams.noTxs, "duration", common.PrettyDuration(time.Since(start)))
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
@@ -1092,6 +1113,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	// opBNB no need to hard code this contract via hardfork
 	// misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
 
+	start = time.Now()
 	for _, tx := range genParams.txs {
 		from, _ := types.Sender(work.signer, tx)
 		work.state.SetTxContext(tx.Hash(), work.tcount)
@@ -1101,6 +1123,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		}
 		work.tcount++
 	}
+	log.Info("committed deposit txs", "parent hash", genParams.parentHash, "isEmpty", genParams.noTxs, "duration", common.PrettyDuration(time.Since(start)))
 
 	// forced transactions done, fill rest of block with transactions
 	if !genParams.noTxs {
@@ -1115,7 +1138,11 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout))
 		}
 	}
+
+	start = time.Now()
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)
+	log.Info("FinalizeAndAssembled", "parent hash", genParams.parentHash, "block number", block.NumberU64(), "isEmpty", genParams.noTxs, "duration", common.PrettyDuration(time.Since(start)))
+
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
@@ -1238,8 +1265,10 @@ func (w *worker) getSealingBlock(params *generateParams) *newPayloadResult {
 		params: params,
 		result: make(chan *newPayloadResult, 1),
 	}
+	start := time.Now()
 	select {
 	case w.getWorkCh <- req:
+		log.Info("sent build req", "parent hash", params.parentHash, "isEmpty", params.noTxs, "duration", common.PrettyDuration(time.Since(start)))
 		return <-req.result
 	case <-w.exitCh:
 		return &newPayloadResult{err: errors.New("miner closed")}

@@ -221,7 +221,7 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 		log.Error("Built initial payload error", "id", args.Id(), "error", empty.err)
 		return nil, empty.err
 	}
-	log.Debug("Built initial payload", "id", args.Id(), "number", empty.block.NumberU64(), "hash", empty.block.Hash(), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Built initial payload", "id", args.Id(), "number", empty.block.NumberU64(), "hash", empty.block.Hash(), "elapsed", common.PrettyDuration(time.Since(start)))
 
 	// Construct a payload object for return.
 	payload := newPayload(empty.block, args.Id())
@@ -267,7 +267,7 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 					log.Error("Failed to build updated payload", "id", payload.id, "err", r.err)
 					return
 				}
-				log.Debug("Built updated payload", "id", payload.id, "number", r.block.NumberU64(), "hash", r.block.Hash(), "elapsed", common.PrettyDuration(time.Since(start)))
+				log.Info("Built updated payload", "id", payload.id, "number", r.block.NumberU64(), "hash", r.block.Hash(), "elapsed", common.PrettyDuration(time.Since(start)))
 				payload.update(r, time.Since(start), func() {
 					w.cacheMiningBlock(r.block, r.env)
 				})

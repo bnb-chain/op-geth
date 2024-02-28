@@ -35,7 +35,19 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+)
+
+var (
+	sendBuildReqTimer = metrics.NewRegisteredTimer("miner/build/request", nil)
+	buildEmptyPayloadTimer = metrics.NewRegisteredTimer("miner/build/empty", nil)
+	buildFullPayloadTimer = metrics.NewRegisteredTimer("miner/build/full", nil)
+	prepareWorkTimer = metrics.NewRegisteredTimer("miner/build/prepare", nil)
+	achieveTxTimer = metrics.NewRegisteredTimer("miner/build/txpool", nil)
+	commitDepositTxTimer = metrics.NewRegisteredTimer("miner/build/commit/deposit", nil)
+	commitPoolTxTimer = metrics.NewRegisteredTimer("miner/build/commit/pool", nil)
+	assembleWorkTimer = metrics.NewRegisteredTimer("miner/build/assemble", nil)
 )
 
 // Backend wraps all methods required for mining. Only full node is capable

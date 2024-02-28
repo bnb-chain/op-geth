@@ -1050,11 +1050,13 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // be customized with the plugin in the future.
 func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) error {
 	start := time.Now()
+	var commitDuration time.Duration
+
 	pending := w.eth.TxPool().Pending(true)
 	log.Info("got pending from pool", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
 	
 	// Split the pending transactions into locals and remotes.
-	start = time.Now()
+	start1 := time.Now()
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
 	for _, account := range w.eth.TxPool().Locals() {
 		if txs := remoteTxs[account]; len(txs) > 0 {
@@ -1062,34 +1064,37 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 			localTxs[account] = txs
 		}
 	}
-	log.Info("got locals from pool", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+	log.Info("got locals from pool", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start1)))
 
 
 	// Fill the block with all available pending transactions.
 	if len(localTxs) > 0 {
-		start = time.Now()
+		start2 := time.Now()
 		txs := newTransactionsByPriceAndNonce(env.signer, localTxs, env.header.BaseFee)
-		log.Info("local newTransactionsByPriceAndNonce", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+		log.Info("local newTransactionsByPriceAndNonce", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start2)))
 
-		start = time.Now()
+		start3 := time.Now()
 		if err := w.commitTransactions(env, txs, interrupt); err != nil {
 			return err
 		}
-		log.Info("local commitTransactions", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+		commitDuration += time.Since(start3)
+		log.Info("local commitTransactions", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start3)))
 
 	}
 	if len(remoteTxs) > 0 {
-		start = time.Now()
+		start4 := time.Now()
 		txs := newTransactionsByPriceAndNonce(env.signer, remoteTxs, env.header.BaseFee)
-		log.Info("remote newTransactionsByPriceAndNonce", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
+		log.Info("remote newTransactionsByPriceAndNonce", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start4)))
 
-		start = time.Now()
+		start5 := time.Now()
 		if err := w.commitTransactions(env, txs, interrupt); err != nil {
 			return err
 		}
-		log.Info("remote commitTransactions", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start)))
-
+		commitDuration += time.Since(start5)
+		log.Info("remote commitTransactions", "parent hash", env.header.ParentHash, "duration", common.PrettyDuration(time.Since(start5)))
 	}
+	achieveTxTimer.Update(time.Since(start) - commitDuration)
+	commitPoolTxTimer.Update(commitDuration)
 	return nil
 }
 
@@ -1097,10 +1102,11 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	start := time.Now()
 	work, err := w.prepareWork(genParams)
-	log.Info("prepared work", "parent hash", genParams.parentHash, "isEmpty", genParams.noTxs, "duration", common.PrettyDuration(time.Since(start)))
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
+	prepareWorkTimer.Update(time.Since(start))
+	log.Info("prepared work", "parent hash", genParams.parentHash, "isEmpty", genParams.noTxs, "duration", common.PrettyDuration(time.Since(start)))
 	defer work.discard()
 	if work.gasPool == nil {
 		work.gasPool = new(core.GasPool).AddGas(work.header.GasLimit)
@@ -1123,6 +1129,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		}
 		work.tcount++
 	}
+	commitDepositTxTimer.Update(time.Since(start))
 	log.Info("committed deposit txs", "parent hash", genParams.parentHash, "isEmpty", genParams.noTxs, "duration", common.PrettyDuration(time.Since(start)))
 
 	// forced transactions done, fill rest of block with transactions
@@ -1141,11 +1148,12 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 
 	start = time.Now()
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)
-	log.Info("FinalizeAndAssembled", "parent hash", genParams.parentHash, "block number", block.NumberU64(), "isEmpty", genParams.noTxs, "duration", common.PrettyDuration(time.Since(start)))
-
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
+	assembleWorkTimer.Update(time.Since(start))
+	log.Info("FinalizeAndAssembled", "parent hash", genParams.parentHash, "block number", block.NumberU64(), "isEmpty", genParams.noTxs, "duration", common.PrettyDuration(time.Since(start)))
+
 	return &newPayloadResult{
 		block:    block,
 		fees:     totalFees(block, work.receipts),
@@ -1269,6 +1277,7 @@ func (w *worker) getSealingBlock(params *generateParams) *newPayloadResult {
 	select {
 	case w.getWorkCh <- req:
 		log.Info("sent build req", "parent hash", params.parentHash, "isEmpty", params.noTxs, "duration", common.PrettyDuration(time.Since(start)))
+		sendBuildReqTimer.Update(time.Since(start))
 		return <-req.result
 	case <-w.exitCh:
 		return &newPayloadResult{err: errors.New("miner closed")}

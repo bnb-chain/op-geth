@@ -32,9 +32,16 @@ import (
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rpc"
+)
+
+var (
+	forkChoiceUnsafeTimer = metrics.NewRegisteredTimer("engine/fork/unsafe", nil)
+	forkChoiceSafeTimer = metrics.NewRegisteredTimer("engine/fork/safe", nil)
+	forkChoiceFinalTimer = metrics.NewRegisteredTimer("engine/fork/final", nil)
 )
 
 // Register adds the engine API to the full node.
@@ -313,9 +320,11 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 	}
 	if rawdb.ReadCanonicalHash(api.eth.ChainDb(), block.NumberU64()) != update.HeadBlockHash {
 		// Block is not canonical, set head.
+		start := time.Now()
 		if latestValid, err := api.eth.BlockChain().SetCanonical(block); err != nil {
 			return engine.ForkChoiceResponse{PayloadStatus: engine.PayloadStatusV1{Status: engine.INVALID, LatestValidHash: &latestValid}}, err
 		}
+		forkChoiceUnsafeTimer.Update(time.Since(start))
 	} else if api.eth.BlockChain().CurrentBlock().Hash() == update.HeadBlockHash {
 		// If the specified head matches with our local head, do nothing and keep
 		// generating the payload. It's a special corner case that a few slots are
@@ -344,7 +353,9 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			return engine.STATUS_INVALID, engine.InvalidForkChoiceState.With(errors.New("final block not in canonical chain"))
 		}
 		// Set the finalized block
+		start := time.Now()
 		api.eth.BlockChain().SetFinalized(finalBlock.Header())
+		forkChoiceFinalTimer.Update(time.Since(start))
 	}
 	// Check if the safe block hash is in our canonical tree, if not somethings wrong
 	if update.SafeBlockHash != (common.Hash{}) {
@@ -358,7 +369,9 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			return engine.STATUS_INVALID, engine.InvalidForkChoiceState.With(errors.New("safe block not in canonical chain"))
 		}
 		// Set the safe block
+		start := time.Now()
 		api.eth.BlockChain().SetSafe(safeBlock.Header())
+		forkChoiceSafeTimer.Update(time.Since(start))
 	}
 	// If payload generation was requested, create a new block to be potentially
 	// sealed by the beacon client. The payload will be requested later, and we

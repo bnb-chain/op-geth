@@ -318,7 +318,13 @@ func (sf *subfetcher) abort() {
 	select {
 	case <-sf.stop:
 	default:
-		close(sf.stop)
+		// abort() would be called parallely, ensure to close channel only once.
+		sf.lock.Lock()
+		if sf.stop != nil {
+			close(sf.stop)
+			sf.stop = nil
+		}
+		sf.lock.Unlock()
 	}
 	<-sf.term
 }

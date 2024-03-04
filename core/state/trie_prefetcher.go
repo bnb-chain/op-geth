@@ -315,17 +315,14 @@ func (sf *subfetcher) peek() Trie {
 // abort interrupts the subfetcher immediately. It is safe to call abort multiple
 // times but it is not thread safe.
 func (sf *subfetcher) abort() {
+	// abort() would be called parallely, ensure to close channel only once.
+	sf.lock.Lock()
 	select {
 	case <-sf.stop:
 	default:
-		// abort() would be called parallely, ensure to close channel only once.
-		sf.lock.Lock()
-		if sf.stop != nil {
-			close(sf.stop)
-			sf.stop = nil
-		}
-		sf.lock.Unlock()
+		close(sf.stop)
 	}
+	sf.lock.Unlock()
 	<-sf.term
 }
 

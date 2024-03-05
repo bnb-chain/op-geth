@@ -299,6 +299,10 @@ func (d *Database) Has(key []byte) (bool, error) {
 
 // Get retrieves the given key if it's present in the key-value store.
 func (d *Database) Get(key []byte) ([]byte, error) {
+	start := time.Now()
+	if metrics.EnabledExpensive {
+		defer func() { ethdb.EthdbGetTimer.UpdateSince(start) }()
+	}
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -316,6 +320,10 @@ func (d *Database) Get(key []byte) ([]byte, error) {
 
 // Put inserts the given value into the key-value store.
 func (d *Database) Put(key []byte, value []byte) error {
+	start := time.Now()
+	if metrics.EnabledExpensive {
+		defer func() { ethdb.EthdbPutTimer.UpdateSince(start) }()
+	}
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -326,6 +334,10 @@ func (d *Database) Put(key []byte, value []byte) error {
 
 // Delete removes the key from the key-value store.
 func (d *Database) Delete(key []byte) error {
+	start := time.Now()
+	if metrics.EnabledExpensive {
+		defer func() { ethdb.EthdbDeleteTimer.UpdateSince(start) }()
+	}
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -482,6 +494,10 @@ func (d *Database) meter(refresh time.Duration, namespace string) {
 			nonLevel0CompCount = int64(d.nonLevel0Comp.Load())
 			level0CompCount    = int64(d.level0Comp.Load())
 		)
+		fmt.Printf("loop print db stats db_metrics=\n%v\n", stats)
+		d.log.Info("loop print db stats", "comp_time", compTime, "write_delay_count", writeDelayCount, "write_delay_time",
+			writeDelayTime, "non_level0_comp_count", nonLevel0CompCount, "level0_comp_count", level0CompCount)
+
 		writeDelayTimes[i%2] = writeDelayTime
 		writeDelayCounts[i%2] = writeDelayCount
 		compTimes[i%2] = compTime
@@ -580,6 +596,10 @@ func (b *batch) ValueSize() int {
 
 // Write flushes any accumulated data to disk.
 func (b *batch) Write() error {
+	start := time.Now()
+	if metrics.EnabledExpensive {
+		defer func() { ethdb.EthdbBatchWriteTimer.UpdateSince(start) }()
+	}
 	b.db.quitLock.RLock()
 	defer b.db.quitLock.RUnlock()
 	if b.db.closed {

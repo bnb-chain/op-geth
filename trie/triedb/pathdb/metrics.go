@@ -47,4 +47,8 @@ var (
 	historyBuildTimeMeter  = metrics.NewRegisteredTimer("pathdb/history/time", nil)
 	historyDataBytesMeter  = metrics.NewRegisteredMeter("pathdb/history/bytes/data", nil)
 	historyIndexBytesMeter = metrics.NewRegisteredMeter("pathdb/history/bytes/index", nil)
+
+	layerNumberMeter           = metrics.NewRegisteredGauge("pathdb/layer/number", nil)
+	frontBufferDeltaMeter      = metrics.NewRegisteredMeter("pathdb/front/buffer/delta", nil)
+	backCommitlayerNumberMeter = metrics.NewRegisteredGauge("pathdb/back/commit/layer/number", nil)
 )

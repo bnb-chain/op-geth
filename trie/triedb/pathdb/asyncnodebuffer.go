@@ -272,6 +272,7 @@ func (nc *nodecache) commit(nodes map[common.Hash]map[string]*trienode.Node) err
 	}
 	nc.updateSize(delta)
 	nc.layers++
+	frontBufferDeltaMeter.Mark(delta)
 	gcNodesMeter.Mark(overwrite)
 	gcBytesMeter.Mark(overwriteSize)
 	return nil
@@ -321,6 +322,7 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id ui
 	if err := batch.Write(); err != nil {
 		return err
 	}
+	backCommitlayerNumberMeter.Update(int64(nc.layers))
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)

@@ -191,6 +191,7 @@ func (tree *layerTree) cap(root common.Hash, layers int) error {
 			remove(root)
 		}
 	}
+	layerNumberMeter.Update(int64(len(tree.layers)))
 	return nil
 }
 

@@ -51,4 +51,13 @@ var (
 	layerNumberMeter           = metrics.NewRegisteredGauge("pathdb/layer/number", nil)
 	frontBufferDeltaMeter      = metrics.NewRegisteredMeter("pathdb/front/buffer/delta", nil)
 	backCommitlayerNumberMeter = metrics.NewRegisteredGauge("pathdb/back/commit/layer/number", nil)
+
+	// only for node buffer list
+	nodeBufferListSizeMeter  = metrics.NewRegisteredMeter("pathdb/nodebufferlist/size", nil)
+	baseNodeBufferSizeMeter  = metrics.NewRegisteredMeter("pathdb/basenodebuffer/size", nil)
+	nodeBufferCountMeter     = metrics.NewRegisteredMeter("pathdb/nodebufferlist/count", nil)
+	nodeBufferLayerMeter     = metrics.NewRegisteredMeter("pathdb/nodebufferlist/layer", nil)
+	baseNodeBufferLayerMeter = metrics.NewRegisteredMeter("pathdb/basenodebuffer/layer", nil)
+	nodeBufferPersistID      = metrics.NewRegisteredMeter("pathdb/nodebufferlist/persistid", nil)
+	nodeBufferLastBlock      = metrics.NewRegisteredMeter("pathdb/nodebufferlist/lastblock", nil)
 )

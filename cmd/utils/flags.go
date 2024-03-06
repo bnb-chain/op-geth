@@ -300,10 +300,16 @@ var (
 		Usage:    "Scheme to use for storing ethereum state ('hash' or 'path')",
 		Category: flags.StateCategory,
 	}
-	PathDBSyncFlag = &cli.BoolFlag{
-		Name:     "pathdb.sync",
-		Usage:    "sync flush nodes cache to disk in path schema",
-		Value:    false,
+	PathDBNodeBufferTypeFlag = &cli.StringFlag{
+		Name:     "pathdb.nodebuffer",
+		Usage:    "Type of trienodebuffer to cache trie nodes in disklayer('list', 'sync', or 'async')",
+		Value:    "async",
+		Category: flags.StateCategory,
+	}
+	ProposeBlockIntervalFlag = &cli.Uint64Flag{
+		Name:     "pathdb.proposeblock",
+		Usage:    "keep the same with op-proposer propose block interval",
+		Value:    pathdb.DefaultProposeBlockInterval,
 		Category: flags.StateCategory,
 	}
 	StateHistoryFlag = &cli.Uint64Flag{
@@ -1862,8 +1868,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		log.Warn("The flag --txlookuplimit is deprecated and will be removed, please use --history.transactions")
 		cfg.TransactionHistory = ctx.Uint64(TxLookupLimitFlag.Name)
 	}
-	if ctx.IsSet(PathDBSyncFlag.Name) {
-		cfg.PathSyncFlush = true
+	if ctx.IsSet(PathDBNodeBufferTypeFlag.Name) {
+		cfg.PathNodeBuffer = pathdb.GetNodeBufferType(ctx.String(PathDBNodeBufferTypeFlag.Name))
+	}
+	if ctx.IsSet(ProposeBlockIntervalFlag.Name) {
+		cfg.ProposeBlockInterval = ctx.Uint64(ProposeBlockIntervalFlag.Name)
 	}
 	if ctx.String(GCModeFlag.Name) == "archive" && cfg.TransactionHistory != 0 {
 		cfg.TransactionHistory = 0

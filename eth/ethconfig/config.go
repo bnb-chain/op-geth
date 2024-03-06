@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -109,8 +110,9 @@ type Config struct {
 	// State scheme represents the scheme used to store ethereum states and trie
 	// nodes on top. It can be 'hash', 'path', or none which means use the scheme
 	// consistent with persistent state.
-	StateScheme   string `toml:",omitempty"`
-	PathSyncFlush bool   `toml:",omitempty"` // State scheme used to store ethereum state and merkle trie nodes on top
+	StateScheme          string                `toml:",omitempty"`
+	PathNodeBuffer       pathdb.NodeBufferType `toml:",omitempty"` // Type of trienodebuffer to cache trie nodes in disklayer
+	ProposeBlockInterval uint64                `toml:",omitempty"` // Keep the same with op-proposer propose block interval
 
 	// RequiredBlocks is a set of block number -> hash mappings which must be in the
 	// canonical chain of all remote peers. Setting the option makes geth verify the

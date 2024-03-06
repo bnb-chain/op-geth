@@ -1083,16 +1083,25 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
 func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) error {
+	// TODO will remove after fix txpool perf issue
+	if interrupt != nil {
+		if signal := interrupt.Load(); signal != commitInterruptNone {
+			return signalToErr(signal)
+		}
+	}
+
 	pending := w.eth.TxPool().Pending(true)
 
 	// Split the pending transactions into locals and remotes.
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
-	for _, account := range w.eth.TxPool().Locals() {
-		if txs := remoteTxs[account]; len(txs) > 0 {
-			delete(remoteTxs, account)
-			localTxs[account] = txs
-		}
-	}
+
+	// TODO will remove after fix txpool perf issue
+	// for _, account := range w.eth.TxPool().Locals() {
+	// 	if txs := remoteTxs[account]; len(txs) > 0 {
+	// 		delete(remoteTxs, account)
+	// 		localTxs[account] = txs
+	// 	}
+	// }
 
 	// Fill the block with all available pending transactions.
 	if len(localTxs) > 0 {

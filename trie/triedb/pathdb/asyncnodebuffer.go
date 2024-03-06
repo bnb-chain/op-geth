@@ -66,11 +66,11 @@ func (a *asyncnodebuffer) node(owner common.Hash, path []byte, hash common.Hash)
 // the ownership of the nodes map which belongs to the bottom-most diff layer.
 // It will just hold the node references from the given map which are safe to
 // copy.
-func (a *asyncnodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer {
+func (a *asyncnodebuffer) commit(block uint64, nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 
-	err := a.current.commit(nodes)
+	err := a.current.commit(block, nodes, true)
 	if err != nil {
 		log.Crit("[BUG] failed to commit nodes to asyncnodebuffer", "error", err)
 	}
@@ -133,7 +133,7 @@ func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 				continue
 			}
 			atomic.StoreUint64(&a.current.immutable, 1)
-			return a.current.flush(db, clean, id)
+			return a.current.flush(db, clean, id, true)
 		}
 	}
 
@@ -153,8 +153,9 @@ func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	go func(persistID uint64) {
 		defer a.isFlushing.Store(false)
 		for {
-			err := a.background.flush(db, clean, persistID)
+			err := a.background.flush(db, clean, persistID, true)
 			if err == nil {
+				a.background.reset()
 				log.Debug("succeed to flush background nodecache to disk", "state_id", persistID)
 				return
 			}
@@ -164,6 +165,7 @@ func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	return nil
 }
 
+// waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
 func (a *asyncnodebuffer) waitAndStopFlushing() {
 	a.stopFlushing.Store(true)
 	for a.isFlushing.Load() {
@@ -172,6 +174,7 @@ func (a *asyncnodebuffer) waitAndStopFlushing() {
 	}
 }
 
+// getAllNodes return all the trie nodes are cached in trienodebuffer.
 func (a *asyncnodebuffer) getAllNodes() map[common.Hash]map[string]*trienode.Node {
 	a.mux.Lock()
 	defer a.mux.Unlock()
@@ -183,6 +186,7 @@ func (a *asyncnodebuffer) getAllNodes() map[common.Hash]map[string]*trienode.Nod
 	return cached.nodes
 }
 
+// getLayers return the size of cached difflayers.
 func (a *asyncnodebuffer) getLayers() uint64 {
 	a.mux.RLock()
 	defer a.mux.RUnlock()
@@ -190,6 +194,7 @@ func (a *asyncnodebuffer) getLayers() uint64 {
 	return a.current.layers + a.background.layers
 }
 
+// getSize return the trienodebuffer used size.
 func (a *asyncnodebuffer) getSize() (uint64, uint64) {
 	a.mux.RLock()
 	defer a.mux.RUnlock()
@@ -197,12 +202,22 @@ func (a *asyncnodebuffer) getSize() (uint64, uint64) {
 	return a.current.size, a.background.size
 }
 
+// setClean set fastcache to trienodebuffer for cache the trie nodes,
+// used for nodebufferlist.
+func (a *asyncnodebuffer) setClean(clean *fastcache.Cache) {
+	return
+}
+
 type nodecache struct {
+	block     uint64
 	layers    uint64                                    // The number of diff layers aggregated inside
 	size      uint64                                    // The size of aggregated writes
 	limit     uint64                                    // The maximum memory allowance in bytes
 	nodes     map[common.Hash]map[string]*trienode.Node // The dirty node set, mapped by owner and path
 	immutable uint64                                    // The flag equal 1, flush nodes to disk background
+
+	pre  *nodecache
+	next *nodecache
 }
 
 func newNodeCache(limit, size uint64, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *nodecache {
@@ -232,11 +247,15 @@ func (nc *nodecache) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 	return n, nil
 }
 
-func (nc *nodecache) commit(nodes map[common.Hash]map[string]*trienode.Node) error {
-	if atomic.LoadUint64(&nc.immutable) == 1 {
+func (nc *nodecache) commit(block uint64, nodes map[common.Hash]map[string]*trienode.Node, checkStatus bool) error {
+	if checkStatus && atomic.LoadUint64(&nc.immutable) == 1 {
 		return errWriteImmutable
 	}
 
+	if nc.block != 0 && nc.block >= block {
+		log.Crit("block number out of order", "pre_block", nc.block, "capping_block", block)
+	}
+	nc.block = block
 	var (
 		delta         int64
 		overwrite     int64
@@ -293,6 +312,9 @@ func (nc *nodecache) reset() {
 	atomic.StoreUint64(&nc.immutable, 0)
 	nc.layers = 0
 	nc.size = 0
+	nc.block = 0
+	nc.pre = nil
+	nc.next = nil
 	nc.nodes = make(map[common.Hash]map[string]*trienode.Node)
 }
 
@@ -300,8 +322,8 @@ func (nc *nodecache) empty() bool {
 	return nc.layers == 0
 }
 
-func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error {
-	if atomic.LoadUint64(&nc.immutable) != 1 {
+func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64, checkStatus bool) error {
+	if checkStatus && atomic.LoadUint64(&nc.immutable) != 1 {
 		return errFlushMutable
 	}
 
@@ -327,7 +349,6 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id ui
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
 	log.Debug("Persisted pathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
-	nc.reset()
 	return nil
 }
 

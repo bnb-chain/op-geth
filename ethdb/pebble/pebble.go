@@ -299,8 +299,8 @@ func (d *Database) Has(key []byte) (bool, error) {
 
 // Get retrieves the given key if it's present in the key-value store.
 func (d *Database) Get(key []byte) ([]byte, error) {
-	start := time.Now()
 	if metrics.EnabledExpensive {
+		start := time.Now()
 		defer func() { ethdb.EthdbGetTimer.UpdateSince(start) }()
 	}
 	d.quitLock.RLock()
@@ -320,8 +320,8 @@ func (d *Database) Get(key []byte) ([]byte, error) {
 
 // Put inserts the given value into the key-value store.
 func (d *Database) Put(key []byte, value []byte) error {
-	start := time.Now()
 	if metrics.EnabledExpensive {
+		start := time.Now()
 		defer func() { ethdb.EthdbPutTimer.UpdateSince(start) }()
 	}
 	d.quitLock.RLock()
@@ -334,8 +334,8 @@ func (d *Database) Put(key []byte, value []byte) error {
 
 // Delete removes the key from the key-value store.
 func (d *Database) Delete(key []byte) error {
-	start := time.Now()
 	if metrics.EnabledExpensive {
+		start := time.Now()
 		defer func() { ethdb.EthdbDeleteTimer.UpdateSince(start) }()
 	}
 	d.quitLock.RLock()
@@ -596,8 +596,8 @@ func (b *batch) ValueSize() int {
 
 // Write flushes any accumulated data to disk.
 func (b *batch) Write() error {
-	start := time.Now()
 	if metrics.EnabledExpensive {
+		start := time.Now()
 		defer func() { ethdb.EthdbBatchWriteTimer.UpdateSince(start) }()
 	}
 	b.db.quitLock.RLock()

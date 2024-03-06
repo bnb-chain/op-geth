@@ -97,11 +97,18 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		start := time.Now()
 		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
 		if err != nil {
+			if metrics.EnabledExpensive {
+				processTxTimer.UpdateSince(start)
+			}
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 		statedb.SetTxContext(tx.Hash(), i)
+
 		receipt, err := applyTransaction(msg, p.config, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
 		if err != nil {
+			if metrics.EnabledExpensive {
+				processTxTimer.UpdateSince(start)
+			}
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 		receipts = append(receipts, receipt)

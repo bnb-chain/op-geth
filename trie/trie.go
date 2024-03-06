@@ -153,8 +153,8 @@ func (t *Trie) Get(key []byte) ([]byte, error) {
 	if t.committed {
 		return nil, ErrCommitted
 	}
-	start := time.Now()
 	if metrics.EnabledExpensive {
+		start := time.Now()
 		defer func() { trieGetTimer.UpdateSince(start) }()
 	}
 	value, newroot, didResolve, err := t.get(t.root, keybytesToHex(key), 0)
@@ -601,8 +601,8 @@ func (t *Trie) resolve(n node, prefix []byte) (node, error) {
 // node's original value. The rlp-encoded blob is preferred to be loaded from
 // database because it's easy to decode node while complex to encode node to blob.
 func (t *Trie) resolveAndTrack(n hashNode, prefix []byte) (node, error) {
-	start := time.Now()
 	if metrics.EnabledExpensive {
+		start := time.Now()
 		defer func() { trieReaderTotalTimer.UpdateSince(start) }()
 	}
 	blob, err := t.reader.node(prefix, common.BytesToHash(n))

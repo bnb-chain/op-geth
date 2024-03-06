@@ -70,8 +70,8 @@ func (h *hasher) release() {
 // ReadAccountTrieNode retrieves the account trie node and the associated node
 // hash with the specified node path.
 func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.Hash) {
-	start := time.Now()
 	if metrics.EnabledExpensive {
+		start := time.Now()
 		defer func() { rawdbGetAccountTrieNodeTimer.UpdateSince(start) }()
 	}
 	data, err := db.Get(accountTrieNodeKey(path))
@@ -122,8 +122,8 @@ func DeleteAccountTrieNode(db ethdb.KeyValueWriter, path []byte) {
 // ReadStorageTrieNode retrieves the storage trie node and the associated node
 // hash with the specified node path.
 func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
-	start := time.Now()
 	if metrics.EnabledExpensive {
+		start := time.Now()
 		defer func() { rawdbGetStorageTrieNodeTimer.UpdateSince(start) }()
 	}
 	data, err := db.Get(storageTrieNodeKey(accountHash, path))

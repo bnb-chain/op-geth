@@ -94,6 +94,8 @@ var (
 		utils.TxLookupLimitFlag,
 		utils.TransactionHistoryFlag,
 		utils.StateHistoryFlag,
+		utils.ProposeBlockIntervalFlag,
+		utils.PathDBSyncFlag,
 		utils.LightServeFlag,
 		utils.LightIngressFlag,
 		utils.LightEgressFlag,

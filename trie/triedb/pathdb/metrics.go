@@ -47,4 +47,13 @@ var (
 	historyBuildTimeMeter  = metrics.NewRegisteredTimer("pathdb/history/time", nil)
 	historyDataBytesMeter  = metrics.NewRegisteredMeter("pathdb/history/bytes/data", nil)
 	historyIndexBytesMeter = metrics.NewRegisteredMeter("pathdb/history/bytes/index", nil)
+
+	// only for node buffer list
+	nodeBufferListSizeGauge  = metrics.NewRegisteredGauge("pathdb/nodebufferlist/size", nil)
+	baseNodeBufferSizeGauge  = metrics.NewRegisteredGauge("pathdb/basenodebuffer/size", nil)
+	nodeBufferCountGauge     = metrics.NewRegisteredGauge("pathdb/nodebufferlist/count", nil)
+	nodeBufferLayerGauge     = metrics.NewRegisteredGauge("pathdb/nodebufferlist/layer", nil)
+	baseNodeBufferLayerGauge = metrics.NewRegisteredGauge("pathdb/basenodebuffer/layer", nil)
+	nodeBufferPersistIDGauge = metrics.NewRegisteredGauge("pathdb/nodebufferlist/persistid", nil)
+	nodeBufferLastBlockGauge = metrics.NewRegisteredGauge("pathdb/nodebufferlist/lastblock", nil)
 )

@@ -130,7 +130,10 @@ func (db *Database) loadLayers() layer {
 		log.Info("Failed to load journal, discard it", "err", err)
 	}
 	// Return single layer with persistent state.
-	return newDiskLayer(root, rawdb.ReadPersistentStateID(db.diskdb), db, nil, NewTrieNodeBuffer(db.config.SyncFlush, db.bufferSize, nil, 0))
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.SyncFlush, db.bufferSize, nil, 0)
+	dl := newDiskLayer(root, rawdb.ReadPersistentStateID(db.diskdb), db, nil, nb)
+	nb.setClean(dl.cleans)
+	return dl
 }
 
 // loadDiskLayer reads the binary blob from the layer journal, reconstructing
@@ -170,7 +173,9 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 		nodes[entry.Owner] = subset
 	}
 	// Calculate the internal state transitions by id difference.
-	base := newDiskLayer(root, id, db, nil, NewTrieNodeBuffer(db.config.SyncFlush, db.bufferSize, nodes, id-stored))
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.SyncFlush, db.bufferSize, nodes, id-stored)
+	base := newDiskLayer(root, id, db, nil, nb)
+	nb.setClean(base.cleans)
 	return base, nil
 }
 

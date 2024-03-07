@@ -85,7 +85,7 @@ func BenchmarkListCapOneTx(b *testing.B) {
 		list := newList(true)
 		// Insert the transactions in a random order
 		for _, v := range rand.Perm(len(txs)) {
-			list.Add(txs[v], DefaultConfig.PriceBump)
+			list.Add(txs[v], DefaultConfig.PriceBump, nil)
 		}
 		b.StartTimer()
 		list.Cap(list.Len() - 1)

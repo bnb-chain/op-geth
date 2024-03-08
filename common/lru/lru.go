@@ -93,11 +93,3 @@ func (c *Cache[K, V]) Keys() []K {
 
 	return c.cache.Keys()
 }
-
-// GetOldest returns the oldest entry in the cache.
-func (c *Cache[K, V]) GetOldest() (key K, value V, ok bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return c.cache.GetOldest()
-}

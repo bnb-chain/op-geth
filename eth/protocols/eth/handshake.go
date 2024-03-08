@@ -17,13 +17,14 @@
 package eth
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/forkid"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p"
 )
 
@@ -41,7 +42,7 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 
 	var status StatusPacket // safe to read after two values have been received from errc
 
-	gopool.Submit(func() {
+	go func() {
 		errc <- p2p.Send(p.rw, StatusMsg, &StatusPacket{
 			ProtocolVersion: uint32(p.version),
 			NetworkID:       network,
@@ -50,19 +51,21 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 			Genesis:         genesis,
 			ForkID:          forkID,
 		})
-	})
-	gopool.Submit(func() {
+	}()
+	go func() {
 		errc <- p.readStatus(network, &status, genesis, forkFilter)
-	})
+	}()
 	timeout := time.NewTimer(handshakeTimeout)
 	defer timeout.Stop()
 	for i := 0; i < 2; i++ {
 		select {
 		case err := <-errc:
 			if err != nil {
+				markError(p, err)
 				return err
 			}
 		case <-timeout.C:
+			markError(p, p2p.DiscReadTimeout)
 			return p2p.DiscReadTimeout
 		}
 	}
@@ -105,4 +108,26 @@ func (p *Peer) readStatus(network uint64, status *StatusPacket, genesis common.H
 		return fmt.Errorf("%w: %v", errForkIDRejected, err)
 	}
 	return nil
+}
+
+// markError registers the error with the corresponding metric.
+func markError(p *Peer, err error) {
+	if !metrics.Enabled {
+		return
+	}
+	m := meters.get(p.Inbound())
+	switch errors.Unwrap(err) {
+	case errNetworkIDMismatch:
+		m.networkIDMismatch.Mark(1)
+	case errProtocolVersionMismatch:
+		m.protocolVersionMismatch.Mark(1)
+	case errGenesisMismatch:
+		m.genesisMismatch.Mark(1)
+	case errForkIDRejected:
+		m.forkidRejected.Mark(1)
+	case p2p.DiscReadTimeout:
+		m.timeoutError.Mark(1)
+	default:
+		m.peerError.Mark(1)
+	}
 }

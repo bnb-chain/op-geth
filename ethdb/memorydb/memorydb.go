@@ -245,7 +245,7 @@ func (b *batch) Write() error {
 	defer b.db.lock.Unlock()
 
 	if b.db.db == nil {
-		return nil
+		return errMemorydbClosed
 	}
 	for _, keyvalue := range b.writes {
 		if keyvalue.delete {
@@ -345,7 +345,7 @@ func newSnapshot(db *Database) *snapshot {
 	db.lock.RLock()
 	defer db.lock.RUnlock()
 
-	copied := make(map[string][]byte)
+	copied := make(map[string][]byte, len(db.db))
 	for key, val := range db.db {
 		copied[key] = common.CopyBytes(val)
 	}

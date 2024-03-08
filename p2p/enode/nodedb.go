@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/errors"
@@ -304,7 +303,7 @@ func deleteRange(db *leveldb.DB, prefix []byte) {
 // convergence, it's simpler to "ensure" the correct state when an appropriate
 // condition occurs (i.e. a successful bonding), and discard further events.
 func (db *DB) ensureExpirer() {
-	db.runner.Do(func() { gopool.Submit(func() { db.expirer() }) })
+	db.runner.Do(func() { go db.expirer() })
 }
 
 // expirer should be started in a go routine, and is responsible for looping ad

@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/node"
+	"go.uber.org/automaxprocs/maxprocs"
 
 	// Force-load the tracer engines to trigger registration
 	_ "github.com/ethereum/go-ethereum/eth/tracers/js"
@@ -64,22 +65,14 @@ var (
 		utils.NoUSBFlag,
 		utils.USBFlag,
 		utils.SmartCardDaemonPathFlag,
-		utils.OverrideShanghai,
+		utils.OverrideCancun,
+		utils.OverrideVerkle,
+		utils.OverrideOptimismCanyon,
 		utils.EnablePersonal,
-		utils.OverrideOptimismBedrock,
-		utils.OverrideOptimismRegolith,
-		utils.OverrideOptimism,
-		utils.EthashCacheDirFlag,
-		utils.EthashCachesInMemoryFlag,
-		utils.EthashCachesOnDiskFlag,
-		utils.EthashCachesLockMmapFlag,
-		utils.EthashDatasetDirFlag,
-		utils.EthashDatasetsInMemoryFlag,
-		utils.EthashDatasetsOnDiskFlag,
-		utils.EthashDatasetsLockMmapFlag,
 		utils.TxPoolLocalsFlag,
 		utils.TxPoolNoLocalsFlag,
 		utils.TxPoolJournalFlag,
+		utils.TxPoolJournalRemotesFlag,
 		utils.TxPoolRejournalFlag,
 		utils.TxPoolPriceLimitFlag,
 		utils.TxPoolPriceBumpFlag,
@@ -90,22 +83,23 @@ var (
 		utils.TxPoolLifetimeFlag,
 		utils.TxPoolReannounceTimeFlag,
 		utils.TxPoolReannounceRemotesFlag,
+		utils.BlobPoolDataDirFlag,
+		utils.BlobPoolDataCapFlag,
+		utils.BlobPoolPriceBumpFlag,
 		utils.SyncModeFlag,
 		utils.SyncTargetFlag,
 		utils.ExitWhenSyncedFlag,
 		utils.GCModeFlag,
-		utils.TriesInMemoryFlag,
 		utils.SnapshotFlag,
 		utils.TxLookupLimitFlag,
+		utils.TransactionHistoryFlag,
+		utils.StateHistoryFlag,
 		utils.LightServeFlag,
 		utils.LightIngressFlag,
 		utils.LightEgressFlag,
 		utils.LightMaxPeersFlag,
 		utils.LightNoPruneFlag,
 		utils.LightKDFFlag,
-		utils.UltraLightServersFlag,
-		utils.UltraLightFractionFlag,
-		utils.UltraLightOnlyAnnounceFlag,
 		utils.LightNoSyncServeFlag,
 		utils.EthRequiredBlocksFlag,
 		utils.LegacyWhitelistFlag,
@@ -121,47 +115,48 @@ var (
 		utils.CachePreimagesFlag,
 		utils.CacheLogSizeFlag,
 		utils.FDLimitFlag,
+		utils.CryptoKZGFlag,
 		utils.ListenPortFlag,
 		utils.DiscoveryPortFlag,
 		utils.MaxPeersFlag,
 		utils.MaxPendingPeersFlag,
 		utils.MiningEnabledFlag,
-		utils.MinerThreadsFlag,
-		utils.MinerNotifyFlag,
 		utils.MinerGasLimitFlag,
 		utils.MinerGasPriceFlag,
 		utils.MinerEtherbaseFlag,
 		utils.MinerExtraDataFlag,
 		utils.MinerRecommitIntervalFlag,
-		utils.MinerNoVerifyFlag,
 		utils.MinerNewPayloadTimeout,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
+		utils.DiscoveryV4Flag,
 		utils.DiscoveryV5Flag,
+		utils.LegacyDiscoveryV5Flag,
 		utils.NetrestrictFlag,
 		utils.NodeKeyFileFlag,
 		utils.NodeKeyHexFlag,
 		utils.DNSDiscoveryFlag,
 		utils.DeveloperFlag,
-		utils.DeveloperPeriodFlag,
 		utils.DeveloperGasLimitFlag,
+		utils.DeveloperPeriodFlag,
 		utils.VMEnableDebugFlag,
 		utils.NetworkIdFlag,
 		utils.EthStatsURLFlag,
-		utils.FakePoWFlag,
 		utils.NoCompactionFlag,
 		utils.GpoBlocksFlag,
 		utils.GpoPercentileFlag,
 		utils.GpoMaxGasPriceFlag,
 		utils.GpoIgnoreGasPriceFlag,
-		utils.MinerNotifyFullFlag,
+		utils.GpoMinSuggestedPriorityFeeFlag,
 		utils.RollupSequencerHTTPFlag,
 		utils.RollupHistoricalRPCFlag,
 		utils.RollupHistoricalRPCTimeoutFlag,
 		utils.RollupDisableTxPoolGossipFlag,
 		utils.RollupComputePendingBlock,
+		utils.RollupHaltOnIncompatibleProtocolVersionFlag,
+		utils.RollupSuperchainUpgradesFlag,
 		configFileFlag,
-	}, utils.NetworkFlags, utils.DatabasePathFlags)
+	}, utils.NetworkFlags, utils.DatabaseFlags)
 
 	rpcFlags = []cli.Flag{
 		utils.HTTPEnabledFlag,
@@ -191,6 +186,8 @@ var (
 		utils.RPCGlobalEVMTimeoutFlag,
 		utils.RPCGlobalTxFeeCapFlag,
 		utils.AllowUnprotectedTxs,
+		utils.BatchRequestLimit,
+		utils.BatchResponseMaxSize,
 	}
 
 	metricsFlags = []cli.Flag{
@@ -235,8 +232,6 @@ func init() {
 		attachCommand,
 		javascriptCommand,
 		// See misccmd.go:
-		makecacheCommand,
-		makedagCommand,
 		versionCommand,
 		versionCheckCommand,
 		licenseCommand,
@@ -260,10 +255,16 @@ func init() {
 		debug.Flags,
 		metricsFlags,
 	)
+	flags.AutoEnvVars(app.Flags, "GETH")
 
 	app.Before = func(ctx *cli.Context) error {
+		maxprocs.Set() // Automatically set GOMAXPROCS to match Linux container CPU quota.
 		flags.MigrateGlobalFlags(ctx)
-		return debug.Setup(ctx)
+		if err := debug.Setup(ctx); err != nil {
+			return err
+		}
+		flags.CheckEnvVars(ctx, app.Flags, "GETH")
+		return nil
 	}
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
@@ -284,14 +285,14 @@ func main() {
 func prepare(ctx *cli.Context) {
 	// If we're running a known preset, log it for convenience.
 	switch {
-	case ctx.IsSet(utils.RinkebyFlag.Name):
-		log.Info("Starting Geth on Rinkeby testnet...")
-
 	case ctx.IsSet(utils.GoerliFlag.Name):
 		log.Info("Starting Geth on Görli testnet...")
 
 	case ctx.IsSet(utils.SepoliaFlag.Name):
 		log.Info("Starting Geth on Sepolia testnet...")
+
+	case ctx.IsSet(utils.HoleskyFlag.Name):
+		log.Info("Starting Geth on Holesky testnet...")
 
 	case ctx.IsSet(utils.DeveloperFlag.Name):
 		log.Info("Starting Geth in ephemeral dev mode...")
@@ -311,20 +312,43 @@ func prepare(ctx *cli.Context) {
      to 0, and discovery is disabled.
 `)
 
+	case ctx.IsSet(utils.OPNetworkFlag.Name):
+		log.Info("Starting geth on an OP network...", "network", ctx.String(utils.OPNetworkFlag.Name))
+
+	case ctx.IsSet(utils.OpBNBMainnetFlag.Name):
+		log.Info("Starting geth on an opBNB Mainnet  network...", "network", ctx.String(utils.OpBNBMainnetFlag.Name))
+
+	case ctx.IsSet(utils.OpBNBTestnetFlag.Name):
+		log.Info("Starting geth on an opBNB Testnet network...", "network", ctx.String(utils.OpBNBTestnetFlag.Name))
+
+	case ctx.IsSet(utils.OpBNBQANetFlag.Name):
+		log.Info("Starting geth on an opBNB QAnet network...", "network", ctx.String(utils.OpBNBQANetFlag.Name))
+
 	case !ctx.IsSet(utils.NetworkIdFlag.Name):
 		log.Info("Starting Geth on Ethereum mainnet...")
 	}
 	// If we're a full node on mainnet without --cache specified, bump default cache allowance
 	if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) && !ctx.IsSet(utils.NetworkIdFlag.Name) {
 		// Make sure we're not on any supported preconfigured testnet either
-		if !ctx.IsSet(utils.SepoliaFlag.Name) &&
-			!ctx.IsSet(utils.RinkebyFlag.Name) &&
+		if !ctx.IsSet(utils.HoleskyFlag.Name) &&
+			!ctx.IsSet(utils.SepoliaFlag.Name) &&
 			!ctx.IsSet(utils.GoerliFlag.Name) &&
 			!ctx.IsSet(utils.DeveloperFlag.Name) {
 			// Nope, we're really on mainnet. Bump that cache up!
+			// Note: If we don't set the OPNetworkFlag and have already initialized the database, we may hit this case.
 			log.Info("Bumping default cache on mainnet", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 4096)
 			ctx.Set(utils.CacheFlag.Name, strconv.Itoa(4096))
 		}
+	} else if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) && ctx.IsSet(utils.OPNetworkFlag.Name) {
+		// We haven't set the cache, but may used the OP network flag we may be on an OP stack mainnet.
+		if strings.Contains(ctx.String(utils.OPNetworkFlag.Name), "mainnet") {
+			log.Info("Bumping default cache on mainnet", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 4096, "network", ctx.String(utils.OPNetworkFlag.Name))
+			ctx.Set(utils.CacheFlag.Name, strconv.Itoa(4096))
+		}
+	} else if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) && ctx.IsSet(utils.OpBNBMainnetFlag.Name) {
+		// we're really on opBNB mainnet. Bump that cache up
+		log.Info("Bumping default cache on mainnet", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 4096, "network", ctx.String(utils.OpBNBMainnetFlag.Name))
+		ctx.Set(utils.CacheFlag.Name, strconv.Itoa(4096))
 	}
 	// If we're running a light client on any network, drop the cache to some meaningfully low amount
 	if ctx.String(utils.SyncModeFlag.Name) == "light" && !ctx.IsSet(utils.CacheFlag.Name) {
@@ -373,10 +397,7 @@ func startNode(ctx *cli.Context, stack *node.Node, backend ethapi.Backend, isCon
 	stack.AccountManager().Subscribe(events)
 
 	// Create a client to interact with local geth node.
-	rpcClient, err := stack.Attach()
-	if err != nil {
-		utils.Fatalf("Failed to attach to self: %v", err)
-	}
+	rpcClient := stack.Attach()
 	ethClient := ethclient.NewClient(rpcClient)
 
 	go func() {
@@ -437,7 +458,7 @@ func startNode(ctx *cli.Context, stack *node.Node, backend ethapi.Backend, isCon
 	}
 
 	// Start auxiliary services if enabled
-	if ctx.Bool(utils.MiningEnabledFlag.Name) || ctx.Bool(utils.DeveloperFlag.Name) {
+	if ctx.Bool(utils.MiningEnabledFlag.Name) {
 		// Mining only makes sense if a full Ethereum node is running
 		if ctx.String(utils.SyncModeFlag.Name) == "light" {
 			utils.Fatalf("Light clients do not support mining")
@@ -448,10 +469,8 @@ func startNode(ctx *cli.Context, stack *node.Node, backend ethapi.Backend, isCon
 		}
 		// Set the gas price to the limits from the CLI and start mining
 		gasprice := flags.GlobalBig(ctx, utils.MinerGasPriceFlag.Name)
-		ethBackend.TxPool().SetGasPrice(gasprice)
-		// start mining
-		threads := ctx.Int(utils.MinerThreadsFlag.Name)
-		if err := ethBackend.StartMining(threads); err != nil {
+		ethBackend.TxPool().SetGasTip(gasprice)
+		if err := ethBackend.StartMining(); err != nil {
 			utils.Fatalf("Failed to start mining: %v", err)
 		}
 	}
@@ -475,7 +494,12 @@ func unlockAccounts(ctx *cli.Context, stack *node.Node) {
 	if !stack.Config().InsecureUnlockAllowed && stack.Config().ExtRPCEnabled() {
 		utils.Fatalf("Account unlock with HTTP access is forbidden!")
 	}
-	ks := stack.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
+	backends := stack.AccountManager().Backends(keystore.KeyStoreType)
+	if len(backends) == 0 {
+		log.Warn("Failed to unlock accounts, keystore is not available")
+		return
+	}
+	ks := backends[0].(*keystore.KeyStore)
 	passwords := utils.MakePasswordList(ctx)
 	for i, account := range unlocks {
 		unlockAccount(ks, account, i, passwords)

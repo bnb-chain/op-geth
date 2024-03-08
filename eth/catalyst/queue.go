@@ -17,6 +17,7 @@
 package catalyst
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
@@ -73,7 +74,7 @@ func (q *payloadQueue) put(id engine.PayloadID, payload *miner.Payload) {
 }
 
 // get retrieves a previously stored payload item or nil if it does not exist.
-func (q *payloadQueue) get(id engine.PayloadID) *engine.ExecutionPayloadEnvelope {
+func (q *payloadQueue) get(id engine.PayloadID, full bool) *engine.ExecutionPayloadEnvelope {
 	q.lock.RLock()
 	defer q.lock.RUnlock()
 
@@ -82,10 +83,31 @@ func (q *payloadQueue) get(id engine.PayloadID) *engine.ExecutionPayloadEnvelope
 			return nil // no more items
 		}
 		if item.id == id {
-			return item.payload.Resolve()
+			if !full {
+				return item.payload.Resolve()
+			}
+			return item.payload.ResolveFull()
 		}
 	}
 	return nil
+}
+
+// waitFull waits until the first full payload has been built for the specified payload id
+// The method returns immediately if the payload is unknown.
+func (q *payloadQueue) waitFull(id engine.PayloadID) error {
+	q.lock.RLock()
+	defer q.lock.RUnlock()
+
+	for _, item := range q.payloads {
+		if item == nil {
+			return errors.New("unknown payload")
+		}
+		if item.id == id {
+			item.payload.WaitFull()
+			return nil
+		}
+	}
+	return errors.New("unknown payload")
 }
 
 // has checks if a particular payload is already tracked.

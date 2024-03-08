@@ -18,8 +18,6 @@ package bloombits
 
 import (
 	"sync"
-
-	"github.com/ethereum/go-ethereum/common/gopool"
 )
 
 // request represents a bloom retrieval task to prioritize and pull from the local
@@ -65,8 +63,8 @@ func (s *scheduler) run(sections chan uint64, dist chan *request, done chan []by
 
 	// Start the pipeline schedulers to forward between user -> distributor -> user
 	wg.Add(2)
-	gopool.Submit(func() { s.scheduleRequests(sections, dist, pend, quit, wg) })
-	gopool.Submit(func() { s.scheduleDeliveries(pend, done, quit, wg) })
+	go s.scheduleRequests(sections, dist, pend, quit, wg)
+	go s.scheduleDeliveries(pend, done, quit, wg)
 }
 
 // reset cleans up any leftovers from previous runs. This is required before a

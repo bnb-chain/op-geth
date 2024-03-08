@@ -5,7 +5,6 @@ import (
 )
 
 const (
-	AlreadyKnown            = "AlreadyKnown"
 	TypeNotSupportDeposit   = "TypeNotSupportDeposit"
 	TypeNotSupport1559      = "TypeNotSupport1559"
 	TypeNotSupport2718      = "TypeNotSupport2718"
@@ -23,22 +22,17 @@ const (
 	InsufficientFunds       = "InsufficientFunds"
 	Overdraft               = "Overdraft"
 	IntrinsicGas            = "IntrinsicGas"
-	Throttle                = "Throttle"
-	Overflow                = "Overflow"
 	FutureReplacePending    = "FutureReplacePending"
-	ReplaceUnderpriced      = "ReplaceUnderpriced"
-	QueuedDiscard           = "QueueDiscard"
 	GasUnitOverflow         = "GasUnitOverflow"
 )
 
-func meter(err string) metrics.Meter {
+func Meter(err string) metrics.Meter {
 	return metrics.GetOrRegisterMeter("txpool/invalid/"+err, nil)
 }
 
 func init() {
 	// init the metrics
 	for _, err := range []string{
-		AlreadyKnown,
 		TypeNotSupportDeposit,
 		TypeNotSupport1559,
 		TypeNotSupport2718,
@@ -56,13 +50,9 @@ func init() {
 		InsufficientFunds,
 		Overdraft,
 		IntrinsicGas,
-		Throttle,
-		Overflow,
 		FutureReplacePending,
-		ReplaceUnderpriced,
-		QueuedDiscard,
 		GasUnitOverflow,
 	} {
-		meter(err).Mark(0)
+		Meter(err).Mark(0)
 	}
 }

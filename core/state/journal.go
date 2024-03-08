@@ -43,8 +43,7 @@ type journal struct {
 // newJournal creates a new initialized journal.
 func newJournal() *journal {
 	return &journal{
-		dirties: make(map[common.Address]int, defaultNumOfSlots),
-		entries: make([]journalEntry, 0, defaultNumOfSlots),
+		dirties: make(map[common.Address]int),
 	}
 }
 
@@ -91,12 +90,19 @@ type (
 		account *common.Address
 	}
 	resetObjectChange struct {
+		account      *common.Address
 		prev         *stateObject
 		prevdestruct bool
+		prevAccount  []byte
+		prevStorage  map[common.Hash][]byte
+
+		prevAccountOriginExist bool
+		prevAccountOrigin      []byte
+		prevStorageOrigin      map[common.Hash][]byte
 	}
-	suicideChange struct {
+	selfDestructChange struct {
 		account     *common.Address
-		prev        bool // whether account had already suicided
+		prev        bool // whether account had already self-destructed
 		prevbalance *big.Int
 	}
 
@@ -160,21 +166,33 @@ func (ch resetObjectChange) revert(s *StateDB) {
 	if !ch.prevdestruct {
 		delete(s.stateObjectsDestruct, ch.prev.address)
 	}
+	if ch.prevAccount != nil {
+		s.accounts[ch.prev.addrHash] = ch.prevAccount
+	}
+	if ch.prevStorage != nil {
+		s.storages[ch.prev.addrHash] = ch.prevStorage
+	}
+	if ch.prevAccountOriginExist {
+		s.accountsOrigin[ch.prev.address] = ch.prevAccountOrigin
+	}
+	if ch.prevStorageOrigin != nil {
+		s.storagesOrigin[ch.prev.address] = ch.prevStorageOrigin
+	}
 }
 
 func (ch resetObjectChange) dirtied() *common.Address {
-	return nil
+	return ch.account
 }
 
-func (ch suicideChange) revert(s *StateDB) {
+func (ch selfDestructChange) revert(s *StateDB) {
 	obj := s.getStateObject(*ch.account)
 	if obj != nil {
-		obj.suicided = ch.prev
+		obj.selfDestructed = ch.prev
 		obj.setBalance(ch.prevbalance)
 	}
 }
 
-func (ch suicideChange) dirtied() *common.Address {
+func (ch selfDestructChange) dirtied() *common.Address {
 	return ch.account
 }
 
@@ -267,9 +285,7 @@ func (ch accessListAddAccountChange) revert(s *StateDB) {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
-	if s.accessList != nil {
-		s.accessList.DeleteAddress(*ch.address)
-	}
+	s.accessList.DeleteAddress(*ch.address)
 }
 
 func (ch accessListAddAccountChange) dirtied() *common.Address {
@@ -277,9 +293,7 @@ func (ch accessListAddAccountChange) dirtied() *common.Address {
 }
 
 func (ch accessListAddSlotChange) revert(s *StateDB) {
-	if s.accessList != nil {
-		s.accessList.DeleteSlot(*ch.address, *ch.slot)
-	}
+	s.accessList.DeleteSlot(*ch.address, *ch.slot)
 }
 
 func (ch accessListAddSlotChange) dirtied() *common.Address {

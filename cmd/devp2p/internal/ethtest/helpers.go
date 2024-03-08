@@ -17,6 +17,7 @@
 package ethtest
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -61,7 +62,6 @@ func (s *Suite) dial() (*Conn, error) {
 	}
 	// set default p2p capabilities
 	conn.caps = []p2p.Cap{
-		{Name: "eth", Version: 66},
 		{Name: "eth", Version: 67},
 		{Name: "eth", Version: 68},
 	}
@@ -185,7 +185,7 @@ loop:
 	}
 	// make sure eth protocol version is set for negotiation
 	if c.negotiatedProtoVersion == 0 {
-		return nil, fmt.Errorf("eth protocol version must be set in Conn")
+		return nil, errors.New("eth protocol version must be set in Conn")
 	}
 	if status == nil {
 		// default status message
@@ -236,8 +236,8 @@ func (c *Conn) readAndServe(chain *Chain, timeout time.Duration) Message {
 				return errorf("could not get headers for inbound header request: %v", err)
 			}
 			resp := &BlockHeaders{
-				RequestId:          msg.ReqID(),
-				BlockHeadersPacket: eth.BlockHeadersPacket(headers),
+				RequestId:           msg.ReqID(),
+				BlockHeadersRequest: eth.BlockHeadersRequest(headers),
 			}
 			if err := c.Write(resp); err != nil {
 				return errorf("could not write to connection: %v", err)
@@ -266,7 +266,7 @@ func (c *Conn) headersRequest(request *GetBlockHeaders, chain *Chain, reqID uint
 	if !ok {
 		return nil, fmt.Errorf("unexpected message received: %s", pretty.Sdump(msg))
 	}
-	headers := []*types.Header(resp.BlockHeadersPacket)
+	headers := []*types.Header(resp.BlockHeadersRequest)
 	return headers, nil
 }
 
@@ -378,7 +378,7 @@ func (s *Suite) waitForBlockImport(conn *Conn, block *types.Block) error {
 	conn.SetReadDeadline(time.Now().Add(20 * time.Second))
 	// create request
 	req := &GetBlockHeaders{
-		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+		GetBlockHeadersRequest: &eth.GetBlockHeadersRequest{
 			Origin: eth.HashOrNumber{Hash: block.Hash()},
 			Amount: 1,
 		},
@@ -603,8 +603,8 @@ func (s *Suite) hashAnnounce() error {
 			pretty.Sdump(blockHeaderReq))
 	}
 	err = sendConn.Write(&BlockHeaders{
-		RequestId:          blockHeaderReq.ReqID(),
-		BlockHeadersPacket: eth.BlockHeadersPacket{nextBlock.Header()},
+		RequestId:           blockHeaderReq.ReqID(),
+		BlockHeadersRequest: eth.BlockHeadersRequest{nextBlock.Header()},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to write to connection: %v", err)

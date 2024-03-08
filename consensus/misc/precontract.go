@@ -38,5 +38,5 @@ var (
 func ApplyPreContractHardFork(statedb *state.StateDB) {
 	statedb.SetState(WBNBContract, nameSlot, nameValue)
 	statedb.SetState(WBNBContract, symbolSlot, symbolValue)
-	statedb.Suicide(governanceToken)
+	statedb.SelfDestruct(governanceToken)
 }

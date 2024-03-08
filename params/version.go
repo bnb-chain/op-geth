@@ -18,23 +18,45 @@ package params
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 )
 
 // Version is the version of upstream geth
 const (
 	VersionMajor = 1        // Major version component of the current release
-	VersionMinor = 11       // Minor version component of the current release
-	VersionPatch = 5        // Patch version component of the current release
+	VersionMinor = 13       // Minor version component of the current release
+	VersionPatch = 4        // Patch version component of the current release
 	VersionMeta  = "stable" // Version metadata to append to the version string
 )
 
 // OPVersion is the version of op-geth
-const (
+var (
 	OPVersionMajor = 0          // Major version component of the current release
 	OPVersionMinor = 1          // Minor version component of the current release
 	OPVersionPatch = 0          // Patch version component of the current release
 	OPVersionMeta  = "unstable" // Version metadata to append to the version string
 )
+
+// This is set at build-time by the linker when the build is done by build/ci.go.
+var gitTag string
+
+// Override the version variables if the gitTag was set at build time.
+var _ = func() (_ string) {
+	semver := regexp.MustCompile(`^v([0-9]+)\.([0-9]+)\.([0-9]+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+)?$`)
+	version := semver.FindStringSubmatch(gitTag)
+	if version == nil {
+		return
+	}
+	if version[4] == "" {
+		version[4] = "stable"
+	}
+	OPVersionMajor, _ = strconv.Atoi(version[1])
+	OPVersionMinor, _ = strconv.Atoi(version[2])
+	OPVersionPatch, _ = strconv.Atoi(version[3])
+	OPVersionMeta = version[4]
+	return
+}()
 
 // Version holds the textual version string.
 var Version = func() string {

@@ -17,11 +17,8 @@
 package params
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math/big"
-
-	"golang.org/x/crypto/sha3"
 
 	"github.com/ethereum/go-ethereum/common"
 )
@@ -29,41 +26,46 @@ import (
 // Genesis hashes to enforce below configs on.
 var (
 	MainnetGenesisHash = common.HexToHash("0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3")
+	HoleskyGenesisHash = common.HexToHash("0xb5f7f912443c940f21fd611f12828d75b534364ed9e95ca4e307729a4661bde4")
 	SepoliaGenesisHash = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
-	RinkebyGenesisHash = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash  = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBDevNetGenesisHash  = common.HexToHash("0x49d448b8dc98cc95e3968615ff3dbd904d9eec8252c5f52271f029896e6147ee")
+	OPBNBQANetGenesisHash   = common.HexToHash("0x1cba296441b55cf9b5b306b6aef43e68e9aeff2450d68c391dec448604cf3baf")
+)
+
+const (
+	OPMainnetChainID        = 10
+	OPGoerliChainID         = 420
+	BaseMainnetChainID      = 8453
+	BaseGoerliChainID       = 84531
+	baseSepoliaChainID      = 84532
+	baseGoerliDevnetChainID = 11763071
+	pgnSepoliaChainID       = 58008
+	devnetChainID           = 997
+	chaosnetChainID         = 888
+)
+
+const (
+	OPBNBMainnetChainID = 204
+	OPBNBTestNetChainID = 5611
+	OPBNBQANetChainID   = 1322
 )
 
 // OP Stack chain config
 var (
-	OptimismGoerliChainId = big.NewInt(420)
 	// March 17, 2023 @ 7:00:00 pm UTC
 	OptimismGoerliRegolithTime = uint64(1679079600)
-	BaseGoerliChainId          = big.NewInt(84531)
-	// April 27, 2023 @ 5:00:00 pm UTC
-	BaseGoerliRegolithTime = uint64(1682614800)
+	// May 4, 2023 @ 5:00:00 pm UTC
+	BaseGoerliRegolithTime = uint64(1683219600)
+	// Apr 21, 2023 @ 6:30:00 pm UTC
+	baseGoerliDevnetRegolithTime = uint64(1682101800)
+	// March 5, 2023 @ 2:48:00 am UTC
+	devnetRegolithTime = uint64(1677984480)
+	// August 16, 2023 @ 3:34:22 am UTC
+	chaosnetRegolithTime = uint64(1692156862)
 )
-
-// TrustedCheckpoints associates each known checkpoint with the genesis hash of
-// the chain it belongs to.
-var TrustedCheckpoints = map[common.Hash]*TrustedCheckpoint{
-	MainnetGenesisHash: MainnetTrustedCheckpoint,
-	SepoliaGenesisHash: SepoliaTrustedCheckpoint,
-	RinkebyGenesisHash: RinkebyTrustedCheckpoint,
-	GoerliGenesisHash:  GoerliTrustedCheckpoint,
-}
-
-// CheckpointOracles associates each known checkpoint oracles with the genesis hash of
-// the chain it belongs to.
-var CheckpointOracles = map[common.Hash]*CheckpointOracleConfig{
-	MainnetGenesisHash: MainnetCheckpointOracle,
-	RinkebyGenesisHash: RinkebyCheckpointOracle,
-	GoerliGenesisHash:  GoerliCheckpointOracle,
-}
 
 func newUint64(val uint64) *uint64 { return &val }
 
@@ -77,7 +79,6 @@ var (
 		DAOForkBlock:                  big.NewInt(1_920_000),
 		DAOForkSupport:                true,
 		EIP150Block:                   big.NewInt(2_463_000),
-		EIP150Hash:                    common.HexToHash("0x2086799aeebeae135c246c65021c82b4e15a2c451340993aacfd2751886514f0"),
 		EIP155Block:                   big.NewInt(2_675_000),
 		EIP158Block:                   big.NewInt(2_675_000),
 		ByzantiumBlock:                big.NewInt(4_370_000),
@@ -94,28 +95,30 @@ var (
 		ShanghaiTime:                  newUint64(1681338455),
 		Ethash:                        new(EthashConfig),
 	}
-
-	// MainnetTrustedCheckpoint contains the light client trusted checkpoint for the main network.
-	MainnetTrustedCheckpoint = &TrustedCheckpoint{
-		SectionIndex: 506,
-		SectionHead:  common.HexToHash("0x3d1a139a6fc7764211236ef7c64d9e8c1fe55b358d7414e25277bac1144486cd"),
-		CHTRoot:      common.HexToHash("0xef7fc3321a239a54238593bdf68d82933d903cb533b0d03228a8d958cd35ea77"),
-		BloomRoot:    common.HexToHash("0x51d7bfe7c6397b1caa8b1cb046de4aeaf7e7fbd3fb6c726b60bf750de78809e8"),
+	// HoleskyChainConfig contains the chain parameters to run a node on the Holesky test network.
+	HoleskyChainConfig = &ChainConfig{
+		ChainID:                       big.NewInt(17000),
+		HomesteadBlock:                big.NewInt(0),
+		DAOForkBlock:                  nil,
+		DAOForkSupport:                true,
+		EIP150Block:                   big.NewInt(0),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              nil,
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             nil,
+		GrayGlacierBlock:              nil,
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		MergeNetsplitBlock:            nil,
+		ShanghaiTime:                  newUint64(1696000704),
+		Ethash:                        new(EthashConfig),
 	}
-
-	// MainnetCheckpointOracle contains a set of configs for the main network oracle.
-	MainnetCheckpointOracle = &CheckpointOracleConfig{
-		Address: common.HexToAddress("0x9a9070028361F7AAbeB3f2F2Dc07F82C4a98A02a"),
-		Signers: []common.Address{
-			common.HexToAddress("0x1b2C260efc720BE89101890E4Db589b44E950527"), // Peter
-			common.HexToAddress("0x78d1aD571A1A09D60D9BBf25894b44e4C8859595"), // Martin
-			common.HexToAddress("0x286834935f4A8Cfb4FF4C77D5770C2775aE2b0E7"), // Zsolt
-			common.HexToAddress("0xb86e2B0Ab5A4B1373e40c51A7C712c70Ba2f9f8E"), // Gary
-			common.HexToAddress("0x0DF8fa387C602AE62559cC4aFa4972A7045d6707"), // Guillaume
-		},
-		Threshold: 2,
-	}
-
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
 	SepoliaChainConfig = &ChainConfig{
 		ChainID:                       big.NewInt(11155111),
@@ -132,65 +135,14 @@ var (
 		MuirGlacierBlock:              big.NewInt(0),
 		BerlinBlock:                   big.NewInt(0),
 		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             nil,
+		GrayGlacierBlock:              nil,
 		TerminalTotalDifficulty:       big.NewInt(17_000_000_000_000_000),
 		TerminalTotalDifficultyPassed: true,
 		MergeNetsplitBlock:            big.NewInt(1735371),
 		ShanghaiTime:                  newUint64(1677557088),
 		Ethash:                        new(EthashConfig),
 	}
-
-	// SepoliaTrustedCheckpoint contains the light client trusted checkpoint for the Sepolia test network.
-	SepoliaTrustedCheckpoint = &TrustedCheckpoint{
-		SectionIndex: 55,
-		SectionHead:  common.HexToHash("0xb70ea113ab4db9d6e015c5b55d486713f60c40bda666121914a71ce3aec53a75"),
-		CHTRoot:      common.HexToHash("0x206456d8847b66aaf427ed551f55e24cff90241bdb0a02583c761bf8164f78e4"),
-		BloomRoot:    common.HexToHash("0x4369228d59a8fe285fee874c636531091e659b3b1294bb978eb159860a1cede2"),
-	}
-
-	// RinkebyChainConfig contains the chain parameters to run a node on the Rinkeby test network.
-	RinkebyChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(4),
-		HomesteadBlock:      big.NewInt(1),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
-		EIP150Block:         big.NewInt(2),
-		EIP150Hash:          common.HexToHash("0x9b095b36c15eaf13044373aef8ee0bd3a382a5abb92e402afa44b8249c3a90e9"),
-		EIP155Block:         big.NewInt(3),
-		EIP158Block:         big.NewInt(3),
-		ByzantiumBlock:      big.NewInt(1_035_301),
-		ConstantinopleBlock: big.NewInt(3_660_663),
-		PetersburgBlock:     big.NewInt(4_321_234),
-		IstanbulBlock:       big.NewInt(5_435_345),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(8_290_928),
-		LondonBlock:         big.NewInt(8_897_988),
-		ArrowGlacierBlock:   nil,
-		Clique: &CliqueConfig{
-			Period: 15,
-			Epoch:  30000,
-		},
-	}
-
-	// RinkebyTrustedCheckpoint contains the light client trusted checkpoint for the Rinkeby test network.
-	RinkebyTrustedCheckpoint = &TrustedCheckpoint{
-		SectionIndex: 373,
-		SectionHead:  common.HexToHash("0x09f6d8f0d08d61025ccf4578dc214220b78013841470d445ed86faab4a5a885a"),
-		CHTRoot:      common.HexToHash("0xef72902b944a111e9fdfee5fb69a5e46f68bf11a1f0bd430321f92d6b66987df"),
-		BloomRoot:    common.HexToHash("0xd0120268729c51dd6fa2714f7f88527adfecbdb08592c671233ad2e0ad7cd835"),
-	}
-
-	// RinkebyCheckpointOracle contains a set of configs for the Rinkeby test network oracle.
-	RinkebyCheckpointOracle = &CheckpointOracleConfig{
-		Address: common.HexToAddress("0xebe8eFA441B9302A0d7eaECc277c09d20D684540"),
-		Signers: []common.Address{
-			common.HexToAddress("0xd9c9cd5f6779558b6e0ed4e6acf6b1947e7fa1f3"), // Peter
-			common.HexToAddress("0x78d1aD571A1A09D60D9BBf25894b44e4C8859595"), // Martin
-			common.HexToAddress("0x286834935f4A8Cfb4FF4C77D5770C2775aE2b0E7"), // Zsolt
-			common.HexToAddress("0xb86e2B0Ab5A4B1373e40c51A7C712c70Ba2f9f8E"), // Gary
-		},
-		Threshold: 2,
-	}
-
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
 	GoerliChainConfig = &ChainConfig{
 		ChainID:                       big.NewInt(5),
@@ -216,33 +168,11 @@ var (
 			Epoch:  30000,
 		},
 	}
-
-	// GoerliTrustedCheckpoint contains the light client trusted checkpoint for the Görli test network.
-	GoerliTrustedCheckpoint = &TrustedCheckpoint{
-		SectionIndex: 229,
-		SectionHead:  common.HexToHash("0xc5a7b57cb4af7b3d4cc251ac5f29acaac94e7464365358e7ad26129083b7729a"),
-		CHTRoot:      common.HexToHash("0x54c0d5c756d9c48eda26ea13c2a49c2e31f1cb7dfb01514ddc49f3d24272c77e"),
-		BloomRoot:    common.HexToHash("0xd681970a496f6187d089f8c8665a3587b5a78212d79b6ceef97c0dabd0188e56"),
-	}
-
-	// GoerliCheckpointOracle contains a set of configs for the Goerli test network oracle.
-	GoerliCheckpointOracle = &CheckpointOracleConfig{
-		Address: common.HexToAddress("0x18CA0E045F0D772a851BC7e48357Bcaab0a0795D"),
-		Signers: []common.Address{
-			common.HexToAddress("0x4769bcaD07e3b938B7f43EB7D278Bc7Cb9efFb38"), // Peter
-			common.HexToAddress("0x78d1aD571A1A09D60D9BBf25894b44e4C8859595"), // Martin
-			common.HexToAddress("0x286834935f4A8Cfb4FF4C77D5770C2775aE2b0E7"), // Zsolt
-			common.HexToAddress("0xb86e2B0Ab5A4B1373e40c51A7C712c70Ba2f9f8E"), // Gary
-			common.HexToAddress("0x0DF8fa387C602AE62559cC4aFa4972A7045d6707"), // Guillaume
-		},
-		Threshold: 2,
-	}
-
+	// OPBNBMainNetConfig is the chain parameters to run a node on the opBNB main network.
 	OPBNBMainNetConfig = &ChainConfig{
 		ChainID:                       big.NewInt(204),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
-		EIP150Hash:                    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		EIP155Block:                   big.NewInt(0),
 		EIP158Block:                   big.NewInt(0),
 		ByzantiumBlock:                big.NewInt(0),
@@ -265,12 +195,11 @@ var (
 		},
 		Fermat: big.NewInt(9397477), // Nov-28-2023 06 AM +UTC
 	}
-
+	// OPBNBTestNetConfig is the chain parameters to run a node on the opBNB testnet network.
 	OPBNBTestNetConfig = &ChainConfig{
 		ChainID:                       big.NewInt(5611),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
-		EIP150Hash:                    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		EIP155Block:                   big.NewInt(0),
 		EIP158Block:                   big.NewInt(0),
 		ByzantiumBlock:                big.NewInt(0),
@@ -294,12 +223,11 @@ var (
 		PreContractForkBlock: big.NewInt(5805494),
 		Fermat:               big.NewInt(12113000), // Nov-03-2023 06 AM +UTC
 	}
-
-	OPBNBDevNetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(1320),
+	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
+	OPBNBQANetConfig = &ChainConfig{
+		ChainID:                       big.NewInt(1322),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
-		EIP150Hash:                    common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		EIP155Block:                   big.NewInt(0),
 		EIP158Block:                   big.NewInt(0),
 		ByzantiumBlock:                big.NewInt(0),
@@ -320,7 +248,7 @@ var (
 			EIP1559Elasticity:  2,
 			EIP1559Denominator: 8,
 		},
-		Fermat: big.NewInt(3615117),
+		// Fermat: big.NewInt(3615117),
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -331,7 +259,6 @@ var (
 		DAOForkBlock:                  nil,
 		DAOForkSupport:                false,
 		EIP150Block:                   big.NewInt(0),
-		EIP150Hash:                    common.Hash{},
 		EIP155Block:                   big.NewInt(0),
 		EIP158Block:                   big.NewInt(0),
 		ByzantiumBlock:                big.NewInt(0),
@@ -344,14 +271,37 @@ var (
 		ArrowGlacierBlock:             big.NewInt(0),
 		GrayGlacierBlock:              big.NewInt(0),
 		MergeNetsplitBlock:            nil,
+		Fermat:                        big.NewInt(0),
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
+		VerkleTime:                    nil,
 		TerminalTotalDifficulty:       nil,
-		TerminalTotalDifficultyPassed: false,
+		TerminalTotalDifficultyPassed: true,
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
+	}
+
+	AllDevChainProtocolChanges = &ChainConfig{
+		ChainID:                       big.NewInt(1337),
+		HomesteadBlock:                big.NewInt(0),
+		EIP150Block:                   big.NewInt(0),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
 		Fermat:                        big.NewInt(0),
+		ShanghaiTime:                  newUint64(0),
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		IsDevMode:                     true,
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
@@ -362,7 +312,6 @@ var (
 		DAOForkBlock:                  nil,
 		DAOForkSupport:                false,
 		EIP150Block:                   big.NewInt(0),
-		EIP150Hash:                    common.Hash{},
 		EIP155Block:                   big.NewInt(0),
 		EIP158Block:                   big.NewInt(0),
 		ByzantiumBlock:                big.NewInt(0),
@@ -375,25 +324,25 @@ var (
 		ArrowGlacierBlock:             nil,
 		GrayGlacierBlock:              nil,
 		MergeNetsplitBlock:            nil,
+		Fermat:                        big.NewInt(0),
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
+		VerkleTime:                    nil,
 		TerminalTotalDifficulty:       nil,
 		TerminalTotalDifficultyPassed: false,
 		Ethash:                        nil,
 		Clique:                        &CliqueConfig{Period: 0, Epoch: 30000},
-		Fermat:                        big.NewInt(0),
 	}
 
 	// TestChainConfig contains every protocol change (EIPs) introduced
-	// and accepted by the Ethereum core developers for testing proposes.
+	// and accepted by the Ethereum core developers for testing purposes.
 	TestChainConfig = &ChainConfig{
 		ChainID:                       big.NewInt(1),
 		HomesteadBlock:                big.NewInt(0),
 		DAOForkBlock:                  nil,
 		DAOForkSupport:                false,
 		EIP150Block:                   big.NewInt(0),
-		EIP150Hash:                    common.Hash{},
 		EIP155Block:                   big.NewInt(0),
 		EIP158Block:                   big.NewInt(0),
 		ByzantiumBlock:                big.NewInt(0),
@@ -406,14 +355,15 @@ var (
 		ArrowGlacierBlock:             big.NewInt(0),
 		GrayGlacierBlock:              big.NewInt(0),
 		MergeNetsplitBlock:            nil,
+		Fermat:                        big.NewInt(0),
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
+		VerkleTime:                    nil,
 		TerminalTotalDifficulty:       nil,
 		TerminalTotalDifficultyPassed: false,
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
-		Fermat:                        big.NewInt(0),
 	}
 
 	// NonActivatedConfig defines the chain configuration without activating
@@ -424,7 +374,6 @@ var (
 		DAOForkBlock:                  nil,
 		DAOForkSupport:                false,
 		EIP150Block:                   nil,
-		EIP150Hash:                    common.Hash{},
 		EIP155Block:                   nil,
 		EIP158Block:                   nil,
 		ByzantiumBlock:                nil,
@@ -437,14 +386,15 @@ var (
 		ArrowGlacierBlock:             nil,
 		GrayGlacierBlock:              nil,
 		MergeNetsplitBlock:            nil,
+		Fermat:                        nil,
 		ShanghaiTime:                  nil,
 		CancunTime:                    nil,
 		PragueTime:                    nil,
+		VerkleTime:                    nil,
 		TerminalTotalDifficulty:       nil,
 		TerminalTotalDifficultyPassed: false,
 		Ethash:                        new(EthashConfig),
 		Clique:                        nil,
-		Fermat:                        nil,
 	}
 	TestRules = TestChainConfig.Rules(new(big.Int), false, 0)
 
@@ -452,6 +402,7 @@ var (
 	OptimismTestConfig = func() *ChainConfig {
 		conf := *AllCliqueProtocolChanges // copy the config
 		conf.Clique = nil
+		conf.TerminalTotalDifficultyPassed = true
 		conf.BedrockBlock = big.NewInt(5)
 		conf.Optimism = &OptimismConfig{EIP1559Elasticity: 50, EIP1559Denominator: 10}
 		return &conf
@@ -461,57 +412,12 @@ var (
 // NetworkNames are user friendly names to use in the chain spec banner.
 var NetworkNames = map[string]string{
 	MainnetChainConfig.ChainID.String(): "mainnet",
-	RinkebyChainConfig.ChainID.String(): "rinkeby",
 	GoerliChainConfig.ChainID.String():  "goerli",
 	SepoliaChainConfig.ChainID.String(): "sepolia",
-}
-
-// TrustedCheckpoint represents a set of post-processed trie roots (CHT and
-// BloomTrie) associated with the appropriate section index and head hash. It is
-// used to start light syncing from this checkpoint and avoid downloading the
-// entire header chain while still being able to securely access old headers/logs.
-type TrustedCheckpoint struct {
-	SectionIndex uint64      `json:"sectionIndex"`
-	SectionHead  common.Hash `json:"sectionHead"`
-	CHTRoot      common.Hash `json:"chtRoot"`
-	BloomRoot    common.Hash `json:"bloomRoot"`
-}
-
-// HashEqual returns an indicator comparing the itself hash with given one.
-func (c *TrustedCheckpoint) HashEqual(hash common.Hash) bool {
-	if c.Empty() {
-		return hash == common.Hash{}
-	}
-	return c.Hash() == hash
-}
-
-// Hash returns the hash of checkpoint's four key fields(index, sectionHead, chtRoot and bloomTrieRoot).
-func (c *TrustedCheckpoint) Hash() common.Hash {
-	var sectionIndex [8]byte
-	binary.BigEndian.PutUint64(sectionIndex[:], c.SectionIndex)
-
-	w := sha3.NewLegacyKeccak256()
-	w.Write(sectionIndex[:])
-	w.Write(c.SectionHead[:])
-	w.Write(c.CHTRoot[:])
-	w.Write(c.BloomRoot[:])
-
-	var h common.Hash
-	w.Sum(h[:0])
-	return h
-}
-
-// Empty returns an indicator whether the checkpoint is regarded as empty.
-func (c *TrustedCheckpoint) Empty() bool {
-	return c.SectionHead == (common.Hash{}) || c.CHTRoot == (common.Hash{}) || c.BloomRoot == (common.Hash{})
-}
-
-// CheckpointOracleConfig represents a set of checkpoint contract(which acts as an oracle)
-// config which used for light client checkpoint syncing.
-type CheckpointOracleConfig struct {
-	Address   common.Address   `json:"address"`
-	Signers   []common.Address `json:"signers"`
-	Threshold uint64           `json:"threshold"`
+	HoleskyChainConfig.ChainID.String(): "holesky",
+	OPBNBMainNetConfig.ChainID.String(): "opBNBMainnet",
+	OPBNBTestNetConfig.ChainID.String(): "opBNBTestnet",
+	OPBNBQANetConfig.ChainID.String():   "opBNBQAnet",
 }
 
 // ChainConfig is the core config which determines the blockchain settings.
@@ -528,9 +434,7 @@ type ChainConfig struct {
 	DAOForkSupport bool     `json:"daoForkSupport,omitempty"` // Whether the nodes supports or opposes the DAO hard-fork
 
 	// EIP150 implements the Gas price changes (https://github.com/ethereum/EIPs/issues/150)
-	EIP150Block *big.Int    `json:"eip150Block,omitempty"` // EIP150 HF block (nil = no fork)
-	EIP150Hash  common.Hash `json:"eip150Hash,omitempty"`  // EIP150 HF hash (needed for header only clients as only gas pricing changed)
-
+	EIP150Block *big.Int `json:"eip150Block,omitempty"` // EIP150 HF block (nil = no fork)
 	EIP155Block *big.Int `json:"eip155Block,omitempty"` // EIP155 HF block
 	EIP158Block *big.Int `json:"eip158Block,omitempty"` // EIP158 HF block
 
@@ -550,9 +454,16 @@ type ChainConfig struct {
 	ShanghaiTime *uint64 `json:"shanghaiTime,omitempty"` // Shanghai switch time (nil = no fork, 0 = already on shanghai)
 	CancunTime   *uint64 `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already on cancun)
 	PragueTime   *uint64 `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
+	VerkleTime   *uint64 `json:"verkleTime,omitempty"`   // Verkle switch time (nil = no fork, 0 = already on verkle)
 
 	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // Bedrock switch block (nil = no fork, 0 = already on optimism bedrock)
 	RegolithTime *uint64  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
+	CanyonTime   *uint64  `json:"canyonTime,omitempty"`   // Canyon switch time (nil = no fork, 0 = already on optimism canyon)
+
+	// PreContractForkBlock hard-fork switch block (nil = no fork, 0 = already on preContractForkBlock)
+	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
+	// Fermat switch block (nil = no fork, 0 = already on Fermat)
+	Fermat *big.Int `json:"fermat,omitempty"`
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -564,15 +475,12 @@ type ChainConfig struct {
 	TerminalTotalDifficultyPassed bool `json:"terminalTotalDifficultyPassed,omitempty"`
 
 	// Various consensus engines
-	Ethash *EthashConfig `json:"ethash,omitempty"`
-	Clique *CliqueConfig `json:"clique,omitempty"`
+	Ethash    *EthashConfig `json:"ethash,omitempty"`
+	Clique    *CliqueConfig `json:"clique,omitempty"`
+	IsDevMode bool          `json:"isDev,omitempty"`
 
 	// Optimism config, nil if not active
 	Optimism *OptimismConfig `json:"optimism,omitempty"`
-	// PreContractForkBlock hard-fork switch block (nil = no fork, 0 = already on preContractForkBlock)
-	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
-	// Fermat switch block (nil = no fork, 0 = already on Fermat)
-	Fermat *big.Int `json:"fermat,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -596,8 +504,9 @@ func (c *CliqueConfig) String() string {
 
 // OptimismConfig is the optimism config.
 type OptimismConfig struct {
-	EIP1559Elasticity  uint64 `json:"eip1559Elasticity"`
-	EIP1559Denominator uint64 `json:"eip1559Denominator"`
+	EIP1559Elasticity        uint64 `json:"eip1559Elasticity"`
+	EIP1559Denominator       uint64 `json:"eip1559Denominator"`
+	EIP1559DenominatorCanyon uint64 `json:"eip1559DenominatorCanyon"`
 }
 
 // String implements the stringer interface, returning the optimism fee config details.
@@ -609,7 +518,7 @@ func (o *OptimismConfig) String() string {
 func (c *ChainConfig) Description() string {
 	var banner string
 
-	// Create some basinc network config output
+	// Create some basic network config output
 	network := NetworkNames[c.ChainID.String()]
 	if network == "" {
 		network = "unknown"
@@ -693,8 +602,14 @@ func (c *ChainConfig) Description() string {
 	if c.PragueTime != nil {
 		banner += fmt.Sprintf(" - Prague:                      @%-10v\n", *c.PragueTime)
 	}
+	if c.VerkleTime != nil {
+		banner += fmt.Sprintf(" - Verkle:                      @%-10v\n", *c.VerkleTime)
+	}
 	if c.RegolithTime != nil {
 		banner += fmt.Sprintf(" - Regolith:                    @%-10v\n", *c.RegolithTime)
+	}
+	if c.CanyonTime != nil {
+		banner += fmt.Sprintf(" - Canyon:                      @%-10v\n", *c.CanyonTime)
 	}
 	banner += "OPBNB hard forks (block based):\n"
 	if c.PreContractForkBlock != nil {
@@ -767,11 +682,6 @@ func (c *ChainConfig) IsLondon(num *big.Int) bool {
 	return isBlockForked(c.LondonBlock, num)
 }
 
-// IsFermat returns whether num is either equal to the Fermat fork block or greater.
-func (c *ChainConfig) IsFermat(num *big.Int) bool {
-	return isBlockForked(c.Fermat, num)
-}
-
 // IsArrowGlacier returns whether num is either equal to the Arrow Glacier (EIP-4345) fork block or greater.
 func (c *ChainConfig) IsArrowGlacier(num *big.Int) bool {
 	return isBlockForked(c.ArrowGlacierBlock, num)
@@ -791,18 +701,23 @@ func (c *ChainConfig) IsTerminalPoWBlock(parentTotalDiff *big.Int, totalDiff *bi
 }
 
 // IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
-func (c *ChainConfig) IsShanghai(time uint64) bool {
-	return isTimestampForked(c.ShanghaiTime, time)
+func (c *ChainConfig) IsShanghai(num *big.Int, time uint64) bool {
+	return c.IsLondon(num) && isTimestampForked(c.ShanghaiTime, time)
 }
 
 // IsCancun returns whether num is either equal to the Cancun fork time or greater.
-func (c *ChainConfig) IsCancun(time uint64) bool {
-	return isTimestampForked(c.CancunTime, time)
+func (c *ChainConfig) IsCancun(num *big.Int, time uint64) bool {
+	return c.IsLondon(num) && isTimestampForked(c.CancunTime, time)
 }
 
 // IsPrague returns whether num is either equal to the Prague fork time or greater.
-func (c *ChainConfig) IsPrague(time uint64) bool {
-	return isTimestampForked(c.PragueTime, time)
+func (c *ChainConfig) IsPrague(num *big.Int, time uint64) bool {
+	return c.IsLondon(num) && isTimestampForked(c.PragueTime, time)
+}
+
+// IsVerkle returns whether num is either equal to the Verkle fork time or greater.
+func (c *ChainConfig) IsVerkle(num *big.Int, time uint64) bool {
+	return c.IsLondon(num) && isTimestampForked(c.VerkleTime, time)
 }
 
 // IsBedrock returns whether num is either equal to the Bedrock fork block or greater.
@@ -812,6 +727,10 @@ func (c *ChainConfig) IsBedrock(num *big.Int) bool {
 
 func (c *ChainConfig) IsRegolith(time uint64) bool {
 	return isTimestampForked(c.RegolithTime, time)
+}
+
+func (c *ChainConfig) IsCanyon(time uint64) bool {
+	return isTimestampForked(c.CanyonTime, time)
 }
 
 // IsOptimism returns whether the node is an optimism node or not.
@@ -827,10 +746,18 @@ func (c *ChainConfig) IsOptimismBedrock(num *big.Int) bool {
 func (c *ChainConfig) IsOptimismRegolith(time uint64) bool {
 	return c.IsOptimism() && c.IsRegolith(time)
 }
+func (c *ChainConfig) IsOptimismCanyon(time uint64) bool {
+	return c.IsOptimism() && c.IsCanyon(time)
+}
 
 // IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
 func (c *ChainConfig) IsOptimismPreBedrock(num *big.Int) bool {
 	return c.IsOptimism() && !c.IsBedrock(num)
+}
+
+// IsFermat returns whether num is either equal to the Fermat fork block or greater.
+func (c *ChainConfig) IsFermat(num *big.Int) bool {
+	return isBlockForked(c.Fermat, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -887,6 +814,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "shanghaiTime", timestamp: c.ShanghaiTime},
 		{name: "cancunTime", timestamp: c.CancunTime, optional: true},
 		{name: "pragueTime", timestamp: c.PragueTime, optional: true},
+		{name: "verkleTime", timestamp: c.VerkleTime, optional: true},
 	} {
 		if lastFork.name != "" {
 			switch {
@@ -990,6 +918,9 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 	if isForkTimestampIncompatible(c.PragueTime, newcfg.PragueTime, headTimestamp) {
 		return newTimestampCompatError("Prague fork timestamp", c.PragueTime, newcfg.PragueTime)
 	}
+	if isForkTimestampIncompatible(c.VerkleTime, newcfg.VerkleTime, headTimestamp) {
+		return newTimestampCompatError("Verkle fork timestamp", c.VerkleTime, newcfg.VerkleTime)
+	}
 	if isForkBlockIncompatible(c.PreContractForkBlock, newcfg.PreContractForkBlock, headNumber) {
 		return newBlockCompatError("PreContract fork block", c.PreContractForkBlock, newcfg.PreContractForkBlock)
 	}
@@ -1000,8 +931,12 @@ func (c *ChainConfig) checkCompatible(newcfg *ChainConfig, headNumber *big.Int, 
 }
 
 // BaseFeeChangeDenominator bounds the amount the base fee can change between blocks.
-func (c *ChainConfig) BaseFeeChangeDenominator() uint64 {
+// The time parameters is the timestamp of the block to determine if Canyon is active or not
+func (c *ChainConfig) BaseFeeChangeDenominator(time uint64) uint64 {
 	if c.Optimism != nil {
+		if c.IsCanyon(time) {
+			return c.Optimism.EIP1559DenominatorCanyon
+		}
 		return c.Optimism.EIP1559Denominator
 	}
 	return DefaultBaseFeeChangeDenominator
@@ -1146,8 +1081,10 @@ type Rules struct {
 	IsHomestead, IsEIP150, IsEIP155, IsEIP158               bool
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon                                      bool
-	IsMerge, IsShanghai, isCancun, isPrague                 bool
+	IsMerge, IsShanghai, IsCancun, IsPrague                 bool
+	IsVerkle                                                bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
+	IsOptimismCanyon                                        bool
 	IsFermat                                                bool
 }
 
@@ -1170,12 +1107,14 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
 		IsMerge:          isMerge,
-		IsShanghai:       c.IsShanghai(timestamp),
-		isCancun:         c.IsCancun(timestamp),
-		isPrague:         c.IsPrague(timestamp),
+		IsShanghai:       c.IsShanghai(num, timestamp),
+		IsCancun:         c.IsCancun(num, timestamp),
+		IsPrague:         c.IsPrague(num, timestamp),
+		IsVerkle:         c.IsVerkle(num, timestamp),
 		// Optimism
 		IsOptimismBedrock:  c.IsOptimismBedrock(num),
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
+		IsOptimismCanyon:   c.IsOptimismCanyon(timestamp),
 		// OPBNB
 		IsFermat: c.IsFermat(num),
 	}

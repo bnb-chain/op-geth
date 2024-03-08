@@ -227,7 +227,16 @@ func initGenesis(ctx *cli.Context) error {
 		}
 		defer chaindb.Close()
 
-		triedb := utils.MakeTrieDatabase(ctx, stack, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false, genesis.IsVerkle(), true)
+		// if the trie data dir has been set, new trie db with a new state database
+		if ctx.IsSet(utils.SeparateDBFlag.Name) {
+			statediskdb, dbErr := stack.OpenDatabaseWithFreezer(name+"/state", 0, 0, "", "", false, false, false, false)
+			if dbErr != nil {
+				utils.Fatalf("Failed to open separate trie database: %v", dbErr)
+			}
+			chaindb.SetStateStore(statediskdb)
+		}
+
+		triedb := utils.MakeTrieDatabase(ctx, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false, genesis.IsVerkle())
 		defer triedb.Close()
 
 		_, hash, err := core.SetupGenesisBlockWithOverride(chaindb, triedb, genesis, &overrides)
@@ -522,6 +531,17 @@ func parseDumpConfig(ctx *cli.Context, stack *node.Node) (*state.DumpConfig, eth
 	if ctx.NArg() > 1 {
 		return nil, nil, common.Hash{}, fmt.Errorf("expected 1 argument (number or hash), got %d", ctx.NArg())
 	}
+
+	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	scheme, err := rawdb.ParseStateScheme(ctx.String(utils.StateSchemeFlag.Name), db)
+	if err != nil {
+		return nil, nil, common.Hash{}, err
+	}
+	if scheme == rawdb.PathScheme {
+		fmt.Println("You are using geth dump in path mode, please use `geth dump-roothash` command to get all available blocks.")
+	}
+
+	header := &types.Header{}
 	if ctx.NArg() == 1 {
 		arg := ctx.Args().First()
 		if hashish(arg) {

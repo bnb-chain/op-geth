@@ -741,6 +741,46 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 	return db, err
 }
 
+func (n *Node) OpenAndMergeDatabase(name string, cache, handles int, freezer, diff, namespace string, readonly, persistDiff, pruneAncientData bool) (ethdb.Database, error) {
+	chainDataHandles := handles
+	if persistDiff {
+		chainDataHandles = handles * chainDataHandlesPercentage / 100
+	}
+	var statediskdb ethdb.Database
+	var err error
+	// Open the separated state database if the state directory exists
+	if n.IsSeparatedDB() {
+		// Allocate half of the  handles and cache to this separate state data database
+		statediskdb, err = n.OpenDatabaseWithFreezer(name+"/state", cache/2, chainDataHandles/2, "", "eth/db/statedata/", readonly, false, false, pruneAncientData)
+		if err != nil {
+			return nil, err
+		}
+
+		// Reduce the handles and cache to this separate database because it is not a complete database with no trie data storing in it.
+		cache = int(float64(cache) * 0.6)
+		chainDataHandles = int(float64(chainDataHandles) * 0.6)
+	}
+
+	chainDB, err := n.OpenDatabaseWithFreezer(name, cache, chainDataHandles, freezer, namespace, readonly, false, false, pruneAncientData)
+	if err != nil {
+		return nil, err
+	}
+
+	if statediskdb != nil {
+		chainDB.SetStateStore(statediskdb)
+	}
+
+	if persistDiff {
+		diffStore, err := n.OpenDiffDatabase(name, handles-chainDataHandles, diff, namespace, readonly)
+		if err != nil {
+			chainDB.Close()
+			return nil, err
+		}
+		chainDB.SetDiffStore(diffStore)
+	}
+	return chainDB, nil
+}
+
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
 // creates one if no previous can be found) from within the node's data directory,
 // also attaching a chain freezer to it that moves ancient chain data from the
@@ -772,6 +812,16 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient 
 		db = n.wrapDatabase(db)
 	}
 	return db, err
+}
+
+// IsSeparatedDB check the state subdirectory of db, if subdirectory exists, return true
+func (n *Node) IsSeparatedDB() bool {
+	separateDir := filepath.Join(n.ResolvePath("chaindata"), "state")
+	fileInfo, err := os.Stat(separateDir)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return fileInfo.IsDir()
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.

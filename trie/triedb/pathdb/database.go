@@ -211,7 +211,14 @@ func (db *Database) Reader(root common.Hash) (layer, error) {
 	if l == nil {
 		return nil, fmt.Errorf("state %#x is not available", root)
 	}
-	return l, nil
+
+	dl := db.tree.bottom()
+	nodes := dl.buffer.getAllNodes()
+	_, ok := nodes[root]
+	if !ok {
+		return nil, fmt.Errorf("state %#x is not in node buffer list", root)
+	}
+	return dl, nil
 }
 
 // Update adds a new layer into the tree, if that can be linked to an existing

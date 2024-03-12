@@ -54,6 +54,7 @@ func newTrieReader(stateRoot, owner common.Hash, db *Database) (*trieReader, err
 	}
 	reader, err := db.Reader(stateRoot)
 	if err != nil {
+		log.Error("Failed to read data", "error", err)
 		return nil, &MissingNodeError{Owner: owner, NodeHash: stateRoot, err: err}
 	}
 	return &trieReader{owner: owner, reader: reader}, nil

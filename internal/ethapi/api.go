@@ -733,6 +733,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 			id := trie.StorageTrieID(header.Root, crypto.Keccak256Hash(address.Bytes()), storageRoot)
 			st, err := trie.NewStateTrie(id, statedb.Database().TrieDB())
 			if err != nil {
+				log.Error("Get proof failed to new storage state trie", "error", err)
 				return nil, err
 			}
 			storageTrie = st
@@ -764,6 +765,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 	// Create the accountProof.
 	tr, err := trie.NewStateTrie(trie.StateTrieID(header.Root), statedb.Database().TrieDB())
 	if err != nil {
+		log.Error("Get proof failed to new account state trie", "error", err)
 		return nil, err
 	}
 	var accountProof proofList

@@ -34,7 +34,7 @@ var nodeCachePool = sync.Pool{
 }
 
 // nodebufferlist implements the trienodebuffer interface, It is designed to meet
-// the withdraw proof function of opBNB at the storage layer while taking into
+// the withdrawal proof function of opBNB at the storage layer while taking into
 // account high performance. It is a nodecache based queue that stores
 // mergeBlockInterval compressed block difflayers per nodecache. It also has one
 // base nodecache that collects the list's trie nodes to write disk.
@@ -48,7 +48,7 @@ type nodebufferlist struct {
 	tail *nodecache
 
 	mux       sync.RWMutex
-	basemMux  sync.RWMutex
+	baseMux   sync.RWMutex
 	base      *nodecache
 	size      uint64
 	count     uint64
@@ -61,11 +61,7 @@ type nodebufferlist struct {
 }
 
 // newNodeBufferList initializes the node buffer list with the provided nodes
-func newNodeBufferList(
-	db ethdb.Database,
-	limit uint64,
-	nodes map[common.Hash]map[string]*trienode.Node,
-	layers uint64) *nodebufferlist {
+func newNodeBufferList(db ethdb.Database, limit uint64, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *nodebufferlist {
 	if nodes == nil {
 		nodes = make(map[common.Hash]map[string]*trienode.Node)
 	}
@@ -122,9 +118,9 @@ func (nf *nodebufferlist) node(owner common.Hash, path []byte, hash common.Hash)
 	}
 	nf.mux.RUnlock()
 
-	nf.basemMux.RLock()
+	nf.baseMux.RLock()
 	node, err = nf.base.node(owner, path, hash)
-	nf.basemMux.RUnlock()
+	nf.baseMux.RUnlock()
 	return node, err
 }
 
@@ -139,7 +135,7 @@ func (nf *nodebufferlist) commit(block uint64, nodes map[common.Hash]map[string]
 	oldSize := nf.head.size
 	err := nf.head.commit(block, nodes, false)
 	if err != nil {
-		log.Crit("failed to commit nodes to node buffer list", "error", err)
+		log.Crit("Failed to commit nodes to node buffer list", "error", err)
 	}
 
 	nf.block = block
@@ -164,13 +160,13 @@ func (nf *nodebufferlist) commit(block uint64, nodes map[common.Hash]map[string]
 func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error {
 	// hang user read/write and background write,
 	nf.mux.Lock()
-	nf.basemMux.Lock()
+	nf.baseMux.Lock()
 	defer nf.mux.Unlock()
-	defer nf.basemMux.Unlock()
+	defer nf.baseMux.Unlock()
 
 	merge := func(buffer *nodecache) bool {
 		if err := nf.base.commit(buffer.block, buffer.nodes, false); err != nil {
-			log.Crit("failed to commit nodes to base node buffer", "error", err)
+			log.Crit("Failed to commit nodes to base node buffer", "error", err)
 		}
 		baseNodeBufferSizeGauge.Update(int64(nf.base.size))
 		baseNodeBufferLayerGauge.Update(int64(nf.base.layers))
@@ -202,16 +198,16 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 
 	// hang user read/write and background write
 	nf.mux.Lock()
-	nf.basemMux.Lock()
+	nf.baseMux.Lock()
 	defer nf.mux.Unlock()
-	defer nf.basemMux.Unlock()
+	defer nf.baseMux.Unlock()
 
 	nf.stopFlushing.Store(true)
 	defer nf.stopFlushing.Store(false)
 	for {
 		if nf.isFlushing.Swap(true) {
 			time.Sleep(time.Duration(DefaultBackgroundFlushInterval) * time.Second)
-			log.Info("waiting base node cache flushed into disk for forcing flush node buffer")
+			log.Info("Waiting base node cache flushed into disk for forcing flush node buffer")
 			continue
 		} else {
 			break
@@ -220,7 +216,7 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 
 	commitFunc := func(buffer *nodecache) bool {
 		if err := nf.base.commit(buffer.block, buffer.nodes, false); err != nil {
-			log.Crit("failed to commit nodes to base node buffer", "error", err)
+			log.Crit("Failed to commit nodes to base node buffer", "error", err)
 		}
 		del := nf.popBack()
 		nf.base.layers--
@@ -236,7 +232,7 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	persistID := nf.persistID + nf.base.layers
 	err := nf.base.flush(nf.db, nf.clean, persistID, false)
 	if err != nil {
-		log.Crit("failed to flush base node buffer to disk", "error", err)
+		log.Crit("Failed to flush base node buffer to disk", "error", err)
 	}
 	nf.isFlushing.Store(false)
 	nf.base.reset()
@@ -283,25 +279,25 @@ func (nf *nodebufferlist) empty() bool {
 
 // getSize return the trienodebuffer used size.
 func (nf *nodebufferlist) getSize() (uint64, uint64) {
-	// no lock, the return vals are used to log, not strictly correct
+	// no lock, the returned values are used to log, not strictly correct
 	return nf.size, nf.base.size
 }
 
 // getAllNodes return all the trie nodes are cached in trienodebuffer.
 func (nf *nodebufferlist) getAllNodes() map[common.Hash]map[string]*trienode.Node {
 	nf.mux.Lock()
-	nf.basemMux.Lock()
+	nf.baseMux.Lock()
 	defer nf.mux.Unlock()
-	defer nf.basemMux.Unlock()
+	defer nf.baseMux.Unlock()
 
 	nc := nodeCachePool.Get().(*nodecache)
 	nc.reset()
 	if err := nc.commit(nf.base.block, nf.base.nodes, false); err != nil {
-		log.Crit("failed to commit nodes to node buffer", "error", err)
+		log.Crit("Failed to commit nodes to node buffer", "error", err)
 	}
 	merge := func(buffer *nodecache) bool {
 		if err := nc.commit(buffer.block, buffer.nodes, false); err != nil {
-			log.Crit("failed to commit nodes to node buffer", "error", err)
+			log.Crit("Failed to commit nodes to node buffer", "error", err)
 		}
 		return true
 	}
@@ -323,11 +319,11 @@ func (nf *nodebufferlist) waitAndStopFlushing() {
 	nf.stopFlushing.Store(true)
 	for nf.isFlushing.Load() {
 		time.Sleep(time.Second)
-		log.Warn("waiting background node buffer flushed into disk")
+		log.Warn("Waiting background node buffer flushed into disk")
 	}
 }
 
-// setClean sets fastcache to trienodebuffer for cache the trie nodes, used for nodebufferlist.
+// setClean sets fastcache to trienodebuffer for caching the trie nodes, used for nodebufferlist.
 func (nf *nodebufferlist) setClean(clean *fastcache.Cache) {
 	nf.mux.Lock()
 	defer nf.mux.Unlock()
@@ -367,17 +363,17 @@ func (nf *nodebufferlist) popBack() *nodecache {
 
 	nf.size -= tag.size
 	if nf.size < 0 {
-		log.Warn("node buffer list size less 0", "old", nf.size, "dealt", tag.size)
+		log.Warn("Node buffer list size is less than 0", "old", nf.size, "dealt", tag.size)
 		nf.size = 0
 	}
 	nf.layers -= tag.layers
 	if nf.layers < 0 {
-		log.Warn("node buffer list layers less 0", "old", nf.layers, "dealt", tag.layers)
+		log.Warn("Node buffer list layers are less than 0", "old", nf.layers, "dealt", tag.layers)
 		nf.layers = 0
 	}
 	nf.count--
 	if nf.count < 0 {
-		log.Warn("node buffer list count less 0", "old", nf.count)
+		log.Warn("Node buffer list count is less than 0", "old", nf.count)
 		nf.count = 0
 	}
 
@@ -425,22 +421,22 @@ func (nf *nodebufferlist) traverseReverse(cb func(*nodecache) bool) {
 func (nf *nodebufferlist) diffToBase() {
 	commitFunc := func(buffer *nodecache) bool {
 		if nf.base.size >= nf.limit {
-			log.Debug("base node buffer need write disk immediately")
+			log.Debug("Base node buffer needs to be written into disk immediately")
 			return false
 		}
 		if nf.count < reserveNodeCacheNumber {
-			log.Debug("node buffer list less, waiting more difflayers are committed")
+			log.Debug("Node buffer list is less, waiting more difflayers are committed")
 			return false
 		}
 		if buffer.block%mergeBlockInterval != 0 {
-			log.Crit("committed block number misaligned", "block", buffer.block)
+			log.Crit("Committed block number misaligned", "block", buffer.block)
 		}
 
-		nf.basemMux.Lock()
+		nf.baseMux.Lock()
 		err := nf.base.commit(buffer.block, buffer.nodes, false)
-		nf.basemMux.Unlock()
+		nf.baseMux.Unlock()
 		if err != nil {
-			log.Info("failed to commit nodes to base node buffer", "error", err)
+			log.Info("Failed to commit nodes to base node buffer", "error", err)
 		}
 		del := nf.popBack()
 		nf.base.layers--
@@ -458,17 +454,19 @@ func (nf *nodebufferlist) diffToBase() {
 
 // backgroundFlush flush base node buffer to disk.
 func (nf *nodebufferlist) backgroundFlush() {
-	nf.basemMux.RLock()
+	nf.baseMux.RLock()
 	persistID := nf.persistID + nf.base.layers
-	nf.basemMux.RUnlock()
+	nf.baseMux.RUnlock()
 	err := nf.base.flush(nf.db, nf.clean, persistID, false)
 	if err != nil {
-		log.Crit("failed to flush base node buffer to disk", "error", err)
+		log.Crit("Failed to flush base node buffer to disk", "error", err)
 	}
-	nf.basemMux.Lock()
+
+	nf.baseMux.Lock()
 	nf.base.reset()
 	nf.persistID = persistID
-	nf.basemMux.Unlock()
+	nf.baseMux.Unlock()
+
 	baseNodeBufferSizeGauge.Update(int64(nf.base.size))
 	baseNodeBufferLayerGauge.Update(int64(nf.base.layers))
 	nodeBufferPersistIDGauge.Update(int64(nf.persistID))
@@ -501,7 +499,7 @@ func (nf *nodebufferlist) loop() {
 
 // report logs the nodebufferlist info for monitor.
 func (nf *nodebufferlist) report() {
-	log.Info("node buffer list info", "block_number", nf.block, "layers", nf.layers,
+	log.Info("Node buffer list info", "block_number", nf.block, "layers", nf.layers,
 		"node_buffer_count", nf.count, "persist_id", nf.persistID, "list_size", common.StorageSize(nf.size),
 		"base_buffer_size", common.StorageSize(nf.base.size), "base_buffer_layer", nf.base.layers)
 }

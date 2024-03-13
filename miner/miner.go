@@ -35,7 +35,28 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
+)
+
+var (
+	commitDepositTxsTimer = metrics.NewRegisteredTimer("miner/commit/deposit/txs", nil)
+	packFromTxpoolTimer = metrics.NewRegisteredTimer("miner/pack/txpool/txs", nil)
+	commitTxpoolTxsTimer = metrics.NewRegisteredTimer("miner/commit/txpool/txs", nil)
+	assembleBlockTimer = metrics.NewRegisteredTimer("miner/assemble/block", nil)
+
+	accountReadTimer   = metrics.NewRegisteredTimer("miner/account/reads", nil)
+	accountHashTimer   = metrics.NewRegisteredTimer("miner/account/hashes", nil)
+	accountUpdateTimer = metrics.NewRegisteredTimer("miner/account/updates", nil)
+
+	storageReadTimer   = metrics.NewRegisteredTimer("miner/storage/reads", nil)
+	storageHashTimer   = metrics.NewRegisteredTimer("miner/storage/hashes", nil)
+	storageUpdateTimer = metrics.NewRegisteredTimer("miner/storage/updates", nil)
+
+	snapshotAccountReadTimer = metrics.NewRegisteredTimer("miner/snapshot/account/reads", nil)
+	snapshotStorageReadTimer = metrics.NewRegisteredTimer("miner/snapshot/storage/reads", nil)
+
+	waitPayloadTimer = metrics.NewRegisteredTimer("miner/wait/payload", nil)
 )
 
 // Backend wraps all methods required for mining. Only full node is capable

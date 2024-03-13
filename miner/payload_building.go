@@ -211,7 +211,9 @@ func (payload *Payload) resolve(onlyFull bool) *engine.ExecutionPayloadEnvelope 
 		// Wait the full payload construction. Note it might block
 		// forever if Resolve is called in the meantime which
 		// terminates the background construction process.
+		start := time.Now()
 		payload.cond.Wait()
+		waitPayloadTimer.UpdateSince(start)
 	}
 
 	// Now we can signal the building routine to stop.

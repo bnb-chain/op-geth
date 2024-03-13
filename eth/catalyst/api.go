@@ -32,9 +32,15 @@ import (
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rpc"
+)
+
+var (
+	forkchoiceUpdateAttributesTimer = metrics.NewRegisteredTimer("api/engine/forkchoiceUpdate/attributes", nil)
+	forkchoiceUpdateHeadsTimer = metrics.NewRegisteredTimer("api/engine/forkchoiceUpdate/heads", nil)
 )
 
 // Register adds the engine API to the full node.
@@ -228,6 +234,8 @@ func checkAttribute(active func(*big.Int, uint64) bool, exists bool, block *big.
 }
 
 func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payloadAttributes *engine.PayloadAttributes) (engine.ForkChoiceResponse, error) {
+	start := time.Now()
+
 	api.forkchoiceLock.Lock()
 	defer api.forkchoiceLock.Unlock()
 
@@ -398,8 +406,10 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			return valid(nil), engine.InvalidPayloadAttributes.With(err)
 		}
 		api.localBlocks.put(id, payload)
+		forkchoiceUpdateAttributesTimer.UpdateSince(start)
 		return valid(&id), nil
 	}
+	forkchoiceUpdateHeadsTimer.UpdateSince(start)
 	return valid(nil), nil
 }
 

@@ -697,7 +697,6 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 		return nil, err
 	}
 	if s.b.ChainConfig().IsOptimismPreBedrock(header.Number) {
-		log.Info("is optimism pre bedrock")
 		if s.b.HistoricalRPCService() != nil {
 			var res AccountResult
 			err := s.b.HistoricalRPCService().CallContext(ctx, &res, "eth_getProof", address, storageKeys, blockNrOrHash)
@@ -722,10 +721,9 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 			return nil, err
 		}
 	}
-	log.Info("quwydegwqdgw")
-	statedb, header, err := s.b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	statedb, header, err := s.b.StateAndHeaderByNumberOrHashForProof(ctx, blockNrOrHash)
 	if statedb == nil || err != nil {
-		log.Error("There is an error")
+		log.Error("There is an error", "error", err)
 		return nil, err
 	}
 	codeHash := statedb.GetCodeHash(address)

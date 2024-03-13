@@ -691,11 +691,13 @@ func (n *proofList) Delete(key []byte) error {
 
 // GetProof returns the Merkle-proof for a given account and optionally some storage keys.
 func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (*AccountResult, error) {
+	log.Info("Enter GetProof function")
 	header, err := headerByNumberOrHash(ctx, s.b, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
 	if s.b.ChainConfig().IsOptimismPreBedrock(header.Number) {
+		log.Info("is optimism pre bedrock")
 		if s.b.HistoricalRPCService() != nil {
 			var res AccountResult
 			err := s.b.HistoricalRPCService().CallContext(ctx, &res, "eth_getProof", address, storageKeys, blockNrOrHash)
@@ -720,8 +722,10 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 			return nil, err
 		}
 	}
+	log.Info("quwydegwqdgw")
 	statedb, header, err := s.b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
 	if statedb == nil || err != nil {
+		log.Error("There is an error")
 		return nil, err
 	}
 	codeHash := statedb.GetCodeHash(address)
@@ -730,7 +734,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 	if len(keys) > 0 {
 		var storageTrie state.Trie
 		if storageRoot != types.EmptyRootHash && storageRoot != (common.Hash{}) {
-			id := trie.StorageTrieID(header.Root, crypto.Keccak256Hash(address.Bytes()), storageRoot)
+			id := trie.StorageTrieIDForProof(header.Root, crypto.Keccak256Hash(address.Bytes()), storageRoot)
 			st, err := trie.NewStateTrie(id, statedb.Database().TrieDB())
 			if err != nil {
 				log.Error("Get proof failed to new storage state trie", "error", err)
@@ -763,7 +767,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 		}
 	}
 	// Create the accountProof.
-	tr, err := trie.NewStateTrie(trie.StateTrieID(header.Root), statedb.Database().TrieDB())
+	tr, err := trie.NewStateTrie(trie.StateTrieIDForProof(header.Root), statedb.Database().TrieDB())
 	if err != nil {
 		log.Error("Get proof failed to new account state trie", "error", err)
 		return nil, err

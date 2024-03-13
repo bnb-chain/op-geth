@@ -148,12 +148,12 @@ func NewDatabase(diskdb ethdb.Database, config *Config) *Database {
 
 // Reader returns a reader for accessing all trie nodes with provided state root.
 // An error will be returned if the requested state is not available.
-func (db *Database) Reader(blockRoot common.Hash) (Reader, error) {
+func (db *Database) Reader(blockRoot common.Hash, flag bool) (Reader, error) {
 	switch b := db.backend.(type) {
 	case *hashdb.Database:
 		return b.Reader(blockRoot)
 	case *pathdb.Database:
-		return b.Reader(blockRoot)
+		return b.Reader(blockRoot, flag)
 	}
 	return nil, errors.New("unknown backend")
 }

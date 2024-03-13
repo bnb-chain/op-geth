@@ -181,7 +181,7 @@ func testIterativeSync(t *testing.T, count int, bypath bool, scheme string) {
 			syncPath: NewSyncPath([]byte(paths[i])),
 		})
 	}
-	reader, err := srcDb.Reader(srcTrie.Hash())
+	reader, err := srcDb.Reader(srcTrie.Hash(), false)
 	if err != nil {
 		t.Fatalf("State is not available %x", srcTrie.Hash())
 	}
@@ -256,7 +256,7 @@ func testIterativeDelayedSync(t *testing.T, scheme string) {
 			syncPath: NewSyncPath([]byte(paths[i])),
 		})
 	}
-	reader, err := srcDb.Reader(srcTrie.Hash())
+	reader, err := srcDb.Reader(srcTrie.Hash(), false)
 	if err != nil {
 		t.Fatalf("State is not available %x", srcTrie.Hash())
 	}
@@ -325,7 +325,7 @@ func testIterativeRandomSync(t *testing.T, count int, scheme string) {
 			syncPath: NewSyncPath([]byte(paths[i])),
 		}
 	}
-	reader, err := srcDb.Reader(srcTrie.Hash())
+	reader, err := srcDb.Reader(srcTrie.Hash(), false)
 	if err != nil {
 		t.Fatalf("State is not available %x", srcTrie.Hash())
 	}
@@ -392,7 +392,7 @@ func testIterativeRandomDelayedSync(t *testing.T, scheme string) {
 			syncPath: NewSyncPath([]byte(path)),
 		}
 	}
-	reader, err := srcDb.Reader(srcTrie.Hash())
+	reader, err := srcDb.Reader(srcTrie.Hash(), false)
 	if err != nil {
 		t.Fatalf("State is not available %x", srcTrie.Hash())
 	}
@@ -464,7 +464,7 @@ func testDuplicateAvoidanceSync(t *testing.T, scheme string) {
 			syncPath: NewSyncPath([]byte(paths[i])),
 		})
 	}
-	reader, err := srcDb.Reader(srcTrie.Hash())
+	reader, err := srcDb.Reader(srcTrie.Hash(), false)
 	if err != nil {
 		t.Fatalf("State is not available %x", srcTrie.Hash())
 	}
@@ -540,7 +540,7 @@ func testIncompleteSync(t *testing.T, scheme string) {
 			syncPath: NewSyncPath([]byte(paths[i])),
 		})
 	}
-	reader, err := srcDb.Reader(srcTrie.Hash())
+	reader, err := srcDb.Reader(srcTrie.Hash(), false)
 	if err != nil {
 		t.Fatalf("State is not available %x", srcTrie.Hash())
 	}
@@ -628,7 +628,7 @@ func testSyncOrdering(t *testing.T, scheme string) {
 		})
 		reqs = append(reqs, NewSyncPath([]byte(paths[i])))
 	}
-	reader, err := srcDb.Reader(srcTrie.Hash())
+	reader, err := srcDb.Reader(srcTrie.Hash(), false)
 	if err != nil {
 		t.Fatalf("State is not available %x", srcTrie.Hash())
 	}
@@ -695,7 +695,7 @@ func syncWith(t *testing.T, root common.Hash, db ethdb.Database, srcDb *Database
 			syncPath: NewSyncPath([]byte(paths[i])),
 		})
 	}
-	reader, err := srcDb.Reader(root)
+	reader, err := srcDb.Reader(root, false)
 	if err != nil {
 		t.Fatalf("State is not available %x", root)
 	}

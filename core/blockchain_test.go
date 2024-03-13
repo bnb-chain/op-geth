@@ -1844,7 +1844,7 @@ func TestTrieForkGC(t *testing.T) {
 		chain.TrieDB().Dereference(blocks[len(blocks)-1-i].Root())
 		chain.TrieDB().Dereference(forks[len(blocks)-1-i].Root())
 	}
-	if _, nodes, _ := chain.TrieDB().Size(); nodes > 0 { // all memory is returned in the nodes return for hashdb
+	if _, nodes, _, _ := chain.TrieDB().Size(); nodes > 0 { // all memory is returned in the nodes return for hashdb
 		t.Fatalf("stale tries still alive after garbase collection")
 	}
 }
@@ -2238,9 +2238,9 @@ func testSideImport(t *testing.T, numCanonBlocksInSidechain, blocksBetweenCommon
 //	[ Cn, Cn+1, Cc, Sn+3 ... Sm]
 //	^    ^    ^  pruned
 func TestPrunedImportSide(t *testing.T) {
-	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stdout, log.TerminalFormat(false)))
-	//glogger.Verbosity(3)
-	//log.Root().SetHandler(log.Handler(glogger))
+	// glogger := log.NewGlogHandler(log.StreamHandler(os.Stdout, log.TerminalFormat(false)))
+	// glogger.Verbosity(3)
+	// log.Root().SetHandler(log.Handler(glogger))
 	testSideImport(t, 3, 3, -1)
 	testSideImport(t, 3, -3, -1)
 	testSideImport(t, 10, 0, -1)
@@ -2249,9 +2249,9 @@ func TestPrunedImportSide(t *testing.T) {
 }
 
 func TestPrunedImportSideWithMerging(t *testing.T) {
-	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stdout, log.TerminalFormat(false)))
-	//glogger.Verbosity(3)
-	//log.Root().SetHandler(log.Handler(glogger))
+	// glogger := log.NewGlogHandler(log.StreamHandler(os.Stdout, log.TerminalFormat(false)))
+	// glogger.Verbosity(3)
+	// log.Root().SetHandler(log.Handler(glogger))
 	testSideImport(t, 3, 3, 0)
 	testSideImport(t, 3, -3, 0)
 	testSideImport(t, 10, 0, 0)
@@ -3463,7 +3463,7 @@ func testDeleteRecreateSlotsAcrossManyBlocks(t *testing.T, scheme string) {
 			e.exist = false
 			e.values = nil
 		}
-		//t.Logf("block %d; adding destruct\n", e.blocknum)
+		// t.Logf("block %d; adding destruct\n", e.blocknum)
 		return tx
 	}
 	var newResurrect = func(e *expectation, b *BlockGen) *types.Transaction {
@@ -3474,7 +3474,7 @@ func testDeleteRecreateSlotsAcrossManyBlocks(t *testing.T, scheme string) {
 			e.exist = true
 			e.values = map[int]int{3: e.blocknum + 1, 4: 4}
 		}
-		//t.Logf("block %d; adding resurrect\n", e.blocknum)
+		// t.Logf("block %d; adding resurrect\n", e.blocknum)
 		return tx
 	}
 
@@ -3505,8 +3505,8 @@ func testDeleteRecreateSlotsAcrossManyBlocks(t *testing.T, scheme string) {
 	})
 	// Import the canonical chain
 	chain, err := NewBlockChain(rawdb.NewMemoryDatabase(), DefaultCacheConfigWithScheme(scheme), gspec, nil, engine, vm.Config{
-		//Debug:  true,
-		//Tracer: vm.NewJSONLogger(nil, os.Stdout),
+		// Debug:  true,
+		// Tracer: vm.NewJSONLogger(nil, os.Stdout),
 	}, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
@@ -3643,8 +3643,8 @@ func testInitThenFailCreateContract(t *testing.T, scheme string) {
 
 	// Import the canonical chain
 	chain, err := NewBlockChain(rawdb.NewMemoryDatabase(), DefaultCacheConfigWithScheme(scheme), gspec, nil, engine, vm.Config{
-		//Debug:  true,
-		//Tracer: vm.NewJSONLogger(nil, os.Stdout),
+		// Debug:  true,
+		// Tracer: vm.NewJSONLogger(nil, os.Stdout),
 	}, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
@@ -3913,7 +3913,7 @@ func TestSetCanonical(t *testing.T) {
 }
 
 func testSetCanonical(t *testing.T, scheme string) {
-	//log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
+	// log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
 
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -4388,8 +4388,8 @@ func testCreateThenDelete(t *testing.T, config *params.ChainConfig) {
 	})
 	// Import the canonical chain
 	chain, err := NewBlockChain(rawdb.NewMemoryDatabase(), nil, gspec, nil, engine, vm.Config{
-		//Debug:  true,
-		//Tracer: logger.NewJSONLogger(nil, os.Stdout),
+		// Debug:  true,
+		// Tracer: logger.NewJSONLogger(nil, os.Stdout),
 	}, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)

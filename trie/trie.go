@@ -80,7 +80,7 @@ func (t *Trie) Copy() *Trie {
 // empty, otherwise, the root node must be present in database or returns
 // a MissingNodeError if not.
 func New(id *ID, db *Database) (*Trie, error) {
-	reader, err := newTrieReader(id.StateRoot, id.Owner, db)
+	reader, err := newTrieReader(id.StateRoot, id.Owner, db, id.Flag)
 	if err != nil {
 		log.Error("Failed to new trie reader", "error", err)
 		return nil, err

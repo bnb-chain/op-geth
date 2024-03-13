@@ -206,19 +206,20 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 }
 
 // Reader retrieves a layer belonging to the given state root.
-func (db *Database) Reader(root common.Hash) (layer, error) {
+func (db *Database) Reader(root common.Hash, flag bool) (layer, error) {
 	l := db.tree.get(root)
 	if l == nil {
+		if flag {
+			dl := db.tree.bottom()
+			nodes := dl.buffer.getAllNodes()
+			if _, ok := nodes[root]; !ok {
+				return nil, fmt.Errorf("state %#x is not in node buffer list", root)
+			}
+			return dl, nil
+		}
 		return nil, fmt.Errorf("state %#x is not available", root)
 	}
-
-	dl := db.tree.bottom()
-	nodes := dl.buffer.getAllNodes()
-	_, ok := nodes[root]
-	if !ok {
-		return nil, fmt.Errorf("state %#x is not in node buffer list", root)
-	}
-	return dl, nil
+	return l, nil
 }
 
 // Update adds a new layer into the tree, if that can be linked to an existing

@@ -45,14 +45,14 @@ type trieReader struct {
 }
 
 // newTrieReader initializes the trie reader with the given node reader.
-func newTrieReader(stateRoot, owner common.Hash, db *Database) (*trieReader, error) {
+func newTrieReader(stateRoot, owner common.Hash, db *Database, flag bool) (*trieReader, error) {
 	if stateRoot == (common.Hash{}) || stateRoot == types.EmptyRootHash {
 		if stateRoot == (common.Hash{}) {
 			log.Error("Zero state root hash!")
 		}
 		return &trieReader{owner: owner}, nil
 	}
-	reader, err := db.Reader(stateRoot)
+	reader, err := db.Reader(stateRoot, flag)
 	if err != nil {
 		log.Error("Failed to read data", "error", err)
 		return nil, &MissingNodeError{Owner: owner, NodeHash: stateRoot, err: err}

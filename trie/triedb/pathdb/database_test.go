@@ -307,7 +307,7 @@ func (t *tester) lastHash() common.Hash {
 }
 
 func (t *tester) verifyState(root common.Hash) error {
-	reader, err := t.db.Reader(root)
+	reader, err := t.db.Reader(root, false)
 	if err != nil {
 		return err
 	}

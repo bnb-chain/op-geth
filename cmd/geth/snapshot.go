@@ -416,7 +416,7 @@ func traverseRawState(ctx *cli.Context) error {
 		log.Error("Failed to open iterator", "root", root, "err", err)
 		return err
 	}
-	reader, err := triedb.Reader(root)
+	reader, err := triedb.Reader(root, false)
 	if err != nil {
 		log.Error("State is non-existent", "root", root)
 		return nil

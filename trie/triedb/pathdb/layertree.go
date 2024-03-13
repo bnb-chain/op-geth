@@ -239,18 +239,18 @@ func (tree *layerTree) front() common.Hash {
 		}
 	}
 	if (base == common.Hash{}) {
-		log.Info("pathdb top difflayer is empty")
+		log.Info("Pathdb top difflayer is empty")
 		return base
 	}
 	parent := base
 	for {
 		children, ok := chain[parent]
 		if !ok {
-			log.Info("pathdb top difflayer", "root", parent)
+			log.Info("Pathdb top difflayer", "root", parent)
 			return parent
 		}
 		if len(children) != 1 {
-			log.Info("pathdb top difflayer is forked", "common ancestor root", parent)
+			log.Info("Pathdb top difflayer is forked", "common ancestor root", parent)
 			return parent
 		}
 		parent = children[0]

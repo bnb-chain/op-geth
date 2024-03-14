@@ -1,5 +1,33 @@
 # Changelog
 
+## v0.3.0
+
+This is a recommended release for op-geth. This release brings in upstream updates, see https://github.com/bnb-chain/op-geth/pull/58 for the contents. This is also a ready release for the next planed fork, which will bring in canyon fork from upstream as well.
+
+### User Facing Changes
+
+- Feature of config tries layer number in memory is removed, and related flag `--triesInMemory` is deleted.
+- If start a fresh node, will use pebble db as default(set `--db.engine=leveldb` if prefer leveldb)
+- You can start opbnb mainnet or testnet without init genesis.json, and use flag `--opBNBMainnet` or `--opBNBTestnet` to start new node. If you have already inited genesis.json, you can still use these two flags, which will check whether the content of your init is correct.
+
+### Partial Changelog
+
+- [#64](https://github.com/bnb-chain/op-geth/pull/64): fix(op-geth):fix static peer cannot reassign header tasks
+- [#60](https://github.com/bnb-chain/op-geth/pull/60): feature: add opbnb networks' genesis 
+- [#58](https://github.com/bnb-chain/op-geth/pull/58): Merge upstream op-geth v1.101304.1
+- [#51](https://github.com/bnb-chain/op-geth/pull/51): feat: sync pebble db from bsc
+- [#50](https://github.com/bnb-chain/op-geth/pull/50): fix: fix task stuck and not reassign bug in concurrent-fetch logic
+- [#49](https://github.com/bnb-chain/op-geth/pull/49): fix: ignore errors that caused by gap to keep peer connection 
+- [#46](https://github.com/bnb-chain/op-geth/pull/46): fix: prune uses the latest block height as the target by default
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.3.0
+
+### Full Changelog
+
+https://github.com/bnb-chain/op-geth/compare/v0.2.2...v0.3.0
+
 ## v0.2.2
 
 This is a minor release for opBNB Mainnet and Testnet.

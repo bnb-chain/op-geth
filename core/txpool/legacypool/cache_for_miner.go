@@ -9,6 +9,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/metrics"
+)
+
+var (
+	pendingCacheGauge = metrics.NewRegisteredGauge("txpool/legacypool/pending/cache", nil)
+	localCacheGauge   = metrics.NewRegisteredGauge("txpool/legacypool/local/cache", nil)
 )
 
 // copy of pending transactions
@@ -27,6 +33,7 @@ func (pc *cacheForMiner) add(txs types.Transactions, signer types.Signer) {
 	}
 	pc.txLock.Lock()
 	defer pc.txLock.Unlock()
+	pendingCacheGauge.Inc(int64(len(txs)))
 	for _, tx := range txs {
 		addr, _ := types.Sender(signer, tx)
 		slots, ok := pc.pending[addr]
@@ -50,6 +57,7 @@ func (pc *cacheForMiner) del(txs types.Transactions, signer types.Signer) {
 		if !ok {
 			continue
 		}
+		pendingCacheGauge.Dec(1)
 		delete(slots, tx)
 		if len(slots) == 0 {
 			delete(pc.pending, addr)
@@ -124,6 +132,7 @@ func (pc *cacheForMiner) pendingTxs(enforceTips bool) map[common.Address][]*txpo
 func (pc *cacheForMiner) markLocal(addr common.Address) {
 	pc.addrLock.Lock()
 	defer pc.addrLock.Unlock()
+	localCacheGauge.Inc(1)
 	pc.locals[addr] = true
 }
 

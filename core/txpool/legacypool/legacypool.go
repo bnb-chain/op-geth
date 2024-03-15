@@ -250,6 +250,8 @@ type LegacyPool struct {
 	all     *lookup                      // All transactions to allow lookups
 	priced  *pricedList                  // All transactions sorted by price
 
+	pendingCache *cacheForMiner //pending list cache for miner
+
 	reqResetCh      chan *txpoolResetRequest
 	reqPromoteCh    chan *accountSet
 	queueTxEventCh  chan *types.Transaction
@@ -289,11 +291,16 @@ func New(config Config, chain BlockChain) *LegacyPool {
 		reorgDoneCh:     make(chan chan struct{}),
 		reorgShutdownCh: make(chan struct{}),
 		initDoneCh:      make(chan struct{}),
+		pendingCache: &cacheForMiner{
+			pending: make(map[common.Address]map[*types.Transaction]struct{}),
+			locals:  make(map[common.Address]bool),
+		},
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range config.Locals {
 		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
+		pool.pendingCache.markLocal(addr)
 	}
 	pool.priced = newPricedList(pool.all)
 
@@ -596,40 +603,7 @@ func (pool *LegacyPool) Pending(enforceTips bool) map[common.Address][]*txpool.L
 	defer func(t0 time.Time) {
 		getPendingDurationTimer.Update(time.Since(t0))
 	}(time.Now())
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
-
-	pending := make(map[common.Address][]*txpool.LazyTransaction, len(pool.pending))
-	for addr, list := range pool.pending {
-		txs := list.Flatten()
-
-		// If the miner requests tip enforcement, cap the lists now
-		if enforceTips && !pool.locals.contains(addr) {
-			for i, tx := range txs {
-				if tx.EffectiveGasTipIntCmp(pool.gasTip.Load(), pool.priced.urgent.baseFee) < 0 {
-					txs = txs[:i]
-					break
-				}
-			}
-		}
-		if len(txs) > 0 {
-			lazies := make([]*txpool.LazyTransaction, len(txs))
-			for i := 0; i < len(txs); i++ {
-				lazies[i] = &txpool.LazyTransaction{
-					Pool:      pool,
-					Hash:      txs[i].Hash(),
-					Tx:        txs[i],
-					Time:      txs[i].Time(),
-					GasFeeCap: txs[i].GasFeeCap(),
-					GasTipCap: txs[i].GasTipCap(),
-					Gas:       txs[i].Gas(),
-					BlobGas:   txs[i].BlobGas(),
-				}
-			}
-			pending[addr] = lazies
-		}
-	}
-	return pending
+	return pool.pendingCache.pendingTxs(enforceTips)
 }
 
 // Locals retrieves the accounts currently considered local by the pool.
@@ -637,10 +611,8 @@ func (pool *LegacyPool) Locals() []common.Address {
 	defer func(t0 time.Time) {
 		getLocalsDurationTimer.Update(time.Since(t0))
 	}(time.Now())
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
 
-	return pool.locals.flatten()
+	return pool.pendingCache.flattenLocals()
 }
 
 // toJournal retrieves all transactions that should be included in the journal,
@@ -866,7 +838,9 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 			return false, txpool.ErrReplaceUnderpriced
 		}
 		// New transaction is better, replace old one
+		pool.pendingCache.add([]*types.Transaction{tx}, pool.signer)
 		if old != nil {
+			pool.pendingCache.del([]*types.Transaction{old}, pool.signer)
 			pool.all.Remove(old.Hash())
 			pool.priced.Removed(1)
 			pendingReplaceMeter.Mark(1)
@@ -890,6 +864,7 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 	if local && !pool.locals.contains(from) {
 		log.Info("Setting new local account", "address", from)
 		pool.locals.add(from)
+		pool.pendingCache.markLocal(from)
 		pool.priced.Removed(pool.all.RemoteToLocals(pool.locals)) // Migrate the remotes if it's marked as local first time.
 	}
 	if isLocal {
@@ -998,10 +973,12 @@ func (pool *LegacyPool) promoteTx(addr common.Address, hash common.Hash, tx *typ
 		return false
 	}
 	// Otherwise discard any previous transaction and mark this
+	pool.pendingCache.add([]*types.Transaction{tx}, pool.signer)
 	if old != nil {
 		pool.all.Remove(old.Hash())
 		pool.priced.Removed(1)
 		pendingReplaceMeter.Mark(1)
+		pool.pendingCache.del([]*types.Transaction{old}, pool.signer)
 	} else {
 		// Nothing was replaced, bump the pending counter
 		pendingGauge.Inc(1)
@@ -1223,6 +1200,7 @@ func (pool *LegacyPool) removeTx(hash common.Hash, outofbound bool, unreserve bo
 			// Update the account nonce if needed
 			pool.pendingNonces.setIfLower(addr, tx.Nonce())
 			// Reduce the pending counter
+			pool.pendingCache.del(append(invalids, tx), pool.signer)
 			pendingGauge.Dec(int64(1 + len(invalids)))
 			return 1 + len(invalids)
 		}
@@ -1383,14 +1361,16 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 	// because of another transaction (e.g. higher gas price).
 	if reset != nil {
 		pool.demoteUnexecutables()
+		var pendingBaseFee = pool.priced.urgent.baseFee
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
-				pendingBaseFee := eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
+				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
 				pool.priced.SetBaseFee(pendingBaseFee)
 			} else {
 				pool.priced.Reheap()
 			}
 		}
+		go pool.pendingCache.dump(pool, pool.gasTip.Load(), pendingBaseFee)
 		// Update all accounts to the latest known pending nonce
 		nonces := make(map[common.Address]uint64, len(pool.pending))
 		for addr, list := range pool.pending {
@@ -1630,6 +1610,7 @@ func (pool *LegacyPool) truncatePending() {
 	}
 	// Gradually drop transactions from offenders
 	offenders := []common.Address{}
+	var dropPendingCache []*types.Transaction
 	for pending > pool.config.GlobalSlots && !spammers.Empty() {
 		// Retrieve the next offender if not local address
 		offender, _ := spammers.Pop()
@@ -1656,6 +1637,7 @@ func (pool *LegacyPool) truncatePending() {
 						log.Trace("Removed fairness-exceeding pending transaction", "hash", hash)
 					}
 					pool.priced.Removed(len(caps))
+					dropPendingCache = append(dropPendingCache, caps...)
 					pendingGauge.Dec(int64(len(caps)))
 					if pool.locals.contains(offenders[i]) {
 						localGauge.Dec(int64(len(caps)))
@@ -1682,6 +1664,7 @@ func (pool *LegacyPool) truncatePending() {
 					pool.pendingNonces.setIfLower(addr, tx.Nonce())
 					log.Trace("Removed fairness-exceeding pending transaction", "hash", hash)
 				}
+				dropPendingCache = append(dropPendingCache, caps...)
 				pool.priced.Removed(len(caps))
 				pendingGauge.Dec(int64(len(caps)))
 				if pool.locals.contains(addr) {
@@ -1691,6 +1674,7 @@ func (pool *LegacyPool) truncatePending() {
 			}
 		}
 	}
+	pool.pendingCache.del(dropPendingCache, pool.signer)
 	pendingRateLimitMeter.Mark(int64(pendingBeforeCap - pending))
 }
 
@@ -1750,6 +1734,7 @@ func (pool *LegacyPool) demoteUnexecutables() {
 	// Iterate over all accounts and demote any non-executable transactions
 	gasLimit := txpool.EffectiveGasLimit(pool.chainconfig, pool.currentHead.Load().GasLimit)
 	for addr, list := range pool.pending {
+		var dropPendingCache []*types.Transaction
 		nonce := pool.currentState.GetNonce(addr)
 
 		// Drop all transactions that are deemed too old (low nonce)
@@ -1783,6 +1768,9 @@ func (pool *LegacyPool) demoteUnexecutables() {
 			// Internal shuffle shouldn't touch the lookup set.
 			pool.enqueueTx(hash, tx, false, false)
 		}
+		dropPendingCache = append(dropPendingCache, olds...)
+		dropPendingCache = append(dropPendingCache, invalids...)
+		dropPendingCache = append(dropPendingCache, drops...)
 		pendingGauge.Dec(int64(len(olds) + len(drops) + len(invalids)))
 		if pool.locals.contains(addr) {
 			localGauge.Dec(int64(len(olds) + len(drops) + len(invalids)))
@@ -1797,6 +1785,7 @@ func (pool *LegacyPool) demoteUnexecutables() {
 				// Internal shuffle shouldn't touch the lookup set.
 				pool.enqueueTx(hash, tx, false, false)
 			}
+			dropPendingCache = append(dropPendingCache, gapped...)
 			pendingGauge.Dec(int64(len(gapped)))
 		}
 		// Delete the entire pending entry if it became empty.
@@ -1806,6 +1795,7 @@ func (pool *LegacyPool) demoteUnexecutables() {
 				pool.reserve(addr, false)
 			}
 		}
+		pool.pendingCache.del(dropPendingCache, pool.signer)
 	}
 }
 

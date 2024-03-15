@@ -110,6 +110,11 @@ var (
 	reheapTimer = metrics.NewRegisteredTimer("txpool/reheap", nil)
 
 	staledMeter = metrics.NewRegisteredMeter("txpool/staled/count", nil) // staled transactions
+
+	// duration of miner worker fetching all pending transactions
+	getPendingDurationTimer = metrics.NewRegisteredTimer("txpool/getpending/time", nil)
+	// duration of miner worker fetching all local addresses
+	getLocalsDurationTimer = metrics.NewRegisteredTimer("txpool/getlocals/time", nil)
 )
 
 // BlockChain defines the minimal set of methods needed to back a tx pool with
@@ -588,6 +593,9 @@ func (pool *LegacyPool) ContentFrom(addr common.Address) ([]*types.Transaction, 
 // transactions and only return those whose **effective** tip is large enough in
 // the next pending execution environment.
 func (pool *LegacyPool) Pending(enforceTips bool) map[common.Address][]*txpool.LazyTransaction {
+	defer func(t0 time.Time) {
+		getPendingDurationTimer.Update(time.Since(t0))
+	}(time.Now())
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 
@@ -626,6 +634,9 @@ func (pool *LegacyPool) Pending(enforceTips bool) map[common.Address][]*txpool.L
 
 // Locals retrieves the accounts currently considered local by the pool.
 func (pool *LegacyPool) Locals() []common.Address {
+	defer func(t0 time.Time) {
+		getLocalsDurationTimer.Update(time.Since(t0))
+	}(time.Now())
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 

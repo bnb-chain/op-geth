@@ -110,6 +110,9 @@ var (
 	reheapTimer = metrics.NewRegisteredTimer("txpool/reheap", nil)
 
 	staledMeter = metrics.NewRegisteredMeter("txpool/staled/count", nil) // staled transactions
+
+	// demoteDuration measures how long time a demotion takes.
+	demoteDurationTimer = metrics.NewRegisteredTimer("txpool/demotetime", nil)
 )
 
 // BlockChain defines the minimal set of methods needed to back a tx pool with
@@ -1370,8 +1373,10 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 	// If a new block appeared, validate the pool of pending transactions. This will
 	// remove any transaction that has been included in the block or was invalidated
 	// because of another transaction (e.g. higher gas price).
+	var t0 = time.Now()
 	if reset != nil {
 		pool.demoteUnexecutables()
+		demoteDurationTimer.Update(time.Since(t0))
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
 				pendingBaseFee := eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)

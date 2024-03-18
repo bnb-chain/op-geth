@@ -113,9 +113,9 @@ var (
 
 	// demote metrics
 	// demoteDuration measures how long time a demotion takes.
-	demoteDurationTimer = metrics.NewRegisteredTimer("txpool/demotetime", nil)
+	demoteDurationTimer = metrics.NewRegisteredTimer("txpool/demote/duration", nil)
 	demoteTxMeter       = metrics.NewRegisteredMeter("txpool/demote/tx", nil)
-	demoteDepthMeter    = metrics.NewRegisteredMeter("txpool/demote/depth", nil) //reorg depth of blocks which causes demote
+	resetDepthMeter     = metrics.NewRegisteredMeter("txpool/reset/depth", nil) //reorg depth of blocks which causes demote
 )
 
 // BlockChain defines the minimal set of methods needed to back a tx pool with
@@ -1529,7 +1529,7 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) (demoteAddrs []com
 			collectAddr(block.Transactions())
 		}
 	}
-	demoteDepthMeter.Mark(int64(depth))
+	resetDepthMeter.Mark(int64(depth))
 	log.Info("reset block depth", "depth", depth)
 	// Initialize the internal state to the current head
 	if newHead == nil {

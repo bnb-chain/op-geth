@@ -291,10 +291,7 @@ func New(config Config, chain BlockChain) *LegacyPool {
 		reorgDoneCh:     make(chan chan struct{}),
 		reorgShutdownCh: make(chan struct{}),
 		initDoneCh:      make(chan struct{}),
-		pendingCache: &cacheForMiner{
-			pending: make(map[common.Address]map[*types.Transaction]struct{}),
-			locals:  make(map[common.Address]bool),
-		},
+		pendingCache:    newCacheForMiner(),
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range config.Locals {

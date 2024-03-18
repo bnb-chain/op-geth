@@ -27,6 +27,17 @@ type cacheForMiner struct {
 	addrLock           sync.Mutex
 }
 
+func newCacheForMiner() *cacheForMiner {
+	cm := &cacheForMiner{
+		pending: make(map[common.Address]map[*types.Transaction]struct{}),
+		locals:  make(map[common.Address]bool),
+	}
+	lazyPendingWithTips, lazyPendingWithoutTips := make(map[common.Address][]*txpool.LazyTransaction), make(map[common.Address][]*txpool.LazyTransaction)
+	cm.pendingWithTips.Store(lazyPendingWithTips)
+	cm.pendingWithoutTips.Store(lazyPendingWithoutTips)
+	return cm
+}
+
 func (pc *cacheForMiner) add(txs types.Transactions, signer types.Signer) {
 	if len(txs) == 0 {
 		return

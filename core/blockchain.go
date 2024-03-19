@@ -146,6 +146,7 @@ type CacheConfig struct {
 	Preimages           bool          // Whether to store preimage of trie key to the disk
 	StateHistory        uint64        // Number of blocks from head whose state histories are reserved.
 	StateScheme         string        // Scheme used to store ethereum states and merkle tree nodes on top
+	PathSyncFlush       bool          // Whether sync flush the trienodebuffer of pathdb to disk.
 
 	SnapshotNoBuild bool // Whether the background generation is allowed
 	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
@@ -163,6 +164,7 @@ func (c *CacheConfig) triedbConfig() *trie.Config {
 	}
 	if c.StateScheme == rawdb.PathScheme {
 		config.PathDB = &pathdb.Config{
+			SyncFlush:      c.PathSyncFlush,
 			StateHistory:   c.StateHistory,
 			CleanCacheSize: c.TrieCleanLimit * 1024 * 1024,
 			DirtyCacheSize: c.TrieDirtyLimit * 1024 * 1024,
@@ -371,6 +373,12 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			var diskRoot common.Hash
 			if bc.cacheConfig.SnapshotLimit > 0 {
 				diskRoot = rawdb.ReadSnapshotRoot(bc.db)
+			}
+			if bc.triedb.Scheme() == rawdb.PathScheme {
+				recoverable, _ := bc.triedb.Recoverable(diskRoot)
+				if !bc.HasState(diskRoot) && !recoverable {
+					diskRoot = bc.triedb.Head()
+				}
 			}
 			if diskRoot != (common.Hash{}) {
 				log.Warn("Head state missing, repairing", "number", head.Number, "hash", head.Hash(), "snaproot", diskRoot)
@@ -1042,7 +1050,7 @@ func (bc *BlockChain) Stop() {
 			for !bc.triegc.Empty() {
 				triedb.Dereference(bc.triegc.PopItem())
 			}
-			if _, nodes, _ := triedb.Size(); nodes != 0 { // all memory is contained within the nodes return for hashdb
+			if _, nodes, _, _ := triedb.Size(); nodes != 0 { // all memory is contained within the nodes return for hashdb
 				log.Error("Dangling trie nodes after full cleanup")
 			}
 		}
@@ -1465,8 +1473,8 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	}
 	// If we exceeded our memory allowance, flush matured singleton nodes to disk
 	var (
-		_, nodes, imgs = bc.triedb.Size() // all memory is contained within the nodes return for hashdb
-		limit          = common.StorageSize(bc.cacheConfig.TrieDirtyLimit) * 1024 * 1024
+		_, nodes, _, imgs = bc.triedb.Size() // all memory is contained within the nodes return for hashdb
+		limit             = common.StorageSize(bc.cacheConfig.TrieDirtyLimit) * 1024 * 1024
 	)
 	if nodes > limit || imgs > 4*1024*1024 {
 		bc.triedb.Cap(limit - ethdb.IdealBatchSize)
@@ -1921,8 +1929,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if bc.snaps != nil {
 			snapDiffItems, snapBufItems = bc.snaps.Size()
 		}
-		trieDiffNodes, trieBufNodes, _ := bc.triedb.Size()
-		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, setHead)
+		trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
+		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, setHead)
 
 		if !setHead {
 			// After merge we expect few side chains. Simply count

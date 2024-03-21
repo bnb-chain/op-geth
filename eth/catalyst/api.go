@@ -41,6 +41,8 @@ import (
 var (
 	forkchoiceUpdateAttributesTimer = metrics.NewRegisteredTimer("api/engine/forkchoiceUpdate/attributes", nil)
 	forkchoiceUpdateHeadsTimer = metrics.NewRegisteredTimer("api/engine/forkchoiceUpdate/heads", nil)
+	getPayloadTimer = metrics.NewRegisteredTimer("api/engine/get/payload", nil)
+	newPayloadTimer = metrics.NewRegisteredTimer("api/engine/new/payload", nil)
 )
 
 // Register adds the engine API to the full node.
@@ -407,9 +409,11 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		}
 		api.localBlocks.put(id, payload)
 		forkchoiceUpdateAttributesTimer.UpdateSince(start)
+		log.Info("forkchoiceUpdateAttributes", "duration", common.PrettyDuration(time.Since(start)), "id", id)
 		return valid(&id), nil
 	}
 	forkchoiceUpdateHeadsTimer.UpdateSince(start)
+	log.Info("forkchoiceUpdateHeads", "duration", common.PrettyDuration(time.Since(start)), "hash", update.HeadBlockHash)
 	return valid(nil), nil
 }
 
@@ -463,6 +467,11 @@ func (api *ConsensusAPI) GetPayloadV3(payloadID engine.PayloadID) (*engine.Execu
 }
 
 func (api *ConsensusAPI) getPayload(payloadID engine.PayloadID, full bool) (*engine.ExecutionPayloadEnvelope, error) {
+	start := time.Now()
+	defer func () {
+		getPayloadTimer.UpdateSince(start)
+		log.Info("getPayload", "duration", common.PrettyDuration(time.Since(start)), "id", payloadID)
+	} ()
 	log.Trace("Engine API request received", "method", "GetPayload", "id", payloadID)
 	data := api.localBlocks.get(payloadID, full)
 	if data == nil {
@@ -517,6 +526,12 @@ func (api *ConsensusAPI) NewPayloadV3(params engine.ExecutableData, versionedHas
 }
 
 func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashes []common.Hash, beaconRoot *common.Hash) (engine.PayloadStatusV1, error) {
+	start := time.Now()
+	defer func () {
+		newPayloadTimer.UpdateSince(start)
+		log.Info("newPayload", "duration", common.PrettyDuration(time.Since(start)), "parentHash", params.ParentHash)
+	} ()
+
 	// The locking here is, strictly, not required. Without these locks, this can happen:
 	//
 	// 1. NewPayload( execdata-N ) is invoked from the CL. It goes all the way down to

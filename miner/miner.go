@@ -44,6 +44,7 @@ var (
 	packFromTxpoolTimer = metrics.NewRegisteredTimer("miner/pack/txpool/txs", nil)
 	commitTxpoolTxsTimer = metrics.NewRegisteredTimer("miner/commit/txpool/txs", nil)
 	assembleBlockTimer = metrics.NewRegisteredTimer("miner/assemble/block", nil)
+	buildBlockTimer = metrics.NewRegisteredTimer("miner/build/block", nil)
 
 	accountReadTimer   = metrics.NewRegisteredTimer("miner/account/reads", nil)
 	accountHashTimer   = metrics.NewRegisteredTimer("miner/account/hashes", nil)
@@ -57,6 +58,8 @@ var (
 	snapshotStorageReadTimer = metrics.NewRegisteredTimer("miner/snapshot/storage/reads", nil)
 
 	waitPayloadTimer = metrics.NewRegisteredTimer("miner/wait/payload", nil)
+
+	isBuildBlockInterruptGauge = metrics.NewRegisteredGauge("miner/build/interrupt", nil)
 )
 
 // Backend wraps all methods required for mining. Only full node is capable

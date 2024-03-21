@@ -1885,6 +1885,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockExecutionTimer.Update(ptime)                               // The time spent on block execution
 		blockValidationTimer.Update(vtime)                              // The time spent on block validation
 
+		log.Info("New payload execution and validation metrics", "hash", block.Hash(), "execution", common.PrettyDuration(ptime), "validation", common.PrettyDuration(vtime), "accountReads", common.PrettyDuration(statedb.AccountReads), "storageReads", common.PrettyDuration(statedb.StorageReads), "snapshotAccountReads", common.PrettyDuration(statedb.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(statedb.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(statedb.AccountUpdates), "storageUpdates", common.PrettyDuration(statedb.StorageUpdates), "accountHashes", common.PrettyDuration(statedb.AccountHashes), "storageHashes", common.PrettyDuration(statedb.StorageHashes))
+
 		// Write the block to the chain and get the status.
 		var (
 			wstart = time.Now()
@@ -1906,8 +1908,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
 		triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
 
-		blockWriteTimer.Update(time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits)
+		blockWriteDuration := time.Since(wstart) - statedb.AccountCommits - statedb.StorageCommits - statedb.SnapshotCommits - statedb.TrieDBCommits
+		blockWriteTimer.Update(blockWriteDuration)
 		blockInsertTimer.UpdateSince(start)
+
+		log.Info("New payload db write metrics", "hash", block.Hash(), "insert", common.PrettyDuration(time.Since(start)), "writeDB", common.PrettyDuration(time.Since(wstart)), "writeBlock", common.PrettyDuration(blockWriteDuration), "accountCommit", common.PrettyDuration(statedb.AccountCommits), "storageCommit", common.PrettyDuration(statedb.StorageCommits), "snapshotCommits", common.PrettyDuration(statedb.SnapshotCommits), "triedbCommit", common.PrettyDuration(statedb.TrieDBCommits))
 
 		// Report the import stats before returning the various results
 		stats.processed++

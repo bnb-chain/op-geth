@@ -1093,6 +1093,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	start := time.Now()
 	pending := w.eth.TxPool().Pending(true)
 	packFromTxpoolTimer.UpdateSince(start)
+	log.Info("packFromTxpool", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
 
 	// Split the pending transactions into locals and remotes.
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
@@ -1120,6 +1121,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 		}
 	}
 	commitTxpoolTxsTimer.UpdateSince(start)
+	log.Info("commitTxpoolTxs", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
 	return nil
 }
 
@@ -1152,6 +1154,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		work.tcount++
 	}
 	commitDepositTxsTimer.UpdateSince(start)
+	log.Info("commitDepositTxs", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	// forced transactions done, fill rest of block with transactions
 	if !genParams.noTxs {
@@ -1167,9 +1170,13 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		err := w.fillTransactions(interrupt, work)
 		timer.Stop() // don't need timeout interruption any more
 		if errors.Is(err, errBlockInterruptedByTimeout) {
-			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout))
+			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
+			isBuildBlockInterruptGauge.Update(2)
 		} else if errors.Is(err, errBlockInterruptedByResolve) {
-			log.Info("Block building got interrupted by payload resolution")
+			log.Info("Block building got interrupted by payload resolution", "parentHash", genParams.parentHash)
+			isBuildBlockInterruptGauge.Update(1)
+		} else {
+			isBuildBlockInterruptGauge.Update(0)
 		}
 	}
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
@@ -1182,6 +1189,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		return &newPayloadResult{err: err}
 	}
 	assembleBlockTimer.UpdateSince(start)
+	log.Info("FinalizeAndAssemble", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	accountReadTimer.Update(work.state.AccountReads)                   // Account reads are complete(in commit txs)
 	storageReadTimer.Update(work.state.StorageReads)                   // Storage reads are complete(in commit txs)
@@ -1191,6 +1199,8 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	storageUpdateTimer.Update(work.state.StorageUpdates)               // Storage updates are complete(in FinalizeAndAssemble)
 	accountHashTimer.Update(work.state.AccountHashes)                  // Account hashes are complete(in FinalizeAndAssemble)
 	storageHashTimer.Update(work.state.StorageHashes)                  // Storage hashes are complete(in FinalizeAndAssemble)
+
+	log.Info("build payload statedb metrics",  "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
 
 	return &newPayloadResult{
 		block:    block,

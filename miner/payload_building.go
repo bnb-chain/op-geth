@@ -164,6 +164,7 @@ func (payload *Payload) update(r *newPayloadResult, elapsed time.Duration, postF
 				postFunc()
 			}
 		}
+		buildBlockTimer.Update(elapsed)
 	}
 }
 
@@ -214,6 +215,7 @@ func (payload *Payload) resolve(onlyFull bool) *engine.ExecutionPayloadEnvelope 
 		start := time.Now()
 		payload.cond.Wait()
 		waitPayloadTimer.UpdateSince(start)
+		log.Info("Wait for background payload building end", "duration", common.PrettyDuration(time.Since(start)), "id", payload.id)
 	}
 
 	// Now we can signal the building routine to stop.

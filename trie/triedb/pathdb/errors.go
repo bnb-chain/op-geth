@@ -63,6 +63,9 @@ var (
 
 	// errRevertImmutable is returned if revert the background immutable nodecache
 	errRevertImmutable = errors.New("revert immutable nodecache")
+
+	// errNoProposedBlockDifflayer is returned if difflayers is not enough.
+	errNoProposedBlockDifflayer = errors.New("no proposed block difflayer")
 )
 
 func newUnexpectedNodeError(loc string, expHash common.Hash, gotHash common.Hash, owner common.Hash, path []byte, blob []byte) error {

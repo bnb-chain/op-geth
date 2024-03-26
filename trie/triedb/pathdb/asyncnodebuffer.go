@@ -41,6 +41,7 @@ func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.No
 		}
 	}
 
+	log.Info("new async node buffer", "limit", common.StorageSize(limit), "layers", layers)
 	return &asyncnodebuffer{
 		current:    newNodeCache(uint64(limit), size, nodes, layers),
 		background: newNodeCache(uint64(limit), 0, make(map[common.Hash]map[string]*trienode.Node), 0),
@@ -66,7 +67,7 @@ func (a *asyncnodebuffer) node(owner common.Hash, path []byte, hash common.Hash)
 // the ownership of the nodes map which belongs to the bottom-most diff layer.
 // It will just hold the node references from the given map which are safe to
 // copy.
-func (a *asyncnodebuffer) commit(nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer {
+func (a *asyncnodebuffer) commit(root common.Hash, id uint64, block uint64, nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer {
 	a.mux.Lock()
 	defer a.mux.Unlock()
 
@@ -164,6 +165,7 @@ func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	return nil
 }
 
+// waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
 func (a *asyncnodebuffer) waitAndStopFlushing() {
 	a.stopFlushing.Store(true)
 	for a.isFlushing.Load() {
@@ -172,6 +174,7 @@ func (a *asyncnodebuffer) waitAndStopFlushing() {
 	}
 }
 
+// getAllNodes return all the trie nodes are cached in trienodebuffer.
 func (a *asyncnodebuffer) getAllNodes() map[common.Hash]map[string]*trienode.Node {
 	a.mux.Lock()
 	defer a.mux.Unlock()
@@ -183,6 +186,7 @@ func (a *asyncnodebuffer) getAllNodes() map[common.Hash]map[string]*trienode.Nod
 	return cached.nodes
 }
 
+// getLayers return the size of cached difflayers.
 func (a *asyncnodebuffer) getLayers() uint64 {
 	a.mux.RLock()
 	defer a.mux.RUnlock()
@@ -190,11 +194,23 @@ func (a *asyncnodebuffer) getLayers() uint64 {
 	return a.current.layers + a.background.layers
 }
 
+// getSize return the trienodebuffer used size.
 func (a *asyncnodebuffer) getSize() (uint64, uint64) {
 	a.mux.RLock()
 	defer a.mux.RUnlock()
 
 	return a.current.size, a.background.size
+}
+
+// setClean set fastcache to trienodebuffer for cache the trie nodes,
+// used for nodebufferlist.
+func (a *asyncnodebuffer) setClean(clean *fastcache.Cache) {
+	return
+}
+
+// proposedBlockReader return the world state Reader of block that is proposed to L1.
+func (a *asyncnodebuffer) proposedBlockReader(blockRoot common.Hash) (layer, error) {
+	return nil, errors.New("async node buffer not support to get proposed block reader")
 }
 
 type nodecache struct {

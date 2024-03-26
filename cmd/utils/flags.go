@@ -302,8 +302,14 @@ var (
 	}
 	PathDBSyncFlag = &cli.BoolFlag{
 		Name:     "pathdb.sync",
-		Usage:    "sync flush nodes cache to disk in path schema",
+		Usage:    "sync flush nodes cache to disk in path scheme",
 		Value:    false,
+		Category: flags.StateCategory,
+	}
+	ProposeBlockIntervalFlag = &cli.Uint64Flag{
+		Name:     "pathdb.proposeblock",
+		Usage:    "keep the same with op-proposer propose block interval",
+		Value:    pathdb.DefaultProposeBlockInterval,
 		Category: flags.StateCategory,
 	}
 	StateHistoryFlag = &cli.Uint64Flag{
@@ -1864,6 +1870,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(PathDBSyncFlag.Name) {
 		cfg.PathSyncFlush = true
+	}
+	if ctx.IsSet(ProposeBlockIntervalFlag.Name) {
+		cfg.ProposeBlockInterval = ctx.Uint64(ProposeBlockIntervalFlag.Name)
 	}
 	if ctx.String(GCModeFlag.Name) == "archive" && cfg.TransactionHistory != 0 {
 		cfg.TransactionHistory = 0

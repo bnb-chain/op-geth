@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	compiler2 "github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"io"
 	"math/big"
 	"os"
@@ -224,7 +225,8 @@ func runCmd(ctx *cli.Context) error {
 		BlobHashes:  blobHashes,
 		BlobBaseFee: blobBaseFee,
 		EVMConfig: vm.Config{
-			Tracer: tracer,
+			Tracer:                    tracer,
+			EnableOpcodeOptimizations: ctx.Bool(VMOpcodeOptimizeFlag.Name),
 		},
 	}
 
@@ -232,6 +234,10 @@ func runCmd(ctx *cli.Context) error {
 		runtimeConfig.ChainConfig = chainConfig
 	} else {
 		runtimeConfig.ChainConfig = params.AllEthashProtocolChanges
+	}
+
+	if runtimeConfig.EVMConfig.EnableOpcodeOptimizations {
+		compiler2.EnableOptimization()
 	}
 
 	var hexInput []byte

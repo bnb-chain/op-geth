@@ -54,12 +54,14 @@ var (
 	storageHashTimer   = metrics.NewRegisteredTimer("miner/storage/hashes", nil)
 	storageUpdateTimer = metrics.NewRegisteredTimer("miner/storage/updates", nil)
 
+	innerExecutionTimer = metrics.NewRegisteredTimer("miner/inner/execution", nil)
+
 	snapshotAccountReadTimer = metrics.NewRegisteredTimer("miner/snapshot/account/reads", nil)
 	snapshotStorageReadTimer = metrics.NewRegisteredTimer("miner/snapshot/storage/reads", nil)
 
 	waitPayloadTimer = metrics.NewRegisteredTimer("miner/wait/payload", nil)
 
-	isBuildBlockInterruptGauge = metrics.NewRegisteredGauge("miner/build/interrupt", nil)
+	isBuildBlockInterruptCounter = metrics.NewRegisteredCounter("miner/build/interrupt", nil)
 )
 
 // Backend wraps all methods required for mining. Only full node is capable

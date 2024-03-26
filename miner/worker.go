@@ -1127,6 +1127,12 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 
 // generateWork generates a sealing block based on the given parameters.
 func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
+	// TODO delete after debug performance metrics
+	core.DebugInnerExecutionDuration = 0
+	defer func () {
+		core.DebugInnerExecutionDuration = 0
+	}()
+
 	work, err := w.prepareWork(genParams)
 	if err != nil {
 		return &newPayloadResult{err: err}
@@ -1171,12 +1177,10 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		timer.Stop() // don't need timeout interruption any more
 		if errors.Is(err, errBlockInterruptedByTimeout) {
 			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
-			isBuildBlockInterruptGauge.Update(2)
+			isBuildBlockInterruptCounter.Inc(1)
 		} else if errors.Is(err, errBlockInterruptedByResolve) {
 			log.Info("Block building got interrupted by payload resolution", "parentHash", genParams.parentHash)
-			isBuildBlockInterruptGauge.Update(1)
-		} else {
-			isBuildBlockInterruptGauge.Update(0)
+			isBuildBlockInterruptCounter.Inc(1)
 		}
 	}
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
@@ -1199,6 +1203,8 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	storageUpdateTimer.Update(work.state.StorageUpdates)               // Storage updates are complete(in FinalizeAndAssemble)
 	accountHashTimer.Update(work.state.AccountHashes)                  // Account hashes are complete(in FinalizeAndAssemble)
 	storageHashTimer.Update(work.state.StorageHashes)                  // Storage hashes are complete(in FinalizeAndAssemble)
+
+	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
 
 	log.Info("build payload statedb metrics",  "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
 

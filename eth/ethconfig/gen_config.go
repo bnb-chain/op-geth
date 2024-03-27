@@ -28,8 +28,10 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TransactionHistory                      uint64                 `toml:",omitempty"`
 		StateHistory                            uint64                 `toml:",omitempty"`
 		StateScheme                             string                 `toml:",omitempty"`
-		ProposeBlockInterval 					uint64 				   `toml:",omitempty"`
 		PathSyncFlush           				bool                   `toml:",omitempty"`
+		ProposeBlockInterval 					uint64 				   `toml:",omitempty"`
+		EnableCheckpoint 						bool                   `toml:",omitempty"`
+		MaxCheckpointNumber 					uint64 				   `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               int                    `toml:",omitempty"`
 		LightIngress                            int                    `toml:",omitempty"`
@@ -136,8 +138,10 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TransactionHistory                      *uint64                `toml:",omitempty"`
 		StateHistory                            *uint64                `toml:",omitempty"`
 		StateScheme                             *string                `toml:",omitempty"`
-		ProposeBlockInterval 					*uint64 			   `toml:",omitempty"`
 		PathSyncFlush           				*bool                  `toml:",omitempty"`
+		ProposeBlockInterval 					*uint64 			   `toml:",omitempty"`
+		EnableCheckpoint 						*bool 				   `toml:",omitempty"`
+		MaxCheckpointNumber 					*uint64 			   `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               *int                   `toml:",omitempty"`
 		LightIngress                            *int                   `toml:",omitempty"`
@@ -213,11 +217,17 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.StateScheme != nil {
 		c.StateScheme = *dec.StateScheme
 	}
+	if dec.PathSyncFlush != nil {
+		c.PathSyncFlush = *dec.PathSyncFlush
+	}
 	if dec.ProposeBlockInterval != nil {
 		c.ProposeBlockInterval = *dec.ProposeBlockInterval
 	}
-	if dec.PathSyncFlush != nil {
-		c.PathSyncFlush = *dec.PathSyncFlush
+	if dec.EnableCheckpoint != nil {
+		c.EnableCheckpoint = *dec.EnableCheckpoint
+	}
+	if dec.MaxCheckpointNumber != nil {
+		c.MaxCheckpointNumber = *dec.MaxCheckpointNumber
 	}
 	if dec.RequiredBlocks != nil {
 		c.RequiredBlocks = dec.RequiredBlocks

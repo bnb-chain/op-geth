@@ -130,7 +130,8 @@ func (db *Database) loadLayers() layer {
 		log.Info("Failed to load journal, discard it", "err", err)
 	}
 	// Return single layer with persistent state.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.SyncFlush, db.bufferSize, nil, 0, db.config.ProposeBlockInterval)
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.SyncFlush, db.bufferSize, nil, 0,
+		db.config.ProposeBlockInterval, db.config.CheckpointDir, db.config.EnableCheckpoint, db.config.MaxCheckpointNumber)
 	dl := newDiskLayer(root, rawdb.ReadPersistentStateID(db.diskdb), db, nil, nb)
 	nb.setClean(dl.cleans)
 	return dl
@@ -173,7 +174,9 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 		nodes[entry.Owner] = subset
 	}
 	// Calculate the internal state transitions by id difference.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.SyncFlush, db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval)
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.SyncFlush,
+		db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval,
+		db.config.CheckpointDir, db.config.EnableCheckpoint, db.config.MaxCheckpointNumber)
 	base := newDiskLayer(root, id, db, nil, nb)
 	nb.setClean(base.cleans)
 	return base, nil

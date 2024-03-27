@@ -65,6 +65,7 @@ type KeyValueStore interface {
 	Iteratee
 	Compacter
 	Snapshotter
+	Checkpointer
 	io.Closer
 }
 
@@ -149,6 +150,10 @@ type AncientStater interface {
 	AncientDatadir() (string, error)
 }
 
+type Checkpointer interface {
+	NewCheckpoint(destDir string) error
+}
+
 // Reader contains the methods required to read data from both key-value as well as
 // immutable ancient data.
 type Reader interface {
@@ -188,5 +193,6 @@ type Database interface {
 	Stater
 	Compacter
 	Snapshotter
+	Checkpointer
 	io.Closer
 }

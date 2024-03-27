@@ -58,6 +58,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -208,6 +209,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			TrieCommitInterval:   config.TrieCommitInterval,
 			PathSyncFlush:        config.PathSyncFlush,
 			ProposeBlockInterval: config.ProposeBlockInterval,
+			EnableCheckpoint:     config.EnableCheckpoint,
+			MaxCheckpointNumber:  config.MaxCheckpointNumber,
+			CheckpointDir:        stack.ResolvePath(pathdb.DefaultCheckpointDir),
 		}
 	)
 	// Override the chain config with provided settings.

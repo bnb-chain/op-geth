@@ -148,6 +148,9 @@ type CacheConfig struct {
 	StateScheme          string        // Scheme used to store ethereum states and merkle tree nodes on top
 	PathSyncFlush        bool          // Whether sync flush the trienodebuffer of pathdb to disk.
 	ProposeBlockInterval uint64        // Propose block to L1 block interval.
+	CheckpointDir        string        // Used to store checkpoints directory
+	EnableCheckpoint     bool          // Enable trie db checkpoint for get withdraw-contract proof
+	MaxCheckpointNumber  uint64        // Max checkpoint number which will be stored
 	SnapshotNoBuild      bool          // Whether the background generation is allowed
 	SnapshotWait         bool          // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
 
@@ -169,6 +172,9 @@ func (c *CacheConfig) triedbConfig() *trie.Config {
 			CleanCacheSize:       c.TrieCleanLimit * 1024 * 1024,
 			DirtyCacheSize:       c.TrieDirtyLimit * 1024 * 1024,
 			ProposeBlockInterval: c.ProposeBlockInterval,
+			CheckpointDir:        c.CheckpointDir,
+			EnableCheckpoint:     c.EnableCheckpoint,
+			MaxCheckpointNumber:  c.MaxCheckpointNumber,
 		}
 	}
 	return config

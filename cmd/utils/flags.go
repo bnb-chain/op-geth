@@ -302,14 +302,26 @@ var (
 	}
 	PathDBSyncFlag = &cli.BoolFlag{
 		Name:     "pathdb.sync",
-		Usage:    "sync flush nodes cache to disk in path scheme",
+		Usage:    "Sync flush nodes cache to disk in path scheme",
 		Value:    false,
 		Category: flags.StateCategory,
 	}
 	ProposeBlockIntervalFlag = &cli.Uint64Flag{
 		Name:     "pathdb.proposeblock",
-		Usage:    "keep the same with op-proposer propose block interval",
+		Usage:    "Keep the same with op-proposer propose block interval",
 		Value:    pathdb.DefaultProposeBlockInterval,
+		Category: flags.StateCategory,
+	}
+	EnableCheckpointFlag = &cli.BoolFlag{
+		Name:     "pathdb.enablecheckpoint",
+		Usage:    "Enable trie db checkpoint for get withdraw-contract proof",
+		Value:    true,
+		Category: flags.StateCategory,
+	}
+	MaxCheckpointNumberFlag = &cli.Uint64Flag{
+		Name:     "pathdb.maxcheckpointnumber",
+		Usage:    "Max checkpoint number which will be stored",
+		Value:    pathdb.DefaultMaxCheckpointNumber,
 		Category: flags.StateCategory,
 	}
 	StateHistoryFlag = &cli.Uint64Flag{
@@ -1873,6 +1885,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(ProposeBlockIntervalFlag.Name) {
 		cfg.ProposeBlockInterval = ctx.Uint64(ProposeBlockIntervalFlag.Name)
+	}
+	if ctx.IsSet(EnableCheckpointFlag.Name) {
+		cfg.EnableCheckpoint = ctx.Bool(EnableCheckpointFlag.Name)
+	}
+	if ctx.IsSet(MaxCheckpointNumberFlag.Name) {
+		cfg.MaxCheckpointNumber = ctx.Uint64(MaxCheckpointNumberFlag.Name)
 	}
 	if ctx.String(GCModeFlag.Name) == "archive" && cfg.TransactionHistory != 0 {
 		cfg.TransactionHistory = 0

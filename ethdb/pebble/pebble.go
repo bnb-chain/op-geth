@@ -667,3 +667,10 @@ func (iter *pebbleIterator) Value() []byte {
 // Release releases associated resources. Release should always succeed and can
 // be called multiple times without causing error.
 func (iter *pebbleIterator) Release() { iter.iter.Close() }
+
+func (d *Database) NewCheckpoint(destDir string) error {
+	var opts []pebble.CheckpointOption
+	opt := pebble.WithFlushedWAL()
+	opts = append(opts, opt)
+	return d.db.Checkpoint(destDir, opts...)
+}

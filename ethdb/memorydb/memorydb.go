@@ -388,3 +388,7 @@ func (snap *snapshot) Release() {
 
 	snap.db = nil
 }
+
+func (db *Database) NewCheckpoint(destDir string) error {
+	return errors.New("memory db checkpoint is unsupported")
+}

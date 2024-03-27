@@ -88,6 +88,9 @@ var (
 	triedbCommitExternalTimer = metrics.NewRegisteredTimer("chain/triedb/commit/external", nil)
 	innerExecutionTimer = metrics.NewRegisteredTimer("chain/inner/execution", nil)
 
+	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
+	mgaspsGauge = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
+
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
 	blockReorgDropMeter = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
@@ -1947,6 +1950,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 		trieDiffNodes, trieBufNodes, _ := bc.triedb.Size()
 		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, setHead)
+		blockGasUsedGauge.Update(int64(block.GasUsed())/1000000)
 
 		if !setHead {
 			// After merge we expect few side chains. Simply count

@@ -268,6 +268,11 @@ var (
 		Value:    2048,
 		Category: flags.EthCategory,
 	}
+	AllowInsecureNoTriesFlag = &cli.BoolFlag{
+		Name:     "allow-insecure-no-tries",
+		Usage:    `Disable the tries state root verification, the state consistency is no longer 100% guaranteed, diffsync is not allowed if enabled. Do not enable it unless you know exactly what the consequence it will cause.`,
+		Category: flags.EthCategory,
+	}
 	OverrideCancun = &cli.Uint64Flag{
 		Name:     "override.cancun",
 		Usage:    "Manually specify the Cancun fork timestamp, overriding the bundled setting",
@@ -1883,6 +1888,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(CacheLogSizeFlag.Name) {
 		cfg.FilterLogCacheSize = ctx.Int(CacheLogSizeFlag.Name)
+	}
+	if ctx.IsSet(AllowInsecureNoTriesFlag.Name) {
+		cfg.NoTries = ctx.Bool(AllowInsecureNoTriesFlag.Name)
 	}
 	if !ctx.Bool(SnapshotFlag.Name) {
 		// If snap-sync is requested, this flag is also required

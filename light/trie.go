@@ -87,6 +87,10 @@ func (db *odrDatabase) ContractCode(addr common.Address, codeHash common.Hash) (
 	return req.Data, err
 }
 
+func (db *odrDatabase) NoTries() bool {
+	return false
+}
+
 func (db *odrDatabase) ContractCodeSize(addr common.Address, codeHash common.Hash) (int, error) {
 	code, err := db.ContractCode(addr, codeHash)
 	return len(code), err
@@ -201,6 +205,10 @@ func (t *odrTrie) GetKey(sha []byte) []byte {
 
 func (t *odrTrie) Prove(key []byte, proofDb ethdb.KeyValueWriter) error {
 	return errors.New("not implemented, needs client/server interface split")
+}
+
+func (t *odrTrie) NoTries() bool {
+	return false
 }
 
 // do tries and retries to execute a function until it returns with no error or

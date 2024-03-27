@@ -46,6 +46,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TrieCommitInterval                      uint64
 		SnapshotCache                           int
 		Preimages                               bool
+		NoTries                                 bool
 		FilterLogCacheSize                      int
 		Miner                                   miner.Config
 		TxPool                                  legacypool.Config
@@ -97,6 +98,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.TrieCommitInterval = c.TrieCommitInterval
 	enc.SnapshotCache = c.SnapshotCache
 	enc.Preimages = c.Preimages
+	enc.NoTries = c.NoTries
 	enc.FilterLogCacheSize = c.FilterLogCacheSize
 	enc.Miner = c.Miner
 	enc.TxPool = c.TxPool
@@ -152,6 +154,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TrieCommitInterval                      *uint64
 		SnapshotCache                           *int
 		Preimages                               *bool
+		NoTries 							   *bool
 		FilterLogCacheSize                      *int
 		Miner                                   *miner.Config
 		TxPool                                  *legacypool.Config
@@ -263,6 +266,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.Preimages != nil {
 		c.Preimages = *dec.Preimages
+	}
+	if dec.NoTries != nil {
+		c.NoTries = *dec.NoTries
 	}
 	if dec.FilterLogCacheSize != nil {
 		c.FilterLogCacheSize = *dec.FilterLogCacheSize

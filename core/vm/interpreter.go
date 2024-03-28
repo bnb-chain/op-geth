@@ -25,10 +25,11 @@ import (
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Tracer                  EVMLogger // Opcode logger
-	NoBaseFee               bool      // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
-	EnablePreimageRecording bool      // Enables recording of SHA3/keccak preimages
-	ExtraEips               []int     // Additional EIPS that are to be enabled
+	Tracer                    EVMLogger // Opcode logger
+	NoBaseFee                 bool      // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
+	EnablePreimageRecording   bool      // Enables recording of SHA3/keccak preimages
+	ExtraEips                 []int     // Additional EIPS that are to be enabled
+	EnableOpcodeOptimizations bool      // Disable optimization of opcode.
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -41,11 +42,12 @@ type ScopeContext struct {
 
 // EVMInterpreter represents an EVM interpreter
 type EVMInterpreter struct {
-	evm   *EVM
-	table *JumpTable
-
-	hasher    crypto.KeccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash        // Keccak256 hasher result array shared across opcodes
+	evm              *EVM
+	table            *JumpTable
+	unOptimizedTable *JumpTable
+	optimizedTable   *JumpTable
+	hasher           crypto.KeccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf        common.Hash        // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -55,6 +57,8 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM) *EVMInterpreter {
 	// If jump table was not initialised we set the default one.
 	var table *JumpTable
+	// The standard jump table without fused opcode. The main purpose is to follow the rule of spec and avoid fused opcode.
+	var optimizedTable *JumpTable
 	switch {
 	case evm.chainRules.IsCancun:
 		table = &cancunInstructionSet
@@ -95,7 +99,12 @@ func NewEVMInterpreter(evm *EVM) *EVMInterpreter {
 		}
 	}
 	evm.Config.ExtraEips = extraEips
-	return &EVMInterpreter{evm: evm, table: table}
+	if evm.Config.EnableOpcodeOptimizations {
+		optimizedTable = copyJumpTable(table)
+		optimizedTable = enableOptimizedOpcode(optimizedTable)
+	}
+
+	return &EVMInterpreter{evm: evm, table: table, unOptimizedTable: table, optimizedTable: optimizedTable}
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns
@@ -108,7 +117,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	// Increment the call depth which is restricted to 1024
 	in.evm.depth++
 	defer func() { in.evm.depth-- }()
-
 	// Make sure the readOnly is only set if we aren't in readOnly yet.
 	// This also makes sure that the readOnly flag isn't removed for child calls.
 	if readOnly && !in.readOnly {
@@ -165,6 +173,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}()
 	}
+
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
@@ -226,6 +235,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			in.evm.Config.Tracer.CaptureState(pc, op, gasCopy, cost, callContext, in.returnData, in.evm.depth, err)
 			logged = true
 		}
+
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
 		if err != nil {
@@ -239,4 +249,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}
 
 	return res, err
+}
+
+func (in *EVMInterpreter) DisableOptimization() {
+	if in.table != in.unOptimizedTable {
+		in.table = in.unOptimizedTable
+	}
+}
+
+func (in *EVMInterpreter) EnableOptimization() {
+	if in.table != in.optimizedTable {
+		in.table = in.optimizedTable
+	}
 }

@@ -224,7 +224,8 @@ func runCmd(ctx *cli.Context) error {
 		BlobHashes:  blobHashes,
 		BlobBaseFee: blobBaseFee,
 		EVMConfig: vm.Config{
-			Tracer: tracer,
+			Tracer:                    tracer,
+			EnableOpcodeOptimizations: ctx.Bool(VMOpcodeOptimizeFlag.Name),
 		},
 	}
 

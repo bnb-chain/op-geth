@@ -17,6 +17,8 @@
 package rawdb
 
 import (
+	"errors"
+
 	"github.com/ethereum/go-ethereum/ethdb"
 )
 
@@ -33,6 +35,10 @@ func NewTable(db ethdb.Database, prefix string) ethdb.Database {
 		db:     db,
 		prefix: prefix,
 	}
+}
+
+func (t *table) NewCheckpoint(destDir string) error {
+	return errors.New("table checkpoint is unsupported")
 }
 
 // Close is a noop to implement the Database interface.

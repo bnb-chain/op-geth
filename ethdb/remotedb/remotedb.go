@@ -22,6 +22,8 @@
 package remotedb
 
 import (
+	"errors"
+
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -151,4 +153,8 @@ func New(client *rpc.Client) ethdb.Database {
 	return &Database{
 		remote: client,
 	}
+}
+
+func (db *Database) NewCheckpoint(destDir string) error {
+	return errors.New("remotedb checkpoint is unsupported")
 }

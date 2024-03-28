@@ -483,3 +483,7 @@ func (snap *snapshot) Get(key []byte) ([]byte, error) {
 func (snap *snapshot) Release() {
 	snap.db.Release()
 }
+
+func (db *Database) NewCheckpoint(destDir string) error {
+	return errors.New("leveldb checkpoint is unsupported")
+}

@@ -83,11 +83,20 @@ type trienodebuffer interface {
 	proposedBlockReader(blockRoot common.Hash) (layer, error)
 }
 
-func NewTrieNodeBuffer(db ethdb.Database, sync bool, limit int, nodes map[common.Hash]map[string]*trienode.Node, layers, proposeBlockInterval uint64) trienodebuffer {
+func NewTrieNodeBuffer(
+	db ethdb.Database,
+	sync bool,
+	limit int,
+	nodes map[common.Hash]map[string]*trienode.Node,
+	layers,
+	proposeBlockInterval uint64,
+	checkpointDir string,
+	enableCheckpoint bool,
+	maxCheckpointNumber uint64) trienodebuffer {
 	if sync {
 		return newNodeBuffer(limit, nodes, layers)
 	}
-	return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval)
+	return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, checkpointDir, enableCheckpoint, maxCheckpointNumber)
 }
 
 // diskLayer is a low level persistent layer built on top of a key-value store.

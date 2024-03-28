@@ -62,4 +62,15 @@ var (
 	proposedBlockReaderSuccess       = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/success", nil)
 	proposedBlockReaderMismatch      = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/mismatch", nil)
 	proposedBlockReaderLessDifflayer = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/lessdifflayer", nil)
+
+	// checkpoint metrics
+	checkpointSizeGauge   = metrics.NewRegisteredGauge("pathdb/checkpoint/size", nil)
+	addCheckpointTimer    = metrics.NewRegisteredTimer("pathdb/addcheckpoint/time", nil)
+	newCheckpointTimer    = metrics.NewRegisteredTimer("pathdb/newcheckpoint/time", nil)
+	openCheckpointTimer   = metrics.NewRegisteredTimer("pathdb/opencheckpoint/time", nil)
+	getCheckpointTimer    = metrics.NewRegisteredTimer("pathdb/getcheckpoint/time", nil)
+	gcCheckpointTimer     = metrics.NewRegisteredTimer("pathdb/gccheckpoint/time", nil)
+	closeCheckpointTimer  = metrics.NewRegisteredTimer("pathdb/closecheckpoint/time", nil)
+	deleteCheckpointTimer = metrics.NewRegisteredTimer("pathdb/deletecheckpoint/time", nil)
+	queryCheckpointTimer  = metrics.NewRegisteredTimer("pathdb/querycheckpoint/time", nil)
 )

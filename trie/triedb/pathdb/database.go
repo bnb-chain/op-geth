@@ -100,6 +100,9 @@ type Config struct {
 	DirtyCacheSize       int    // Maximum memory allowance (in bytes) for caching dirty nodes
 	ReadOnly             bool   // Flag whether the database is opened in read only mode.
 	ProposeBlockInterval uint64 // Propose block to L1 block interval.
+	CheckpointDir        string // Used to store checkpoints directory.
+	EnableCheckpoint     bool   // Enable trie db checkpoint for get withdraw-contract proof.
+	MaxCheckpointNumber  uint64 // Max checkpoint number which will be stored.
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -318,7 +321,9 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.SyncFlush, db.bufferSize, nil, 0, db.config.ProposeBlockInterval)
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.SyncFlush, db.bufferSize,
+		nil, 0, db.config.ProposeBlockInterval, db.config.CheckpointDir,
+		db.config.EnableCheckpoint, db.config.MaxCheckpointNumber)
 	dl := newDiskLayer(root, 0, db, nil, nb)
 	nb.setClean(dl.cleans)
 	db.tree.reset(dl)

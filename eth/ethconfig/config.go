@@ -112,6 +112,8 @@ type Config struct {
 	StateScheme          string `toml:",omitempty"`
 	PathSyncFlush        bool   `toml:",omitempty"` // State scheme used to store ethereum state and merkle trie nodes on top
 	ProposeBlockInterval uint64 `toml:",omitempty"` // Keep the same with op-proposer propose block interval
+	EnableCheckpoint     bool   `toml:",omitempty"` // Enable trie db checkpoint for get withdraw-contract proof
+	MaxCheckpointNumber  uint64 `toml:",omitempty"` // Max checkpoint number which will be stored
 
 	// RequiredBlocks is a set of block number -> hash mappings which must be in the
 	// canonical chain of all remote peers. Setting the option makes geth verify the

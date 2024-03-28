@@ -25,12 +25,16 @@ import (
 const (
 	// DefaultMaxCheckpointNumber is used to keep checkpoint number, default is 3 days for main-net.
 	DefaultMaxCheckpointNumber = 24 * 3
+
 	// DefaultCheckpointDir is used to store checkpoint directory.
 	DefaultCheckpointDir = "checkpoint"
+
 	// gcCheckpointIntervalSecond is used to control gc loop interval.
 	gcCheckpointIntervalSecond = 1
+
 	// printCheckpointStatIntervalSecond is used to print checkpoint stat.
 	printCheckpointStatIntervalSecond = 60
+
 	// checkpointDBKeepaliveSecond is used to check db which has been not used for a long time,
 	// and close it for reducing memory.
 	checkpointDBKeepaliveSecond = 60
@@ -78,7 +82,7 @@ func newCheckpointLayer(checkpointDir string) (ckptLayer *checkpointLayer, err e
 	)
 
 	if blockNumber, blockRoot, err = decodeSubCheckpointDir(checkpointDir); err != nil {
-		log.Warn("Failed to decode checkpoint dir", "dir", checkpointDir, "err", err)
+		log.Warn("Failed to decode checkpoint dir", "dir", checkpointDir, "error", err)
 		return nil, err
 	}
 	ckptLayer = &checkpointLayer{
@@ -116,7 +120,7 @@ func (c *checkpointLayer) loop() {
 		case <-tryCloseTicker.C: // close db when a long time unused for reducing memory usage.
 			if c.isOpened.Load() && time.Now().Sub(c.lastUsedTimestamp) > time.Second*checkpointDBKeepaliveSecond {
 				if err = c.checkpointDB.Close(); err != nil {
-					log.Warn("Failed to close checkpoint db", "err", err)
+					log.Warn("Failed to close checkpoint db", "error", err)
 				} else {
 					c.isOpened.Store(false)
 				}
@@ -133,7 +137,7 @@ func (c *checkpointLayer) loop() {
 				endOpenCheckpointTimestamp = time.Now()
 				openCheckpointTimer.Update(endOpenCheckpointTimestamp.Sub(startOpenCheckpointTimestamp))
 				if err != nil {
-					log.Warn("Failed to open raw db", "err", err)
+					log.Warn("Failed to open raw db", "error", err)
 				} else {
 					c.isOpened.Store(true)
 				}
@@ -146,11 +150,11 @@ func (c *checkpointLayer) loop() {
 				err = c.checkpointDB.Close()
 				endCloseCheckpointTimestamp = time.Now()
 				if err != nil {
-					log.Warn("Failed to close checkpoint db", "err", err)
+					log.Warn("Failed to close checkpoint db", "error", err)
 				} else {
 					c.isOpened.Store(false)
 				}
-				log.Info("Close checkpoint db", "err", err,
+				log.Info("Close checkpoint db", "error", err,
 					"elapsed", common.PrettyDuration(endCloseCheckpointTimestamp.Sub(startCloseCheckpointTimestamp)))
 				closeCheckpointTimer.Update(endCloseCheckpointTimestamp.Sub(startCloseCheckpointTimestamp))
 			}
@@ -158,8 +162,9 @@ func (c *checkpointLayer) loop() {
 				startDeleteCheckpointTimestamp = time.Now()
 				err = os.RemoveAll(c.checkpointDir)
 				endDeleteCheckpointTimestamp = time.Now()
-				log.Info("Delete checkpoint db", "err", err,
-					"elapsed", common.PrettyDuration(endDeleteCheckpointTimestamp.Sub(startDeleteCheckpointTimestamp)))
+				log.Info("Delete checkpoint db", "error", err,
+					"elapsed", common.PrettyDuration(endDeleteCheckpointTimestamp.Sub(startDeleteCheckpointTimestamp)),
+					"checkpoint_dir", c.checkpointDir)
 				deleteCheckpointTimer.Update(endDeleteCheckpointTimestamp.Sub(startDeleteCheckpointTimestamp))
 			}
 			c.waitCloseAndDeleteCh <- struct{}{}
@@ -354,15 +359,13 @@ func (cm *checkpointManager) gcCheckpoint() {
 
 	if gcCkptLayer != nil {
 		var (
-			err             error
-			startTimestamp  time.Time
-			gcCheckpointDir string
+			err            error
+			startTimestamp time.Time
 		)
 		startTimestamp = time.Now()
 		defer func() {
 			gcCheckpointTimer.UpdateSince(startTimestamp)
-			log.Info("GC one checkpoint", "checkpoint_block_number", gcCkptLayer.blockNumber,
-				"gc_checkpoint_dir", gcCheckpointDir, "err", err,
+			log.Info("GC one checkpoint", "checkpoint_block_number", gcCkptLayer.blockNumber, "error", err,
 				"elapsed", common.PrettyDuration(time.Since(startTimestamp)))
 		}()
 
@@ -408,18 +411,18 @@ func (cm *checkpointManager) loadCheckpoint() error {
 	defer func() {
 		addCheckpointTimer.UpdateSince(startTimestamp)
 		log.Info("Load checkpoint", "load_checkpoint_number", succeedLoadNumber,
-			"err", err, "elapsed", common.PrettyDuration(time.Since(startTimestamp)))
+			"error", err, "elapsed", common.PrettyDuration(time.Since(startTimestamp)))
 	}()
 
 	dir, err := ioutil.ReadDir(cm.checkpointDir)
 	if err != nil {
-		log.Warn("Failed to scan checkpoint dir", "dir", cm.checkpointDir, "err", err)
+		log.Warn("Failed to scan checkpoint dir", "dir", cm.checkpointDir, "error", err)
 		return err
 	}
 	for _, f := range dir {
 		if f.IsDir() {
 			if ckptLayer, err = newCheckpointLayer(cm.checkpointDir + "/" + f.Name()); err != nil {
-				log.Warn("Failed to new checkpoint layer", "err", err)
+				log.Warn("Failed to new checkpoint layer", "error", err)
 				return err
 			}
 			cm.checkpointMap[ckptLayer.rootHash()] = ckptLayer
@@ -449,7 +452,7 @@ func (cm *checkpointManager) addCheckpoint(blockNumber uint64, blockRoot common.
 		addCheckpointTimer.UpdateSince(startTimestamp)
 		newCheckpointTimer.Update(endNewCheckpointTimestamp.Sub(startNewCheckpointTimestamp))
 		log.Info("Add a new checkpoint", "block_number", blockNumber, "block_root", blockRoot.String(),
-			"err", err, "elapsed", common.PrettyDuration(time.Since(startTimestamp)),
+			"error", err, "elapsed", common.PrettyDuration(time.Since(startTimestamp)),
 			"new_elapsed", common.PrettyDuration(endNewCheckpointTimestamp.Sub(startNewCheckpointTimestamp)))
 	}()
 
@@ -458,13 +461,13 @@ func (cm *checkpointManager) addCheckpoint(blockNumber uint64, blockRoot common.
 	err = cm.db.NewCheckpoint(subCheckpointDir)
 	endNewCheckpointTimestamp = time.Now()
 	if err != nil {
-		log.Warn("Failed to create checkpoint", "err", err)
+		log.Warn("Failed to create checkpoint", "error", err)
 		return err
 	}
 
 	ckptLayer, err = newCheckpointLayer(subCheckpointDir)
 	if err != nil {
-		log.Warn("Failed to make checkpoint db", "err", err)
+		log.Warn("Failed to make checkpoint db", "error", err)
 		return err
 	}
 
@@ -489,7 +492,7 @@ func (cm *checkpointManager) getCheckpointLayer(root common.Hash) (layer, error)
 	defer func() {
 		getCheckpointTimer.UpdateSince(startTimestamp)
 		log.Info("Get the checkpoint", "root", root.String(),
-			"elapsed", common.PrettyDuration(time.Since(startTimestamp)), "err", err)
+			"elapsed", common.PrettyDuration(time.Since(startTimestamp)), "error", err)
 	}()
 
 	cm.mux.RLock()

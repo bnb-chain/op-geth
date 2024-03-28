@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
@@ -20,7 +19,7 @@ import (
 
 const (
 	// mergeMultiDifflayerInterval defines the interval to collect nodes to flush disk.
-	mergeMultiDifflayerInterval = 3
+	mergeMultiDifflayerInterval = 1
 
 	// DefaultProposeBlockInterval defines the interval of op-proposer proposes block.
 	DefaultProposeBlockInterval = 3600
@@ -57,9 +56,9 @@ type nodebufferlist struct {
 	persistID uint64          // The last state id that have written to disk.
 	baseMux   sync.RWMutex    // The mutex of base multiDifflayer and persistID.
 
-	isFlushing   atomic.Bool // Flag indicates writing disk under background.
-	stopFlushing atomic.Bool // Flag stops writing disk under background.
-	stopCh       chan struct{}
+	forceFlushCh     chan struct{}
+	waitForceFlushCh chan struct{}
+	stopCh           chan struct{}
 
 	checkpointManager *checkpointManager
 }
@@ -114,6 +113,8 @@ func newNodeBufferList(
 		count:             1,
 		persistID:         rawdb.ReadPersistentStateID(db),
 		stopCh:            make(chan struct{}),
+		forceFlushCh:      make(chan struct{}),
+		waitForceFlushCh:  make(chan struct{}),
 		checkpointManager: newCheckpointManager(db, checkpointDir, enableCheckpoint, wpBlocks, maxCheckpointNumber),
 	}
 	go nf.loop()
@@ -232,54 +233,20 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	if !force {
 		return nil
 	}
+	nf.forceFlush()
+	return nil
+}
 
+// forceFlush is used to flush all buffer-list memory to disk.
+func (nf *nodebufferlist) forceFlush() {
 	// hang user read/write and background write
 	nf.mux.Lock()
 	nf.baseMux.Lock()
 	defer nf.mux.Unlock()
 	defer nf.baseMux.Unlock()
 
-	nf.stopFlushing.Store(true)
-	defer nf.stopFlushing.Store(false)
-	for {
-		if nf.isFlushing.Swap(true) {
-			time.Sleep(time.Duration(DefaultBackgroundFlushInterval) * time.Second)
-			log.Info("waiting base node buffer to be flushed to disk")
-			continue
-		} else {
-			break
-		}
-	}
-
-	commitFunc := func(buffer *multiDifflayer) bool {
-		if err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes); err != nil {
-			log.Crit("failed to commit nodes to base node buffer", "error", err)
-		}
-		_ = nf.popBack()
-
-		if nf.checkpointManager.needDoCheckpoint(buffer.block) {
-			// todo: check
-			persistID := nf.persistID + nf.base.layers
-			err := nf.base.flush(nf.db, nf.clean, persistID)
-			if err != nil {
-				log.Crit("failed to flush base node buffer to disk", "error", err)
-			}
-			nf.base.reset()
-			nf.checkpointManager.addCheckpoint(buffer.block, buffer.root)
-		}
-
-		return true
-	}
-	nf.traverseReverse(commitFunc)
-	persistID := nf.persistID + nf.base.layers
-	err := nf.base.flush(nf.db, nf.clean, persistID)
-	if err != nil {
-		log.Crit("failed to flush base node buffer to disk", "error", err)
-	}
-	nf.isFlushing.Store(false)
-	nf.base.reset()
-	nf.persistID = persistID
-	return nil
+	nf.forceFlushCh <- struct{}{}
+	<-nf.waitForceFlushCh
 }
 
 // setSize sets the buffer size to the provided number, and invokes a flush
@@ -348,13 +315,11 @@ func (nf *nodebufferlist) getLayers() uint64 {
 
 // waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
 func (nf *nodebufferlist) waitAndStopFlushing() {
+	nf.forceFlush()
 	close(nf.stopCh)
-	nf.stopFlushing.Store(true)
-	for nf.isFlushing.Load() {
-		time.Sleep(time.Second)
-		log.Warn("waiting background node buffer to be flushed to disk")
-	}
 	nf.checkpointManager.close()
+	nf.report()
+	log.Info("Succeed to stop node buffer list")
 }
 
 // setClean sets fastcache to trienodebuffer for cache the trie nodes, used for nodebufferlist.
@@ -534,23 +499,49 @@ func (nf *nodebufferlist) backgroundFlush() {
 
 // loop runs the background task, collects the nodes for writing to disk.
 func (nf *nodebufferlist) loop() {
-	mergeTicker := time.NewTicker(time.Second * mergeMultiDifflayerInterval)
+	loopFlushTicker := time.NewTicker(time.Second * mergeMultiDifflayerInterval)
+
 	for {
 		select {
 		case <-nf.stopCh:
 			return
-		case <-mergeTicker.C:
-			if nf.stopFlushing.Load() {
-				continue
-			}
-			if nf.isFlushing.Swap(true) {
-				continue
-			}
+		case <-loopFlushTicker.C: // background loop flush.
 			needFlush := nf.diffToBase()
 			if needFlush {
 				nf.backgroundFlush()
 			}
-			nf.isFlushing.Swap(false)
+		case <-nf.forceFlushCh: // force flush all which scope has been in lock guard.
+			commitFunc := func(buffer *multiDifflayer) bool {
+				if err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes); err != nil {
+					log.Crit("failed to commit nodes to base node buffer", "error", err)
+				}
+				_ = nf.popBack()
+				if nf.checkpointManager.needDoCheckpoint(buffer.block) {
+					persistID := nf.persistID + nf.base.layers
+					err := nf.base.flush(nf.db, nf.clean, persistID)
+					if err != nil {
+						log.Crit("failed to flush base node buffer to disk", "error", err)
+					}
+					if err = nf.checkpointManager.addCheckpoint(buffer.block, buffer.root); err != nil {
+						log.Crit("Failed to add new disk checkpoint", "error", err)
+					}
+					nf.base.reset()
+					nf.persistID = persistID
+				}
+
+				return true
+			}
+			nf.traverseReverse(commitFunc)
+			persistID := nf.persistID + nf.base.layers
+			err := nf.base.flush(nf.db, nf.clean, persistID)
+			if err != nil {
+				log.Crit("failed to flush base node buffer to disk", "error", err)
+			}
+			nf.base.reset()
+			nf.persistID = persistID
+			nf.layers = 0
+
+			nf.waitForceFlushCh <- struct{}{}
 		}
 	}
 }

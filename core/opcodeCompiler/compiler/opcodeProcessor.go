@@ -63,6 +63,10 @@ func DisableOptimization() {
 	enabled = false
 }
 
+func IsEnabled() bool {
+	return enabled
+}
+
 func LoadOptimizedCode(hash common.Hash) []byte {
 	if !enabled {
 		return nil

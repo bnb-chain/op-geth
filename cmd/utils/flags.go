@@ -1910,7 +1910,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 
 	if ctx.IsSet(VMOpcodeOptimizeFlag.Name) {
-		// TODO(fjl): force-enable this in --dev mode
 		cfg.EnableOpcodeOptimizing = ctx.Bool(VMOpcodeOptimizeFlag.Name)
 		compiler.EnableOptimization()
 	}

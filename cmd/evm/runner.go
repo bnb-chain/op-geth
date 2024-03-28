@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	compiler2 "github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"io"
 	"math/big"
 	"os"
@@ -234,10 +233,6 @@ func runCmd(ctx *cli.Context) error {
 		runtimeConfig.ChainConfig = chainConfig
 	} else {
 		runtimeConfig.ChainConfig = params.AllEthashProtocolChanges
-	}
-
-	if runtimeConfig.EVMConfig.EnableOpcodeOptimizations {
-		compiler2.EnableOptimization()
 	}
 
 	var hexInput []byte

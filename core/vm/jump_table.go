@@ -175,20 +175,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		memorySize:  memoryCreate2,
 	}
 
-	instructionSet[Nop] = &operation{
-		execute:     opNop,
-		constantGas: 0,
-		minStack:    minStack(0, 0),
-		maxStack:    maxStack(0, 0),
-	}
-
-	instructionSet[Push1Shl] = &operation{
-		execute:     opPush1Shl,
-		constantGas: 2 * GasFastestStep,
-		minStack:    minStack(1, 1),
-		maxStack:    maxStack(1, 1),
-	}
-
 	return validate(instructionSet)
 }
 
@@ -1069,8 +1055,37 @@ func newFrontierInstructionSet() JumpTable {
 		},
 	}
 
-	// TODO-dav: lower the gas fee.
+	// Fill all unassigned slots with opUndefined.
+	for i, entry := range tbl {
+		if entry == nil {
+			tbl[i] = &operation{execute: opUndefined, maxStack: maxStack(0, 0)}
+		}
+	}
+
+	return validate(tbl)
+}
+
+func copyJumpTable(source *JumpTable) *JumpTable {
+	dest := *source
+	for i, op := range source {
+		if op != nil {
+			opCopy := *op
+			dest[i] = &opCopy
+		}
+	}
+	return &dest
+}
+
+func enableOptimizedOpcode(tbl *JumpTable) *JumpTable {
 	// super instructions
+
+	tbl[Nop] = &operation{
+		execute:     opNop,
+		constantGas: 0,
+		minStack:    minStack(0, 0),
+		maxStack:    maxStack(0, 0),
+	}
+
 	tbl[AndSwap1PopSwap2Swap1] = &operation{
 		execute:     opAndSwap1PopSwap2Swap1,
 		constantGas: 4*GasFastestStep + GasQuickStep,
@@ -1122,6 +1137,13 @@ func newFrontierInstructionSet() JumpTable {
 
 	tbl[Push1Add] = &operation{
 		execute:     opPush1Add,
+		constantGas: 2 * GasFastestStep,
+		minStack:    minStack(1, 1),
+		maxStack:    maxStack(1, 1),
+	}
+
+	tbl[Push1Shl] = &operation{
+		execute:     opPush1Shl,
 		constantGas: 2 * GasFastestStep,
 		minStack:    minStack(1, 1),
 		maxStack:    maxStack(1, 1),
@@ -1183,23 +1205,5 @@ func newFrontierInstructionSet() JumpTable {
 		maxStack:    maxStack(1, 0),
 	}
 
-	// Fill all unassigned slots with opUndefined.
-	for i, entry := range tbl {
-		if entry == nil {
-			tbl[i] = &operation{execute: opUndefined, maxStack: maxStack(0, 0)}
-		}
-	}
-
-	return validate(tbl)
-}
-
-func copyJumpTable(source *JumpTable) *JumpTable {
-	dest := *source
-	for i, op := range source {
-		if op != nil {
-			opCopy := *op
-			dest[i] = &opCopy
-		}
-	}
-	return &dest
+	return tbl
 }

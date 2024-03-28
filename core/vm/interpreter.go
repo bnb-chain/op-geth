@@ -42,11 +42,12 @@ type ScopeContext struct {
 
 // EVMInterpreter represents an EVM interpreter
 type EVMInterpreter struct {
-	evm   *EVM
-	table *JumpTable
-
-	hasher    crypto.KeccakState // Keccak256 hasher instance shared across opcodes
-	hasherBuf common.Hash        // Keccak256 hasher result array shared across opcodes
+	evm              *EVM
+	table            *JumpTable
+	unOptimizedTable *JumpTable
+	optimizedTable   *JumpTable
+	hasher           crypto.KeccakState // Keccak256 hasher instance shared across opcodes
+	hasherBuf        common.Hash        // Keccak256 hasher result array shared across opcodes
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
@@ -56,6 +57,8 @@ type EVMInterpreter struct {
 func NewEVMInterpreter(evm *EVM) *EVMInterpreter {
 	// If jump table was not initialised we set the default one.
 	var table *JumpTable
+	// The standard jump table without fused opcode. The main purpose is to follow the rule of spec and avoid fused opcode.
+	var optimizedTable *JumpTable
 	switch {
 	case evm.chainRules.IsCancun:
 		table = &cancunInstructionSet
@@ -96,7 +99,12 @@ func NewEVMInterpreter(evm *EVM) *EVMInterpreter {
 		}
 	}
 	evm.Config.ExtraEips = extraEips
-	return &EVMInterpreter{evm: evm, table: table}
+	if evm.Config.EnableOpcodeOptimizations {
+		optimizedTable = copyJumpTable(table)
+		optimizedTable = enableOptimizedOpcode(optimizedTable)
+	}
+
+	return &EVMInterpreter{evm: evm, table: table, unOptimizedTable: table, optimizedTable: optimizedTable}
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns
@@ -241,4 +249,16 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	}
 
 	return res, err
+}
+
+func (in *EVMInterpreter) DisableOptimization() {
+	if in.table != in.unOptimizedTable {
+		in.table = in.unOptimizedTable
+	}
+}
+
+func (in *EVMInterpreter) EnableOptimization() {
+	if in.table != in.optimizedTable {
+		in.table = in.optimizedTable
+	}
 }

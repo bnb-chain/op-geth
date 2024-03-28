@@ -258,6 +258,7 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		_ = nf.popBack()
 
 		if nf.checkpointManager.needDoCheckpoint(buffer.block) {
+			// todo: check
 			persistID := nf.persistID + nf.base.layers
 			err := nf.base.flush(nf.db, nf.clean, persistID)
 			if err != nil {
@@ -586,7 +587,7 @@ func (nf *nodebufferlist) proposedBlockReader(blockRoot common.Hash) (layer, err
 		if err != nil {
 			context = append(context, []interface{}{"err", err}...)
 			log.Error("proposed block state is not available", context...)
-			return nil, fmt.Errorf("proposed block proof state %#x is not available", blockRoot)
+			return nil, fmt.Errorf("proposed block proof state %#x is not available", blockRoot.String())
 		}
 		return ckptLayer, nil
 	}

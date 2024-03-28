@@ -315,7 +315,7 @@ var (
 	EnableCheckpointFlag = &cli.BoolFlag{
 		Name:     "pathdb.enablecheckpoint",
 		Usage:    "Enable trie db checkpoint for get withdraw-contract proof",
-		Value:    true,
+		Value:    false,
 		Category: flags.StateCategory,
 	}
 	MaxCheckpointNumberFlag = &cli.Uint64Flag{

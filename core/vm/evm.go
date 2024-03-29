@@ -142,7 +142,6 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig
 	evm.interpreter = NewEVMInterpreter(evm)
 	if config.EnableOpcodeOptimizations {
 		compiler.EnableOptimization()
-		evm.interpreter.table = evm.interpreter.optimizedTable
 	}
 	return evm
 }
@@ -507,14 +506,12 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contract.optimized = false
 	if evm.Config.EnableOpcodeOptimizations {
 		compiler.DisableOptimization()
-		evm.interpreter.DisableOptimization()
 	}
 	ret, err := evm.interpreter.Run(contract, nil, false)
 
 	// After creation, retrieve to optimization
 	if evm.Config.EnableOpcodeOptimizations {
 		compiler.EnableOptimization()
-		evm.interpreter.EnableOptimization()
 	}
 
 	// Check whether the max code size has been exceeded, assign err if the case.

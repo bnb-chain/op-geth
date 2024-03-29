@@ -1076,9 +1076,8 @@ func copyJumpTable(source *JumpTable) *JumpTable {
 	return &dest
 }
 
-func enableOptimizedOpcode(tbl *JumpTable) *JumpTable {
+func createOptimizedOpcodeTable(tbl *JumpTable) *JumpTable {
 	// super instructions
-
 	tbl[Nop] = &operation{
 		execute:     opNop,
 		constantGas: 0,

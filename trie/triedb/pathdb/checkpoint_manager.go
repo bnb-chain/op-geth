@@ -40,10 +40,15 @@ const (
 	checkpointDBKeepaliveSecond = 60
 )
 
+// encodeSubCheckpointDir encodes a completed checkpoint directory.
+// eg: /datadir/geth/checkpoint/3653040_0xbe4838f06a7e85e85492e7a06ec3e838cc141b0b1b30fb4efe11f48b5f4e9f0e.
 func encodeSubCheckpointDir(checkpointDir string, blockNumber uint64, blockRoot common.Hash) string {
 	return checkpointDir + "/" + strconv.FormatUint(blockNumber, 10) + "_" + blockRoot.String()
 }
 
+// decodeSubCheckpointDir decodes meta information such as blockid and blockroot.
+// eg: /datadir/geth/checkpoint/3653040_0xbe4838f06a7e85e85492e7a06ec3e838cc141b0b1b30fb4efe11f48b5f4e9f0e
+// decode to blocknumber=3653040 and blockroot=0xbe4838f06a7e85e85492e7a06ec3e838cc141b0b1b30fb4efe11f48b5f4e9f0e.
 func decodeSubCheckpointDir(subCheckpointDir string) (blockNumber uint64, blockRoot common.Hash, err error) {
 	baseCheckpointDir := filepath.Base(subCheckpointDir)
 	fields := strings.Split(baseCheckpointDir, "_")
@@ -75,6 +80,7 @@ type checkpointLayer struct {
 
 var _ layer = &checkpointLayer{}
 
+// newCheckpointLayer is used to return make a checkpoint instance.
 func newCheckpointLayer(checkpointDir string) (ckptLayer *checkpointLayer, err error) {
 	var (
 		blockNumber uint64
@@ -230,30 +236,33 @@ func (c *checkpointLayer) Node(owner common.Hash, path []byte, hash common.Hash)
 	return nBlob, nil
 }
 
+// rootHash implements the layer interface, returning the root hash of
+// corresponding state.
 func (c *checkpointLayer) rootHash() common.Hash {
 	return c.root
 }
 
-// unused
+// stateID implements the layer interface, note that this is unused.
 func (c *checkpointLayer) stateID() uint64 {
 	return 0
 }
 
-// unused
+// parentLayer implements the layer interface, note that this is unused.
 func (c *checkpointLayer) parentLayer() layer {
 	return nil
 }
 
-// unused
+// update implements the layer interface, note that this is unused.
 func (c *checkpointLayer) update(common.Hash, uint64, uint64, map[common.Hash]map[string]*trienode.Node, *triestate.Set) *diffLayer {
 	return nil
 }
 
-// unused
+// journal implements the layer interface, note that this is unused.
 func (c *checkpointLayer) journal(io.Writer) error {
 	return nil
 }
 
+// checkpointManager struct is mainly manager checkpoint instance lifecycle.
 type checkpointManager struct {
 	db                      ethdb.Database
 	enableCheckPoint        atomic.Bool
@@ -266,6 +275,7 @@ type checkpointManager struct {
 	waitCloseCh             chan struct{}
 }
 
+// newCheckpointManager returns a checkpoint manager instance.
 func newCheckpointManager(db ethdb.Database, checkpointDir string, enableCheckPoint bool, checkpointBlockInterval uint64, maxCheckpointNumber uint64) *checkpointManager {
 	startTimestamp := time.Now()
 	if checkpointBlockInterval == 0 {
@@ -283,6 +293,7 @@ func newCheckpointManager(db ethdb.Database, checkpointDir string, enableCheckPo
 	return cm
 }
 
+// logDetailedInfo prints checkpoint manager detailed info.
 func (cm *checkpointManager) logDetailedInfo() {
 	var infos []interface{}
 	infos = append(infos, []interface{}{"checkpoint_dir", cm.checkpointDir}...)
@@ -294,6 +305,7 @@ func (cm *checkpointManager) logDetailedInfo() {
 	log.Info("Checkpoint manager detailed info", infos...)
 }
 
+// close is used to close all checkpoint db and exit.
 func (cm *checkpointManager) close() {
 	startTimestamp := time.Now()
 	close(cm.stopCh)
@@ -307,6 +319,7 @@ func (cm *checkpointManager) close() {
 	log.Info("Succeed to close checkpoint manager", "elapsed", common.PrettyDuration(time.Since(startTimestamp)))
 }
 
+// needDoCheckpoint determines whether checkpoint needs to be done.
 func (cm *checkpointManager) needDoCheckpoint(currentCommitBlockNumber uint64) bool {
 	if !cm.enableCheckPoint.Load() || cm.checkpointBlockInterval == 0 {
 		return false
@@ -334,6 +347,7 @@ func (cm *checkpointManager) loop() {
 	}
 }
 
+// gcCheckpoint deletes redundant checkpoints in the background.
 func (cm *checkpointManager) gcCheckpoint() {
 	if !cm.enableCheckPoint.Load() {
 		return
@@ -376,6 +390,7 @@ func (cm *checkpointManager) gcCheckpoint() {
 	}
 }
 
+// printCheckpointStat is used to print checkpoint stat.
 func (cm *checkpointManager) printCheckpointStat() error {
 	if !cm.enableCheckPoint.Load() {
 		return nil
@@ -395,6 +410,7 @@ func (cm *checkpointManager) printCheckpointStat() error {
 	return nil
 }
 
+// loadCheckpoint loads all checkpoints on the disk at startup.
 func (cm *checkpointManager) loadCheckpoint() error {
 	if !cm.enableCheckPoint.Load() {
 		return nil
@@ -433,6 +449,7 @@ func (cm *checkpointManager) loadCheckpoint() error {
 	return nil
 }
 
+// addCheckpoint adds a checkpoint. Note that this is a synchronous, blocking, and time-consuming operation.
 func (cm *checkpointManager) addCheckpoint(blockNumber uint64, blockRoot common.Hash) error {
 	if !cm.enableCheckPoint.Load() {
 		return nil
@@ -477,6 +494,7 @@ func (cm *checkpointManager) addCheckpoint(blockNumber uint64, blockRoot common.
 	return nil
 }
 
+// getCheckpointLayer gets a checkpoint layer which is used to get checkpoint withdraw proof.
 func (cm *checkpointManager) getCheckpointLayer(root common.Hash) (layer, error) {
 	if !cm.enableCheckPoint.Load() {
 		return nil, errors.New("checkpoint manager is disabled")

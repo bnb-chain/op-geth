@@ -554,7 +554,13 @@ func (nf *nodebufferlist) proposedBlockReader(blockRoot common.Hash) (layer, err
 	if nf.count < nf.rsevMdNum {
 		proposedBlockReaderLessDifflayer.Mark(1)
 		log.Warn("failed to get propose block reader", "node buffer list count", nf.count)
-		return nil, errNoProposedBlockDifflayer
+		ckptLayer, err := nf.checkpointManager.getCheckpointLayer(blockRoot)
+		if err != nil {
+			log.Error("proposed block state is not available", "block_root", blockRoot.String())
+			return nil, fmt.Errorf("proposed block proof state %#x is not available", blockRoot.String())
+		}
+		// Just restart and need to read from checkpoint.
+		return ckptLayer, nil
 	}
 	var diff *multiDifflayer
 	context := []interface{}{

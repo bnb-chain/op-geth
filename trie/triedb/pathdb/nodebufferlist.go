@@ -556,7 +556,7 @@ func (nf *nodebufferlist) proposedBlockReader(blockRoot common.Hash) (layer, err
 		log.Warn("failed to get propose block reader", "node buffer list count", nf.count)
 		ckptLayer, err := nf.checkpointManager.getCheckpointLayer(blockRoot)
 		if err != nil {
-			log.Error("proposed block state is not available", "block_root", blockRoot.String())
+			log.Error("proposed block state is not available", "block_root", blockRoot.String(), "bufferlist_count", nf.count)
 			return nil, fmt.Errorf("proposed block proof state %#x is not available", blockRoot.String())
 		}
 		// Just restart and need to read from checkpoint.

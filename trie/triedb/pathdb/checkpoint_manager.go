@@ -35,9 +35,15 @@ const (
 	// printCheckpointStatIntervalSecond is used to print checkpoint stat.
 	printCheckpointStatIntervalSecond = 60
 
-	// checkpointDBKeepaliveSecond is used to check db which has been not used for a long time,
+	// checkDBKeepaliveSecond is used to check db which has been not used for a long time,
 	// and close it for reducing memory.
-	checkpointDBKeepaliveSecond = 60
+	checkDBKeepaliveIntervalSecond = 60
+
+	// checkDBOpenedIntervalSecond is used to max opened db number to avoid too many db oom.
+	checkDBOpenedIntervalSecond = 1
+
+	// defaultMaxOpenedNumber is max opened number.
+	defaultMaxOpenedNumber = 3
 )
 
 // encodeSubCheckpointDir encodes a completed checkpoint directory.
@@ -76,6 +82,7 @@ type checkpointLayer struct {
 	waitCloseAndDeleteCh chan struct{}
 	tryCloseAndStopCh    chan struct{}
 	waitCloseAndStopCh   chan struct{}
+	tryCloseCh           chan struct{}
 }
 
 var _ layer = &checkpointLayer{}
@@ -104,6 +111,7 @@ func newCheckpointLayer(checkpointDir string) (ckptLayer *checkpointLayer, err e
 	ckptLayer.waitCloseAndDeleteCh = make(chan struct{})
 	ckptLayer.tryCloseAndStopCh = make(chan struct{})
 	ckptLayer.waitCloseAndStopCh = make(chan struct{})
+	ckptLayer.tryCloseCh = make(chan struct{})
 	go ckptLayer.loop()
 	return ckptLayer, nil
 }
@@ -119,12 +127,21 @@ func (c *checkpointLayer) loop() {
 		endDeleteCheckpointTimestamp   time.Time
 	)
 
-	tryCloseTicker := time.NewTicker(time.Second * checkpointDBKeepaliveSecond)
+	tryCloseTicker := time.NewTicker(time.Second * checkDBKeepaliveIntervalSecond)
+	defer tryCloseTicker.Stop()
 
 	for {
 		select {
 		case <-tryCloseTicker.C: // close db when a long time unused for reducing memory usage.
-			if c.isOpened.Load() && time.Now().Sub(c.lastUsedTimestamp) > time.Second*checkpointDBKeepaliveSecond {
+			if c.isOpened.Load() && time.Now().Sub(c.lastUsedTimestamp) > time.Second*checkDBKeepaliveIntervalSecond {
+				if err = c.checkpointDB.Close(); err != nil {
+					log.Warn("Failed to close checkpoint db", "error", err)
+				} else {
+					c.isOpened.Store(false)
+				}
+			}
+		case <-c.tryCloseCh: // close db when total opened db > max for reducing memory usage.
+			if c.isOpened.Load() {
 				if err = c.checkpointDB.Close(); err != nil {
 					log.Warn("Failed to close checkpoint db", "error", err)
 				} else {
@@ -203,6 +220,11 @@ func (c *checkpointLayer) waitDBCloseAndDelete() {
 func (c *checkpointLayer) waitDBCloseAndStop() {
 	c.tryCloseAndStopCh <- struct{}{}
 	<-c.waitCloseAndStopCh
+}
+
+// closeDB closes the db.
+func (c *checkpointLayer) closeDB() {
+	c.tryCloseCh <- struct{}{}
 }
 
 // Node implements the layer node interface.
@@ -321,7 +343,7 @@ func (cm *checkpointManager) close() {
 
 // needDoCheckpoint determines whether checkpoint needs to be done.
 func (cm *checkpointManager) needDoCheckpoint(currentCommitBlockNumber uint64) bool {
-	if !cm.enableCheckPoint.Load() || cm.checkpointBlockInterval == 0 {
+	if !cm.enableCheckPoint.Load() || cm.checkpointBlockInterval == 0 || currentCommitBlockNumber == 0 {
 		return false
 	}
 	if currentCommitBlockNumber%cm.checkpointBlockInterval == 0 {
@@ -332,7 +354,10 @@ func (cm *checkpointManager) needDoCheckpoint(currentCommitBlockNumber uint64) b
 
 func (cm *checkpointManager) loop() {
 	gcCheckpointTicker := time.NewTicker(time.Second * gcCheckpointIntervalSecond)
+	defer gcCheckpointTicker.Stop()
 	printCheckpointStatTicker := time.NewTicker(time.Second * printCheckpointStatIntervalSecond)
+	defer printCheckpointStatTicker.Stop()
+	checkMaxDBOpenedTicker := time.NewTicker(time.Second * checkDBOpenedIntervalSecond)
 
 	for {
 		select {
@@ -343,7 +368,36 @@ func (cm *checkpointManager) loop() {
 			cm.gcCheckpoint()
 		case <-printCheckpointStatTicker.C:
 			cm.printCheckpointStat()
+		case <-checkMaxDBOpenedTicker.C:
+			cm.checkMaxDBOpened()
 		}
+	}
+}
+
+// checkMaxDBOpened closes the earliest opened db when the number of open dbs is greater than the configuration.
+func (cm *checkpointManager) checkMaxDBOpened() {
+	if !cm.enableCheckPoint.Load() {
+		return
+	}
+
+	var (
+		totalOpennedNumber int64
+		toCloseCkptLayer   *checkpointLayer
+	)
+	cm.mux.RLock()
+	for _, ckptLayer := range cm.checkpointMap {
+		if ckptLayer.isOpened.Load() {
+			totalOpennedNumber = totalOpennedNumber + 1
+			if toCloseCkptLayer == nil || ckptLayer.lastUsedTimestamp.Before(toCloseCkptLayer.lastUsedTimestamp) {
+				toCloseCkptLayer = ckptLayer
+			}
+		}
+	}
+	cm.mux.RUnlock()
+
+	openedCheckpointSizeGauge.Update(totalOpennedNumber)
+	if totalOpennedNumber > defaultMaxOpenedNumber {
+		toCloseCkptLayer.closeDB()
 	}
 }
 

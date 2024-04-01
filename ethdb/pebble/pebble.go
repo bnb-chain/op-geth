@@ -675,8 +675,7 @@ func (d *Database) NewCheckpoint(destDir string) error {
 	return d.db.Checkpoint(destDir, opts...)
 }
 
-// OpenCheckpointDB returns a wrapped checkpoint pebble DB object. The namespace is the prefix that the
-// metrics reporting should use for surfacing internal stats.
+// OpenCheckpointDB returns a wrapped checkpoint pebble DB object.
 func OpenCheckpointDB(file string, blockCache *pebble.Cache, tableCache *pebble.TableCache) (*Database, error) {
 	namespace := "checkpoint"
 	logger := log.New(namespace, file)

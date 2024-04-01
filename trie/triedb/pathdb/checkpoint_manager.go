@@ -200,6 +200,7 @@ func (c *checkpointLayer) loop() {
 				deleteCheckpointTimer.Update(endDeleteCheckpointTimestamp.Sub(startDeleteCheckpointTimestamp))
 			}
 			c.waitCloseAndDeleteCh <- struct{}{}
+			return
 		case <-c.tryCloseAndStopCh: // close for stop.
 			if c.isOpened.Load() {
 				startCloseCheckpointTimestamp = time.Now()
@@ -324,9 +325,11 @@ func newCheckpointManager(db ethdb.Database, checkpointDir string, enableCheckPo
 	cm.stopCh = make(chan struct{})
 	cm.waitCloseCh = make(chan struct{})
 	cm.loadCheckpoint()
+	if cm.enableCheckPoint.Load() {
+		cm.sharedBlockCache = pebbledb.NewCache(8 * 1024 * 1024) // 8MB
+		cm.sharedTableCache = pebbledb.NewTableCache(cm.sharedBlockCache, runtime.NumCPU(), 4096)
+	}
 
-	cm.sharedBlockCache = pebbledb.NewCache(8 * 1024 * 1024) // 8MB
-	cm.sharedTableCache = pebbledb.NewTableCache(cm.sharedBlockCache, runtime.NumCPU(), 4096)
 	go cm.loop()
 	cm.logDetailedInfo()
 	log.Info("Succeed to new checkpoint manager", "elapsed", common.PrettyDuration(time.Since(startTimestamp)))

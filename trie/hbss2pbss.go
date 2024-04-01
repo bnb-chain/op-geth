@@ -20,7 +20,7 @@ import (
 type Hbss2Pbss struct {
 	trie            *Trie // traverse trie
 	db              *Database
-	blocknum        uint64
+	blockNum        uint64
 	root            node // root of triedb
 	stateRootHash   common.Hash
 	concurrentQueue chan struct{}
@@ -33,7 +33,7 @@ const (
 )
 
 // NewHbss2Pbss return a hash2Path obj
-func NewHbss2Pbss(tr *Trie, db *Database, stateRootHash common.Hash, blocknum uint64, jobnum uint64) (*Hbss2Pbss, error) {
+func NewHbss2Pbss(tr *Trie, db *Database, stateRootHash common.Hash, blockNum uint64, jobNum uint64) (*Hbss2Pbss, error) {
 	if tr == nil {
 		return nil, errors.New("trie is nil")
 	}
@@ -44,18 +44,18 @@ func NewHbss2Pbss(tr *Trie, db *Database, stateRootHash common.Hash, blocknum ui
 
 	ins := &Hbss2Pbss{
 		trie:            tr,
-		blocknum:        blocknum,
+		blockNum:        blockNum,
 		db:              db,
 		stateRootHash:   stateRootHash,
 		root:            tr.root,
-		concurrentQueue: make(chan struct{}, jobnum),
+		concurrentQueue: make(chan struct{}, jobNum),
 		wg:              sync.WaitGroup{},
 	}
 
 	return ins, nil
 }
 
-func (t *Trie) resloveWithoutTrack(n node, prefix []byte) (node, error) {
+func (t *Trie) resolveWithoutTrack(n node, prefix []byte) (node, error) {
 	if n, ok := n.(hashNode); ok {
 		blob, err := t.reader.node(prefix, common.BytesToHash(n))
 		if err != nil {
@@ -69,24 +69,27 @@ func (t *Trie) resloveWithoutTrack(n node, prefix []byte) (node, error) {
 func (h2p *Hbss2Pbss) writeNode(pathKey []byte, n *trienode.Node, owner common.Hash) {
 	if owner == (common.Hash{}) {
 		rawdb.WriteAccountTrieNode(h2p.db.diskdb, pathKey, n.Blob)
-		log.Debug("WriteNodes account node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		log.Debug("Write account trie node", "path", common.Bytes2Hex(pathKey), "hash", n.Hash,
+			"blob hash", crypto.Keccak256Hash(n.Blob))
 	} else {
 		rawdb.WriteStorageTrieNode(h2p.db.diskdb, owner, pathKey, n.Blob)
-		log.Debug("WriteNodes storage node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		log.Debug("Write storage trie node", "path", common.Bytes2Hex(pathKey), "owner", owner.String(),
+			"hash", n.Hash, "blob hash", crypto.Keccak256Hash(n.Blob))
 	}
 }
 
 // Run statistics, external call
 func (h2p *Hbss2Pbss) Run() {
-	log.Debug("Find Account Trie Tree, rootHash: ", h2p.trie.Hash().String(), "BlockNum: ", h2p.blocknum)
+	log.Debug("Find account trie tree", "rootHash", h2p.trie.Hash().String(), "block num", h2p.blockNum)
 
 	h2p.ConcurrentTraversal(h2p.trie, h2p.root, []byte{})
 	h2p.wg.Wait()
 
-	log.Info("Total complete: %v, go routines Num: %v, h2p concurrentQueue: %v\n", h2p.totalNum, runtime.NumGoroutine(), len(h2p.concurrentQueue))
+	log.Info("Hbss to pbss statistics", "total complete", h2p.totalNum, "go routines num", runtime.NumGoroutine(),
+		"h2p concurrent queue", len(h2p.concurrentQueue))
 
-	rawdb.WritePersistentStateID(h2p.db.diskdb, h2p.blocknum)
-	rawdb.WriteStateID(h2p.db.diskdb, h2p.stateRootHash, h2p.blocknum)
+	rawdb.WritePersistentStateID(h2p.db.diskdb, h2p.blockNum)
+	rawdb.WriteStateID(h2p.db.diskdb, h2p.stateRootHash, h2p.blockNum)
 }
 
 func (h2p *Hbss2Pbss) SubConcurrentTraversal(theTrie *Trie, theNode node, path []byte) {
@@ -97,7 +100,7 @@ func (h2p *Hbss2Pbss) SubConcurrentTraversal(theTrie *Trie, theNode node, path [
 }
 
 func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []byte) {
-	total_num := uint64(0)
+	totalNum := uint64(0)
 	// nil node
 	if theNode == nil {
 		return
@@ -118,10 +121,11 @@ func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 		var hash, _ = collapsed.cache()
 		collapsed.Children = h2p.commitChildren(path, current)
 
-		nodebytes := nodeToBytes(collapsed)
-		if common.BytesToHash(hash) != common.BytesToHash(crypto.Keccak256(nodebytes)) {
-			log.Error("Hash is inconsistent, hash: ", common.BytesToHash(hash), "node hash: ", common.BytesToHash(crypto.Keccak256(nodebytes)), "node: ", collapsed.fstring(""))
-			panic("hash inconsistent.")
+		nodeBytes := nodeToBytes(collapsed)
+		if common.BytesToHash(hash) != common.BytesToHash(crypto.Keccak256(nodeBytes)) {
+			log.Error("Hash is inconsistent", "hash", common.BytesToHash(hash),
+				"node hash", common.BytesToHash(crypto.Keccak256(nodeBytes)), "node", collapsed.fstring(""))
+			panic("inconsistent hash")
 		}
 
 		h2p.writeNode(path, trienode.New(common.BytesToHash(hash), nodeToBytes(collapsed)), theTrie.owner)
@@ -141,43 +145,44 @@ func (h2p *Hbss2Pbss) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 			}
 		}
 	case hashNode:
-		n, err := theTrie.resloveWithoutTrack(current, path)
+		n, err := theTrie.resolveWithoutTrack(current, path)
 		if err != nil {
-			log.Error("Resolve HashNode", "error", err, "TrieRoot", theTrie.Hash(), "Path", path)
+			log.Error("Failed to resolve hash node", "error", err, "trie root", theTrie.Hash(), "path", path)
 			return
 		}
 		h2p.ConcurrentTraversal(theTrie, n, path)
-		total_num = atomic.AddUint64(&h2p.totalNum, 1)
-		if total_num%100000 == 0 {
-			log.Info("Converting ", "Complete progress", total_num, "go routines Num", runtime.NumGoroutine(), "h2p concurrentQueue", len(h2p.concurrentQueue))
+		totalNum = atomic.AddUint64(&h2p.totalNum, 1)
+		if totalNum%100000 == 0 {
+			log.Info("Converting", "complete progress", totalNum, "go routines num", runtime.NumGoroutine(),
+				"h2p concurrentQueue", len(h2p.concurrentQueue))
 		}
 		return
 	case valueNode:
 		if !hasTerm(path) {
-			log.Info("ValueNode miss path term", "path", common.Bytes2Hex(path))
+			log.Info("ValueNode misses path term", "path", common.Bytes2Hex(path))
 			break
 		}
 		var account types.StateAccount
 		if err := rlp.Decode(bytes.NewReader(current), &account); err != nil {
-			// log.Info("Rlp decode account failed.", "err", err)
+			// log.Error("Failed to decode rlp account", "err", err)
 			break
 		}
 		if account.Root == (common.Hash{}) || account.Root == types.EmptyRootHash {
-			// log.Info("Not a storage trie.", "account", common.BytesToHash(path).String())
+			// log.Info("Not a storage trie", "account", common.BytesToHash(path).String())
 			break
 		}
 
 		ownerAddress := common.BytesToHash(hexToCompact(path))
 		tr, err := New(StorageTrieID(h2p.stateRootHash, ownerAddress, account.Root), h2p.db)
 		if err != nil {
-			log.Error("New Storage trie error", "err", err, "root", account.Root.String(), "owner", ownerAddress.String())
+			log.Error("Failed to new Storage trie", "err", err, "root", account.Root.String(), "owner", ownerAddress.String())
 			break
 		}
-		log.Debug("Find Contract Trie Tree", "rootHash: ", tr.Hash().String(), "")
+		log.Debug("Find Contract Trie Tree", "rootHash", tr.Hash().String())
 		h2p.wg.Add(1)
 		go h2p.SubConcurrentTraversal(tr, tr.root, []byte{})
 	default:
-		panic(errors.New("Invalid node type to traverse."))
+		panic(errors.New("invalid node type to traverse"))
 	}
 }
 
@@ -232,7 +237,6 @@ func (h2p *Hbss2Pbss) commit(path []byte, n node) node {
 		hashedKids := h2p.commitChildren(path, cn)
 		collapsed := cn.copy()
 		collapsed.Children = hashedKids
-
 		return collapsed
 	case hashNode:
 		return cn

@@ -668,10 +668,30 @@ func (iter *pebbleIterator) Value() []byte {
 // be called multiple times without causing error.
 func (iter *pebbleIterator) Release() { iter.iter.Close() }
 
+var (
+	// Checkpoint range of Path-based storage scheme of merkle patricia trie.
+	trieAccountBeginByteWise = []byte("A") // which is equal to rawdb.trieNodeAccountPrefix
+	trieAccountEndByteWise   = []byte("B") // A next byte-wise is B
+	trieStorageBeginByteWise = []byte("O") // which is equal to rawdb.trieNodeStoragePrefix
+	trieStorageEndByteWise   = []byte("P") // O next byte-wise is P
+)
+
 func (d *Database) NewCheckpoint(destDir string) error {
-	var opts []pebble.CheckpointOption
-	opt := pebble.WithFlushedWAL()
-	opts = append(opts, opt)
+	var (
+		opts  []pebble.CheckpointOption
+		spans []pebble.CheckpointSpan
+	)
+
+	spans = append(spans, pebble.CheckpointSpan{
+		Start: trieAccountBeginByteWise,
+		End:   trieAccountEndByteWise,
+	})
+	spans = append(spans, pebble.CheckpointSpan{
+		Start: trieStorageBeginByteWise,
+		End:   trieStorageEndByteWise,
+	})
+	opts = append(opts, pebble.WithRestrictToSpans(spans))
+	opts = append(opts, pebble.WithFlushedWAL())
 	return d.db.Checkpoint(destDir, opts...)
 }
 

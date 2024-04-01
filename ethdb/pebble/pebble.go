@@ -674,3 +674,55 @@ func (d *Database) NewCheckpoint(destDir string) error {
 	opts = append(opts, opt)
 	return d.db.Checkpoint(destDir, opts...)
 }
+
+// OpenCheckpointDB returns a wrapped checkpoint pebble DB object. The namespace is the prefix that the
+// metrics reporting should use for surfacing internal stats.
+func OpenCheckpointDB(file string, blockCache *pebble.Cache, tableCache *pebble.TableCache) (*Database, error) {
+	namespace := "checkpoint"
+	logger := log.New(namespace, file)
+	logger.Info("Open checkpoint db", "checkpoint_dir", file)
+
+	db := &Database{
+		fn:       file,
+		log:      logger,
+		quitChan: make(chan chan error),
+	}
+	opt := &pebble.Options{
+		Cache:                    blockCache,
+		TableCache:               tableCache,
+		MaxConcurrentCompactions: func() int { return 1 },
+		ReadOnly:                 true,
+		EventListener: &pebble.EventListener{
+			CompactionBegin: db.onCompactionBegin,
+			CompactionEnd:   db.onCompactionEnd,
+			WriteStallBegin: db.onWriteStallBegin,
+			WriteStallEnd:   db.onWriteStallEnd,
+		},
+		Logger: panicLogger{}, // TODO(karalabe): Delete when this is upstreamed in Pebble
+	}
+
+	// Open the db and recover any potential corruptions
+	innerDB, err := pebble.Open(file, opt)
+	if err != nil {
+		return nil, err
+	}
+	db.db = innerDB
+
+	db.compTimeMeter = metrics.NewRegisteredMeter(namespace+"compact/time", nil)
+	db.compReadMeter = metrics.NewRegisteredMeter(namespace+"compact/input", nil)
+	db.compWriteMeter = metrics.NewRegisteredMeter(namespace+"compact/output", nil)
+	db.diskSizeGauge = metrics.NewRegisteredGauge(namespace+"disk/size", nil)
+	db.diskReadMeter = metrics.NewRegisteredMeter(namespace+"disk/read", nil)
+	db.diskWriteMeter = metrics.NewRegisteredMeter(namespace+"disk/write", nil)
+	db.writeDelayMeter = metrics.NewRegisteredMeter(namespace+"compact/writedelay/duration", nil)
+	db.writeDelayNMeter = metrics.NewRegisteredMeter(namespace+"compact/writedelay/counter", nil)
+	db.memCompGauge = metrics.NewRegisteredGauge(namespace+"compact/memory", nil)
+	db.level0CompGauge = metrics.NewRegisteredGauge(namespace+"compact/level0", nil)
+	db.nonlevel0CompGauge = metrics.NewRegisteredGauge(namespace+"compact/nonlevel0", nil)
+	db.seekCompGauge = metrics.NewRegisteredGauge(namespace+"compact/seek", nil)
+	db.manualMemAllocGauge = metrics.NewRegisteredGauge(namespace+"memory/manualalloc", nil)
+
+	// Start up the metrics gathering and return
+	go db.meter(metricsGatheringInterval, namespace)
+	return db, nil
+}

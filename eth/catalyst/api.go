@@ -409,11 +409,11 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		}
 		api.localBlocks.put(id, payload)
 		forkchoiceUpdateAttributesTimer.UpdateSince(start)
-		log.Info("forkchoiceUpdateAttributes", "duration", common.PrettyDuration(time.Since(start)), "id", id)
+		log.Debug("forkchoiceUpdateAttributesTimer", "duration", common.PrettyDuration(time.Since(start)), "id", id)
 		return valid(&id), nil
 	}
 	forkchoiceUpdateHeadsTimer.UpdateSince(start)
-	log.Info("forkchoiceUpdateHeads", "duration", common.PrettyDuration(time.Since(start)), "hash", update.HeadBlockHash)
+	log.Debug("forkchoiceUpdateAttributesTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", update.HeadBlockHash)
 	return valid(nil), nil
 }
 
@@ -470,7 +470,7 @@ func (api *ConsensusAPI) getPayload(payloadID engine.PayloadID, full bool) (*eng
 	start := time.Now()
 	defer func () {
 		getPayloadTimer.UpdateSince(start)
-		log.Info("getPayload", "duration", common.PrettyDuration(time.Since(start)), "id", payloadID)
+		log.Debug("getPayloadTimer", "duration", common.PrettyDuration(time.Since(start)), "id", payloadID)
 	} ()
 	log.Trace("Engine API request received", "method", "GetPayload", "id", payloadID)
 	data := api.localBlocks.get(payloadID, full)
@@ -529,7 +529,7 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	start := time.Now()
 	defer func () {
 		newPayloadTimer.UpdateSince(start)
-		log.Info("newPayload", "duration", common.PrettyDuration(time.Since(start)), "parentHash", params.ParentHash)
+		log.Debug("newPayloadTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", params.ParentHash)
 	} ()
 
 	// The locking here is, strictly, not required. Without these locks, this can happen:

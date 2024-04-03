@@ -1093,7 +1093,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	start := time.Now()
 	pending := w.eth.TxPool().Pending(true)
 	packFromTxpoolTimer.UpdateSince(start)
-	log.Info("packFromTxpool", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
+	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
 
 	// Split the pending transactions into locals and remotes.
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
@@ -1121,7 +1121,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 		}
 	}
 	commitTxpoolTxsTimer.UpdateSince(start)
-	log.Info("commitTxpoolTxs", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
+	log.Debug("commitTxpoolTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
 	return nil
 }
 
@@ -1160,7 +1160,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		work.tcount++
 	}
 	commitDepositTxsTimer.UpdateSince(start)
-	log.Info("commitDepositTxs", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
+	log.Debug("commitDepositTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	// forced transactions done, fill rest of block with transactions
 	if !genParams.noTxs {
@@ -1193,7 +1193,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		return &newPayloadResult{err: err}
 	}
 	assembleBlockTimer.UpdateSince(start)
-	log.Info("FinalizeAndAssemble", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
+	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	accountReadTimer.Update(work.state.AccountReads)                   // Account reads are complete(in commit txs)
 	storageReadTimer.Update(work.state.StorageReads)                   // Storage reads are complete(in commit txs)
@@ -1206,7 +1206,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 
 	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
 
-	log.Info("build payload statedb metrics",  "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
+	log.Debug("build payload statedb metrics",  "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
 
 	return &newPayloadResult{
 		block:    block,

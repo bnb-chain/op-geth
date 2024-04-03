@@ -483,6 +483,13 @@ func TestNoCommitCrashWithNewSnapshot(t *testing.T) {
 	// Expected head block     : G
 	// Expected snapshot disk  : C4
 	for _, scheme := range []string{rawdb.HashScheme, rawdb.PathScheme} {
+		// in hash scheme ,rewind use snapshot root and the snapshot root block number = 4.
+		// Last committed disk layer, wait recovery
+		snapshotBottom := uint64(4)
+		if scheme == rawdb.PathScheme {
+			// in path scheme, rewind use trie head as disk root and trie head block number = 0.
+			snapshotBottom = 0
+		}
 		test := &crashSnapshotTest{
 			snapshotTestBasic{
 				scheme:             scheme,
@@ -493,7 +500,7 @@ func TestNoCommitCrashWithNewSnapshot(t *testing.T) {
 				expHeadHeader:      8,
 				expHeadFastBlock:   8,
 				expHeadBlock:       0,
-				expSnapshotBottom:  4, // Last committed disk layer, wait recovery
+				expSnapshotBottom:  snapshotBottom,
 			},
 		}
 		test.test(t)

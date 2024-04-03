@@ -192,13 +192,11 @@ func opMulmod(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 func opSHL(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	// Note, second operand is left in the stack; accumulate result into it, and no need to push it afterwards
 	shift, value := scope.Stack.pop(), scope.Stack.peek()
-
 	if shift.LtUint64(256) {
 		value.Lsh(value, uint(shift.Uint64()))
 	} else {
 		value.Clear()
 	}
-
 	return nil, nil
 }
 
@@ -241,13 +239,8 @@ func opKeccak256(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) (
 
 	if interpreter.hasher == nil {
 		interpreter.hasher = crypto.NewKeccakState()
-	} /* else {
-		interpreter.hasher.Reset()
-	}*/
+	}
 	interpreter.hasherBuf = crypto.HashData(interpreter.hasher, data)
-
-	//interpreter.hasher.Write(data)
-	// interpreter.hasher.Read(interpreter.hasherBuf[:])
 
 	evm := interpreter.evm
 	if evm.Config.EnablePreimageRecording {
@@ -367,9 +360,7 @@ func opCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	if overflow {
 		uint64CodeOffset = 0xffffffffffffffff
 	}
-
 	contractRawCode := scope.Contract.Code
-
 	if interpreter.evm.Config.EnableOpcodeOptimizations && scope.Contract.optimized {
 		contractRawCode = interpreter.evm.StateDB.GetCode(*scope.Contract.CodeAddr)
 	}
@@ -555,7 +546,6 @@ func opJumpi(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 		return nil, errStopToken
 	}
 	pos, cond := scope.Stack.pop2()
-
 	if !cond.IsZero() {
 		if !scope.Contract.validJumpdest(&pos) {
 			return nil, ErrInvalidJump
@@ -758,7 +748,6 @@ func opDelegateCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
 
 	ret, returnGas, err := interpreter.evm.DelegateCall(scope.Contract, toAddr, args, gas)
-
 	if err != nil {
 		temp.Clear()
 	} else {
@@ -898,7 +887,6 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	} else {
 		scope.Stack.push(integer.Clear())
 	}
-
 	return nil, nil
 }
 

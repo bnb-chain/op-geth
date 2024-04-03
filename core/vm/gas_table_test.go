@@ -149,6 +149,7 @@ func TestCreateGas(t *testing.T) {
 			if tt.eip3860 {
 				config.ExtraEips = []int{3860}
 			}
+
 			vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, config)
 			var startGas = uint64(testGas)
 			ret, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, startGas, new(big.Int))

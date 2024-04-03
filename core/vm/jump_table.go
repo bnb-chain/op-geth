@@ -174,7 +174,6 @@ func newConstantinopleInstructionSet() JumpTable {
 		maxStack:    maxStack(4, 1),
 		memorySize:  memoryCreate2,
 	}
-
 	return validate(instructionSet)
 }
 

@@ -137,7 +137,6 @@ var (
 	VMOpcodeOptimizeFlag = &cli.BoolFlag{
 		Name:  "vm.opcode.optimize",
 		Usage: "enable opcode optimization",
-		Value: true,
 	}
 )
 

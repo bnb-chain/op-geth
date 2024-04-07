@@ -94,10 +94,7 @@ func (c *Contract) validJumpdest(dest *uint256.Int) bool {
 	if OpCode(c.Code[udest]) != JUMPDEST {
 		return false
 	}
-	if c.isCode(udest) {
-		return true
-	}
-	return false
+	return c.isCode(udest)
 }
 
 // isCode returns true if the provided PC location is an actual opcode, as

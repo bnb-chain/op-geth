@@ -1055,7 +1055,6 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 	VMOpcodeOptimizeFlag = &cli.BoolFlag{
 		Name:     "vm.opcode.optimize",
 		Usage:    "enable opcode optimization",
-		Value:    true,
 		Category: flags.VMCategory,
 	}
 )
@@ -1911,7 +1910,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(VMOpcodeOptimizeFlag.Name) {
 		cfg.EnableOpcodeOptimizing = ctx.Bool(VMOpcodeOptimizeFlag.Name)
-		compiler.EnableOptimization()
+		if cfg.EnableOpcodeOptimizing {
+			compiler.EnableOptimization()
+		}
 	}
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {

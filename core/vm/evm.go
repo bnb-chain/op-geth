@@ -237,16 +237,25 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		if len(code) == 0 {
 			ret, err = nil, nil // gas is unchanged
 		} else {
-			addrCopy := addr
-			contract := NewContract(caller, AccountRef(addrCopy), value, gas)
-			codeHash := evm.StateDB.GetCodeHash(addrCopy)
-			contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
-			// If the account has no code, we can abort here
-			// The depth-check is already done, and precompiles handled above
-			contract.SetCallCode(&addrCopy, codeHash, code)
-
-			ret, err = evm.interpreter.Run(contract, input, false)
-			gas = contract.Gas
+			if evm.Config.EnableOpcodeOptimizations {
+				addrCopy := addr
+				contract := NewContract(caller, AccountRef(addrCopy), value, gas)
+				codeHash := evm.StateDB.GetCodeHash(addrCopy)
+				contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
+				// If the account has no code, we can abort here
+				// The depth-check is already done, and precompiles handled above
+				contract.SetCallCode(&addrCopy, codeHash, code)
+				ret, err = evm.interpreter.Run(contract, input, false)
+				gas = contract.Gas
+			} else {
+				addrCopy := addr
+				contract := NewContract(caller, AccountRef(addrCopy), value, gas)
+				// If the account has no code, we can abort here
+				// The depth-check is already done, and precompiles handled above
+				contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), code)
+				ret, err = evm.interpreter.Run(contract, input, false)
+				gas = contract.Gas
+			}
 		}
 	}
 	// When an error was returned by the EVM or when setting the creation code
@@ -297,16 +306,26 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 	if p, isPrecompile := evm.precompile(addr); isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
 	} else {
-		addrCopy := addr
-		// Initialise a new contract and set the code that is to be used by the EVM.
-		// The contract is a scoped environment for this execution context only.
-		contract := NewContract(caller, AccountRef(caller.Address()), value, gas)
-		code := evm.StateDB.GetCode(addrCopy)
-		codeHash := evm.StateDB.GetCodeHash(addrCopy)
-		contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
-		contract.SetCallCode(&addrCopy, codeHash, code)
-		ret, err = evm.interpreter.Run(contract, input, false)
-		gas = contract.Gas
+		if evm.Config.EnableOpcodeOptimizations {
+			addrCopy := addr
+			// Initialise a new contract and set the code that is to be used by the EVM.
+			// The contract is a scoped environment for this execution context only.
+			contract := NewContract(caller, AccountRef(caller.Address()), value, gas)
+			code := evm.StateDB.GetCode(addrCopy)
+			codeHash := evm.StateDB.GetCodeHash(addrCopy)
+			contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
+			contract.SetCallCode(&addrCopy, codeHash, code)
+			ret, err = evm.interpreter.Run(contract, input, false)
+			gas = contract.Gas
+		} else {
+			addrCopy := addr
+			// Initialise a new contract and set the code that is to be used by the EVM.
+			// The contract is a scoped environment for this execution context only.
+			contract := NewContract(caller, AccountRef(caller.Address()), value, gas)
+			contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), evm.StateDB.GetCode(addrCopy))
+			ret, err = evm.interpreter.Run(contract, input, false)
+			gas = contract.Gas
+		}
 	}
 	if err != nil {
 		evm.StateDB.RevertToSnapshot(snapshot)
@@ -345,15 +364,24 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 	if p, isPrecompile := evm.precompile(addr); isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
 	} else {
-		addrCopy := addr
-		// Initialise a new contract and make initialise the delegate values
-		contract := NewContract(caller, AccountRef(caller.Address()), nil, gas).AsDelegate()
-		code := evm.StateDB.GetCode(addrCopy)
-		codeHash := evm.StateDB.GetCodeHash(addrCopy)
-		contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
-		contract.SetCallCode(&addrCopy, codeHash, code)
-		ret, err = evm.interpreter.Run(contract, input, false)
-		gas = contract.Gas
+		if evm.Config.EnableOpcodeOptimizations {
+			addrCopy := addr
+			// Initialise a new contract and make initialise the delegate values
+			contract := NewContract(caller, AccountRef(caller.Address()), nil, gas).AsDelegate()
+			code := evm.StateDB.GetCode(addrCopy)
+			codeHash := evm.StateDB.GetCodeHash(addrCopy)
+			contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
+			contract.SetCallCode(&addrCopy, codeHash, code)
+			ret, err = evm.interpreter.Run(contract, input, false)
+			gas = contract.Gas
+		} else {
+			addrCopy := addr
+			// Initialise a new contract and make initialise the delegate values
+			contract := NewContract(caller, AccountRef(caller.Address()), nil, gas).AsDelegate()
+			contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), evm.StateDB.GetCode(addrCopy))
+			ret, err = evm.interpreter.Run(contract, input, false)
+			gas = contract.Gas
+		}
 	}
 	if err != nil {
 		evm.StateDB.RevertToSnapshot(snapshot)
@@ -397,22 +425,38 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 	if p, isPrecompile := evm.precompile(addr); isPrecompile {
 		ret, gas, err = RunPrecompiledContract(p, input, gas)
 	} else {
-		// At this point, we use a copy of address. If we don't, the go compiler will
-		// leak the 'contract' to the outer scope, and make allocation for 'contract'
-		// even if the actual execution ends on RunPrecompiled above.
-		addrCopy := addr
-		// Initialise a new contract and set the code that is to be used by the EVM.
-		// The contract is a scoped environment for this execution context only.
-		contract := NewContract(caller, AccountRef(addrCopy), new(big.Int), gas)
-		code := evm.StateDB.GetCode(addrCopy)
-		codeHash := evm.StateDB.GetCodeHash(addrCopy)
-		contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
-		contract.SetCallCode(&addrCopy, codeHash, code)
-		// When an error was returned by the EVM or when setting the creation code
-		// above we revert to the snapshot and consume any gas remaining. Additionally
-		// when we're in Homestead this also counts for code storage gas errors.
-		ret, err = evm.interpreter.Run(contract, input, true)
-		gas = contract.Gas
+		if evm.Config.EnableOpcodeOptimizations {
+			// At this point, we use a copy of address. If we don't, the go compiler will
+			// leak the 'contract' to the outer scope, and make allocation for 'contract'
+			// even if the actual execution ends on RunPrecompiled above.
+			addrCopy := addr
+			// Initialise a new contract and set the code that is to be used by the EVM.
+			// The contract is a scoped environment for this execution context only.
+			contract := NewContract(caller, AccountRef(addrCopy), new(big.Int), gas)
+			code := evm.StateDB.GetCode(addrCopy)
+			codeHash := evm.StateDB.GetCodeHash(addrCopy)
+			contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
+			contract.SetCallCode(&addrCopy, codeHash, code)
+			// When an error was returned by the EVM or when setting the creation code
+			// above we revert to the snapshot and consume any gas remaining. Additionally
+			// when we're in Homestead this also counts for code storage gas errors.
+			ret, err = evm.interpreter.Run(contract, input, true)
+			gas = contract.Gas
+		} else {
+			// At this point, we use a copy of address. If we don't, the go compiler will
+			// leak the 'contract' to the outer scope, and make allocation for 'contract'
+			// even if the actual execution ends on RunPrecompiled above.
+			addrCopy := addr
+			// Initialise a new contract and set the code that is to be used by the EVM.
+			// The contract is a scoped environment for this execution context only.
+			contract := NewContract(caller, AccountRef(addrCopy), new(big.Int), gas)
+			contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), evm.StateDB.GetCode(addrCopy))
+			// When an error was returned by the EVM or when setting the creation code
+			// above we revert to the snapshot and consume any gas remaining. Additionally
+			// when we're in Homestead this also counts for code storage gas errors.
+			ret, err = evm.interpreter.Run(contract, input, true)
+			gas = contract.Gas
+		}
 	}
 	if err != nil {
 		evm.StateDB.RevertToSnapshot(snapshot)
@@ -427,14 +471,12 @@ func tryGetOptimizedCode(evm *EVM, codeHash common.Hash, rawCode []byte) (bool, 
 	var code []byte
 	optimized := false
 	code = rawCode
-	if evm.Config.EnableOpcodeOptimizations {
-		optCode := compiler.LoadOptimizedCode(codeHash)
-		if len(optCode) != 0 {
-			code = optCode
-			optimized = true
-		} else {
-			compiler.GenOrLoadOptimizedCode(codeHash, rawCode)
-		}
+	optCode := compiler.LoadOptimizedCode(codeHash)
+	if len(optCode) != 0 {
+		code = optCode
+		optimized = true
+	} else {
+		compiler.GenOrLoadOptimizedCode(codeHash, rawCode)
 	}
 	return optimized, code
 }

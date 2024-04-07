@@ -239,19 +239,19 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		} else {
 			if evm.Config.EnableOpcodeOptimizations {
 				addrCopy := addr
+				// If the account has no code, we can abort here
+				// The depth-check is already done, and precompiles handled above
 				contract := NewContract(caller, AccountRef(addrCopy), value, gas)
 				codeHash := evm.StateDB.GetCodeHash(addrCopy)
 				contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
-				// If the account has no code, we can abort here
-				// The depth-check is already done, and precompiles handled above
 				contract.SetCallCode(&addrCopy, codeHash, code)
 				ret, err = evm.interpreter.Run(contract, input, false)
 				gas = contract.Gas
 			} else {
 				addrCopy := addr
-				contract := NewContract(caller, AccountRef(addrCopy), value, gas)
 				// If the account has no code, we can abort here
 				// The depth-check is already done, and precompiles handled above
+				contract := NewContract(caller, AccountRef(addrCopy), value, gas)
 				contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), code)
 				ret, err = evm.interpreter.Run(contract, input, false)
 				gas = contract.Gas

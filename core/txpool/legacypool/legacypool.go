@@ -1430,12 +1430,16 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) (demoteAddrs []com
 	var collectAddr = func(txs types.Transactions) {
 		addrs := make(map[common.Address]struct{})
 		for _, tx := range txs {
+			if !pool.Filter(tx) {
+				continue
+			}
+			// it is heavy to get sender from tx, so we try to get it from the pool
+			if oldtx := pool.all.Get(tx.Hash()); oldtx != nil {
+				tx = oldtx
+			}
 			addr, err := types.Sender(pool.signer, tx)
 			//it might come from other pool, by other signer
 			if err != nil {
-				continue
-			}
-			if !pool.Filter(tx) {
 				continue
 			}
 			addrs[addr] = struct{}{}

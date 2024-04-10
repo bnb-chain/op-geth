@@ -81,6 +81,8 @@ func HashData(kh KeccakState, data []byte) (h common.Hash) {
 
 // Keccak256 calculates and returns the Keccak256 hash of the input data.
 func Keccak256(data ...[]byte) []byte {
+	// Only visit cache when input contains only one []byte to reduce cache overhead
+	// and avoid complexity of cache calculation.
 	if len(data) == 1 {
 		if hash, ok := keccakState256Cache.HasGet(nil, data[0]); ok {
 			return hash
@@ -101,6 +103,8 @@ func Keccak256(data ...[]byte) []byte {
 // Keccak256Hash calculates and returns the Keccak256 hash of the input data,
 // converting it to an internal Hash data structure.
 func Keccak256Hash(data ...[]byte) (h common.Hash) {
+	// Only visit cache when input contains only one []byte to reduce cache overhead
+	// and avoid complexity of cache calculation.
 	if len(data) == 1 {
 		if hash, ok := keccakState256Cache.HasGet(nil, data[0]); ok {
 			return common.BytesToHash(hash)

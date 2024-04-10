@@ -24,12 +24,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/VictoriaMetrics/fastcache"
 	"hash"
 	"io"
 	"math/big"
 	"os"
 
+	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/rlp"

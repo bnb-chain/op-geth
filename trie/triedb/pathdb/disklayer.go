@@ -86,22 +86,22 @@ type trienodebuffer interface {
 type NodeBufferType int32
 
 const (
-	NodeBufferList  NodeBufferType = 0
-	AsyncNodeBuffer NodeBufferType = 1
-	SyncNodeBuffer  NodeBufferType = 2
+	AsyncNodeBuffer NodeBufferType = 0
+	SyncNodeBuffer  NodeBufferType = 1
+	NodeBufferList  NodeBufferType = 2
 )
 
 var (
 	nodeBufferStringToType = map[string]NodeBufferType{
-		"list":  NodeBufferList,
 		"async": AsyncNodeBuffer,
 		"sync":  SyncNodeBuffer,
+		"list":  NodeBufferList,
 	}
 
 	nodeBufferTypeToString = map[NodeBufferType]string{
-		NodeBufferList:  "list",
 		AsyncNodeBuffer: "async",
 		SyncNodeBuffer:  "sync",
+		NodeBufferList:  "list",
 	}
 )
 

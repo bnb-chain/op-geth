@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"math"
 	"math/big"
 	"net"
@@ -1056,6 +1057,12 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Value:    metrics.DefaultConfig.InfluxDBOrganization,
 		Category: flags.MetricsCategory,
 	}
+
+	VMOpcodeOptimizeFlag = &cli.BoolFlag{
+		Name:     "vm.opcode.optimize",
+		Usage:    "enable opcode optimization",
+		Category: flags.VMCategory,
+	}
 )
 
 var (
@@ -1910,6 +1917,13 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.EnablePreimageRecording = ctx.Bool(VMEnableDebugFlag.Name)
 	}
 
+	if ctx.IsSet(VMOpcodeOptimizeFlag.Name) {
+		cfg.EnableOpcodeOptimizing = ctx.Bool(VMOpcodeOptimizeFlag.Name)
+		if cfg.EnableOpcodeOptimizing {
+			compiler.EnableOptimization()
+		}
+	}
+
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
 	}
@@ -2396,8 +2410,12 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readonly bool) (*core.BlockCh
 	if ctx.IsSet(CacheFlag.Name) || ctx.IsSet(CacheGCFlag.Name) {
 		cache.TrieDirtyLimit = ctx.Int(CacheFlag.Name) * ctx.Int(CacheGCFlag.Name) / 100
 	}
-	vmcfg := vm.Config{EnablePreimageRecording: ctx.Bool(VMEnableDebugFlag.Name)}
+	vmcfg := vm.Config{EnablePreimageRecording: ctx.Bool(VMEnableDebugFlag.Name),
+		EnableOpcodeOptimizations: ctx.Bool(VMOpcodeOptimizeFlag.Name)}
 
+	if vmcfg.EnableOpcodeOptimizations {
+		compiler.EnableOptimization()
+	}
 	// Disable transaction indexing/unindexing by default.
 	chain, err := core.NewBlockChain(chainDb, cache, gspec, nil, engine, vmcfg, nil, nil)
 	if err != nil {

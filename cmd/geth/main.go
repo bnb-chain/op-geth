@@ -158,6 +158,7 @@ var (
 		utils.RollupHaltOnIncompatibleProtocolVersionFlag,
 		utils.RollupSuperchainUpgradesFlag,
 		configFileFlag,
+		utils.VMOpcodeOptimizeFlag,
 	}, utils.NetworkFlags, utils.DatabaseFlags)
 
 	rpcFlags = []cli.Flag{

@@ -419,9 +419,6 @@ func (db *Database) Close() error {
 	// Release the memory held by clean cache.
 	db.tree.bottom().resetCache()
 
-	// Release trienodebuffer resource
-	db.tree.bottom().buffer.waitAndStopFlushing()
-
 	// Close the attached state history freezer.
 	if db.freezer == nil {
 		return nil

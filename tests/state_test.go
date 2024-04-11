@@ -224,7 +224,10 @@ func runBenchmark(b *testing.B, t *StateTest) {
 			vmconfig.ExtraEips = eips
 			block := t.genesis(config).ToBlock()
 			triedb, _, statedb := MakePreState(rawdb.NewMemoryDatabase(), t.json.Pre, false, rawdb.HashScheme)
-			defer triedb.Close()
+			defer func() {
+				triedb.Journal(triedb.Head())
+				triedb.Close()
+			}()
 
 			var baseFee *big.Int
 			if rules.IsLondon {

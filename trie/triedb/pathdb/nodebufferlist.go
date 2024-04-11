@@ -335,17 +335,7 @@ func (nf *nodebufferlist) getLayers() uint64 {
 
 // waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
 func (nf *nodebufferlist) waitAndStopFlushing() {
-	nf.mux.Lock()
-	nf.baseMux.Lock()
-	nf.flushMux.Lock()
-	defer nf.mux.Unlock()
-	defer nf.baseMux.Unlock()
-	defer nf.flushMux.Unlock()
-
-	if nf.stopCh != nil {
-		close(nf.stopCh)
-		nf.stopCh = nil
-	}
+	close(nf.stopCh)
 	nf.stopFlushing.Store(true)
 	for nf.isFlushing.Load() {
 		time.Sleep(time.Second)

@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -81,6 +82,17 @@ var (
 	errBlockInterruptedByRecommit = errors.New("recommit interrupt while building block")
 	errBlockInterruptedByTimeout  = errors.New("timeout while building block")
 	errBlockInterruptedByResolve  = errors.New("payload resolution while building block")
+)
+
+var (
+	txTotalMeter               = metrics.NewRegisteredMeter("miner/tx/total", nil)
+	txSuccMeter                = metrics.NewRegisteredMeter("miner/tx/succ", nil)
+	txErrUnknownMeter          = metrics.NewRegisteredMeter("miner/tx/unknown", nil)
+	txErrNoncetoolowMeter      = metrics.NewRegisteredMeter("miner/tx/err/noncetoolow", nil)
+	txErrNotenoughgasMeter     = metrics.NewRegisteredMeter("miner/tx/err/notenoughgas", nil)
+	txErrNotenoughblobgasMeter = metrics.NewRegisteredMeter("miner/tx/err/notenoughblobgas", nil)
+	txErrEvitedMeter           = metrics.NewRegisteredMeter("miner/tx/evited", nil)
+	txErrReplayMeter           = metrics.NewRegisteredMeter("miner/tx/replay", nil)
 )
 
 // environment is the worker's current environment and holds all
@@ -871,15 +883,18 @@ func (w *worker) commitTransactions(env *environment, txs *transactionsByPriceAn
 		if ltx == nil {
 			break
 		}
+		txTotalMeter.Mark(1)
 		// If we don't have enough space for the next transaction, skip the account.
 		if env.gasPool.Gas() < ltx.Gas {
 			log.Trace("Not enough gas left for transaction", "hash", ltx.Hash, "left", env.gasPool.Gas(), "needed", ltx.Gas)
 			txs.Pop()
+			txErrNotenoughgasMeter.Mark(1)
 			continue
 		}
 		if left := uint64(params.MaxBlobGasPerBlock - env.blobs*params.BlobTxBlobGasPerBlob); left < ltx.BlobGas {
 			log.Trace("Not enough blob gas left for transaction", "hash", ltx.Hash, "left", left, "needed", ltx.BlobGas)
 			txs.Pop()
+			txErrNotenoughblobgasMeter.Mark(1)
 			continue
 		}
 		// Transaction seems to fit, pull it up from the pool
@@ -887,6 +902,7 @@ func (w *worker) commitTransactions(env *environment, txs *transactionsByPriceAn
 		if tx == nil {
 			log.Trace("Ignoring evicted transaction", "hash", ltx.Hash)
 			txs.Pop()
+			txErrEvitedMeter.Mark(1)
 			continue
 		}
 		// Error may be ignored here. The error has already been checked
@@ -898,6 +914,7 @@ func (w *worker) commitTransactions(env *environment, txs *transactionsByPriceAn
 		if tx.Protected() && !w.chainConfig.IsEIP155(env.header.Number) {
 			log.Trace("Ignoring replay protected transaction", "hash", ltx.Hash, "eip155", w.chainConfig.EIP155Block)
 			txs.Pop()
+			txErrReplayMeter.Mark(1)
 			continue
 		}
 		// Start executing the transaction
@@ -909,18 +926,21 @@ func (w *worker) commitTransactions(env *environment, txs *transactionsByPriceAn
 			// New head notification data race between the transaction pool and miner, shift
 			log.Trace("Skipping transaction with low nonce", "hash", ltx.Hash, "sender", from, "nonce", tx.Nonce())
 			txs.Shift()
+			txErrNoncetoolowMeter.Mark(1)
 
 		case errors.Is(err, nil):
 			// Everything ok, collect the logs and shift in the next transaction from the same account
 			coalescedLogs = append(coalescedLogs, logs...)
 			env.tcount++
 			txs.Shift()
+			txSuccMeter.Mark(1)
 
 		default:
 			// Transaction is regarded as invalid, drop all consecutive transactions from
 			// the same sender because of `nonce-too-high` clause.
 			log.Debug("Transaction failed, account skipped", "hash", ltx.Hash, "err", err)
 			txs.Pop()
+			txErrUnknownMeter.Mark(1)
 		}
 	}
 	if !w.isRunning() && len(coalescedLogs) > 0 {

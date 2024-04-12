@@ -5,7 +5,7 @@ footer: |
 base:
   name: go-ethereum
   url: https://github.com/ethereum/go-ethereum
-  hash: 3f907d6a6f6de09cff1360ed529126765939851d  # v1.13.4
+  hash: b20b4a71598481443d60b261d3e5dcb37f8a0d82  # v1.13.8
 fork:
   name: op-geth
   url: https://github.com/ethereum-optimism/op-geth
@@ -80,8 +80,18 @@ def:
               description: |
                 The Engine API is activated at the Merge transition, with a Total Terminal Difficulty (TTD).
                 The rollup starts post-merge, and thus sets the TTD to 0.
+                The TTD is always "reached" starting at the bedrock block.
               globs:
                 - "consensus/beacon/consensus.go"
+            - title: "Legacy OP-mainnet / OP-goerli header-verification support"
+              description: |
+                Pre-Bedrock OP-mainnet and OP-Goerli had differently formatted block-headers, loosely compatible with the geth types (since it was based on Clique).
+                However, due to differences like the extra-data length (97+ bytes), these legacy block-headers need special verification.
+                The pre-merge "consensus" fallback is set to this custom but basic verifier, to accept these headers when syncing a pre-bedrock part of the chain,
+                independent of any clique code or configuration (which may be removed from geth at a later point).
+                All the custom verifier has to do is accept the headers, as the headers are already verified by block-hash through the reverse-header-sync.
+              globs:
+                - "consensus/beacon/oplegacy.go"
         - title: "Engine API modifications"
           description: |
             The Engine API is extended to insert transactions into the block and optionally exclude the tx-pool,
@@ -169,6 +179,12 @@ def:
           globs:
             - "core/blockchain_reader.go"
             - "eth/protocols/snap/handler.go"
+        - title: Historical data for Snap-sync
+          description: Snap-sync has access to trusted Deposit Transaction Nonce Data.
+          globs:
+            - "eth/handler.go"
+            - "eth/downloader/downloader.go"
+            - "eth/downloader/receiptreference.go"
         - title: Discv5 node discovery
           description: Fix discv5 option to allow discv5 to be an active source for node-discovery.
           globs:
@@ -206,10 +222,6 @@ def:
           description: Forward pre-bedrock tracing calls to legacy node.
           globs:
             - "eth/tracers/api.go"
-        - title: "Light Ethereum Subprotocol (LES) RPC"
-          description: Match the RPC changes in the LES RPC
-          globs:
-            - "les/*"
         - title: "Daisy Chain tests"
           globs:
             - "internal/ethapi/transaction_args_test.go"
@@ -236,6 +248,13 @@ def:
         - title: Simulated Backend
           globs:
             - "accounts/abi/bind/backends/simulated.go"
+    - title: "Hardware wallet support"
+      description: Extend Ledger wallet support for newer devices on Macos
+      sub:
+        - title: Fix Ledger discoverability
+          # upstream PR: https://github.com/ethereum/go-ethereum/pull/28863/
+          globs:
+            - "accounts/usbwallet/hub.go"
 
 # ignored globally, does not count towards line count
 ignore:

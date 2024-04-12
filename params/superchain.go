@@ -11,7 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-var OPStackSupport = ProtocolVersionV0{Build: [8]byte{}, Major: 4, Minor: 0, Patch: 0, PreRelease: 1}.Encode()
+var OPStackSupport = ProtocolVersionV0{Build: [8]byte{}, Major: 6, Minor: 0, Patch: 0, PreRelease: 0}.Encode()
 
 func init() {
 	for id, ch := range superchain.OPChains {
@@ -65,12 +65,13 @@ func LoadOPStackChainConfig(chainID uint64) (*ChainConfig, error) {
 		ArrowGlacierBlock:             common.Big0,
 		GrayGlacierBlock:              common.Big0,
 		MergeNetsplitBlock:            common.Big0,
-		ShanghaiTime:                  superchainConfig.Config.CanyonTime, // Shanghai activates with Canyon
-		CancunTime:                    nil,
+		ShanghaiTime:                  superchainConfig.Config.CanyonTime,  // Shanghai activates with Canyon
+		CancunTime:                    superchainConfig.Config.EcotoneTime, // Cancun activates with Ecotone
 		PragueTime:                    nil,
 		BedrockBlock:                  common.Big0,
 		RegolithTime:                  &genesisActivation,
 		CanyonTime:                    superchainConfig.Config.CanyonTime,
+		EcotoneTime:                   superchainConfig.Config.EcotoneTime,
 		TerminalTotalDifficulty:       common.Big0,
 		TerminalTotalDifficultyPassed: true,
 		Ethash:                        nil,

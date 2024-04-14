@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/cmd/utils"
@@ -37,17 +39,18 @@ import (
 
 func main() {
 	var (
-		listenAddr  = flag.String("addr", ":30301", "listen address")
-		genKey      = flag.String("genkey", "", "generate a node key")
-		writeAddr   = flag.Bool("writeaddress", false, "write out the node's public key and quit")
-		nodeKeyFile = flag.String("nodekey", "", "private key filename")
-		nodeKeyHex  = flag.String("nodekeyhex", "", "private key as hex (for testing)")
-		natdesc     = flag.String("nat", "none", "port mapping mechanism (any|none|upnp|pmp|pmp:<IP>|extip:<IP>)")
-		netrestrict = flag.String("netrestrict", "", "restrict network communication to the given IP networks (CIDR masks)")
-		runv5       = flag.Bool("v5", false, "run a v5 topic discovery bootnode")
-		verbosity   = flag.Int("verbosity", int(log.LvlInfo), "log verbosity (0-5)")
-		vmodule     = flag.String("logvmodule", "", "log verbosity pattern")
-		network     = flag.String("network", "", "testnet/mainnet")
+		listenAddr     = flag.String("addr", ":30301", "listen address")
+		genKey         = flag.String("genkey", "", "generate a node key")
+		writeAddr      = flag.Bool("writeaddress", false, "write out the node's public key and quit")
+		nodeKeyFile    = flag.String("nodekey", "", "private key filename")
+		nodeKeyHex     = flag.String("nodekeyhex", "", "private key as hex (for testing)")
+		natdesc        = flag.String("nat", "none", "port mapping mechanism (any|none|upnp|pmp|pmp:<IP>|extip:<IP>)")
+		netrestrict    = flag.String("netrestrict", "", "restrict network communication to the given IP networks (CIDR masks)")
+		runv5          = flag.Bool("v5", false, "run a v5 topic discovery bootnode")
+		verbosity      = flag.Int("verbosity", int(log.LvlInfo), "log verbosity (0-5)")
+		vmodule        = flag.String("logvmodule", "", "log verbosity pattern")
+		network        = flag.String("network", "", "testnet/mainnet")
+		staticP2pNodes = flag.String("staticnodes", "", "static p2p nodes for discovery")
 
 		nodeKey *ecdsa.PrivateKey
 		err     error
@@ -92,10 +95,17 @@ func main() {
 		}
 	}
 
-	if *network == "testnet" {
-		staticV4Nodes = staticV4NodesTestnet
+	if *staticP2pNodes == "" {
+		if *network == "testnet" {
+			staticV4Nodes = staticV4NodesTestnet
+		} else {
+			staticV4Nodes = staticV4NodesMainnet
+		}
 	} else {
-		staticV4Nodes = staticV4NodesMainnet
+		parsedNodes, err := parseStaticNodes(*staticP2pNodes)
+		if err == nil {
+			staticV4Nodes = parsedNodes
+		}
 	}
 
 	if *writeAddr {
@@ -217,4 +227,61 @@ func doPortMapping(natm nat.Interface, ln *enode.LocalNode, addr *net.UDPAddr) *
 	}()
 
 	return extaddr
+}
+
+// parseStaticNodes parses a comma-separated list of node URLs into a slice of Node structs.
+func parseStaticNodes(nodeList string) ([]v4wire.Node, error) {
+	nodes := strings.Split(nodeList, ",")
+	var result []v4wire.Node
+
+	for _, node := range nodes {
+		// Trim spaces that might surround the node entry
+		node = strings.TrimSpace(node)
+		if node == "" {
+			continue
+		}
+
+		// Parse the node URL
+		if !strings.HasPrefix(node, "enode://") {
+			return nil, fmt.Errorf("parse error: node does not start with 'enode://'")
+		}
+
+		// Separate the node ID from the IP and port
+		atPos := strings.Index(node, "@")
+		if atPos == -1 {
+			return nil, fmt.Errorf("parse error: '@' not found in node string")
+		}
+
+		idPart := node[8:atPos] // skip "enode://"
+		ipPortPart := node[atPos+1:]
+
+		colonPos := strings.LastIndex(ipPortPart, ":")
+		if colonPos == -1 {
+			return nil, fmt.Errorf("parse error: ':' not found in IP:port part")
+		}
+
+		ipStr := ipPortPart[:colonPos]
+		portStr := ipPortPart[colonPos+1:]
+
+		port, err := strconv.ParseUint(portStr, 10, 16)
+		if err != nil {
+			return nil, fmt.Errorf("parse error: invalid port number")
+		}
+
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			return nil, fmt.Errorf("parse error: invalid IP address")
+		}
+
+		nodeStruct := v4wire.Node{
+			IP:  ip,
+			UDP: uint16(port),
+			TCP: uint16(port),
+			ID:  decodePubkeyV4(idPart),
+		}
+
+		result = append(result, nodeStruct)
+	}
+
+	return result, nil
 }

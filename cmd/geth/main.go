@@ -101,6 +101,8 @@ var (
 		utils.LightNoPruneFlag,
 		utils.LightKDFFlag,
 		utils.LightNoSyncServeFlag,
+		utils.PathDBSyncFlag,
+		utils.JournalFileFlag,
 		utils.EthRequiredBlocksFlag,
 		utils.LegacyWhitelistFlag,
 		utils.BloomFilterSizeFlag,

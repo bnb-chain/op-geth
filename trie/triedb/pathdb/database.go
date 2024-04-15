@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -94,11 +95,13 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
-	SyncFlush      bool   // Flag of trienodebuffer sync flush cache to disk
-	StateHistory   uint64 // Number of recent blocks to maintain state history for
-	CleanCacheSize int    // Maximum memory allowance (in bytes) for caching clean nodes
-	DirtyCacheSize int    // Maximum memory allowance (in bytes) for caching dirty nodes
-	ReadOnly       bool   // Flag whether the database is opened in read only mode.
+	SyncFlush       bool   // Flag of trienodebuffer sync flush cache to disk
+	StateHistory    uint64 // Number of recent blocks to maintain state history for
+	CleanCacheSize  int    // Maximum memory allowance (in bytes) for caching clean nodes
+	DirtyCacheSize  int    // Maximum memory allowance (in bytes) for caching dirty nodes
+	ReadOnly        bool   // Flag whether the database is opened in read only mode.
+	NoTries         bool
+	JournalFilePath string
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -296,7 +299,7 @@ func (db *Database) Enable(root common.Hash) error {
 	// Drop the stale state journal in persistent database and
 	// reset the persistent state id back to zero.
 	batch := db.diskdb.NewBatch()
-	rawdb.DeleteTrieJournal(batch)
+	db.DeleteTrieJournal(batch)
 	rawdb.WritePersistentStateID(batch, 0)
 	if err := batch.Write(); err != nil {
 		return err
@@ -359,7 +362,7 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		// disk layer won't be accessible from outside.
 		db.tree.reset(dl)
 	}
-	rawdb.DeleteTrieJournal(db.diskdb)
+	db.DeleteTrieJournal(db.diskdb)
 	_, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
 	if err != nil {
 		return err
@@ -476,6 +479,23 @@ func (db *Database) modifyAllowed() error {
 	}
 	if db.waitSync {
 		return errDatabaseWaitSync
+	}
+	return nil
+}
+
+func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {
+	filePath := db.config.JournalFilePath
+	if len(filePath) == 0 {
+		rawdb.DeleteTrieJournal(writer)
+	} else {
+		_, err := os.Stat(filePath)
+		if os.IsNotExist(err) {
+			return err
+		}
+		errRemove := os.Remove(filePath)
+		if errRemove != nil {
+			log.Crit("Failed to remove tries journal", "journal path", filePath, "err", err)
+		}
 	}
 	return nil
 }

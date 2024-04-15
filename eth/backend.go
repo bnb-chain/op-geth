@@ -60,6 +60,12 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
+const (
+	ChainDBNamespace = "eth/db/chaindata/"
+	JournalFileName  = "trie.journal"
+	ChainData        = "chaindata"
+)
+
 // Config contains the configuration options of the ETH protocol.
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
@@ -123,7 +129,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Warn("Sanitizing invalid miner gas price", "provided", config.Miner.GasPrice, "updated", ethconfig.Defaults.Miner.GasPrice)
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
-	if config.NoPruning && config.TrieDirtyCache > 0 {
+	if config.StateScheme == rawdb.HashScheme && config.NoPruning && config.TrieDirtyCache > 0 {
 		if config.SnapshotCache > 0 {
 			config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
 			config.SnapshotCache += config.TrieDirtyCache * 2 / 5
@@ -135,7 +141,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
 
 	// Assemble the Ethereum object
-	chainDb, err := stack.OpenDatabaseWithFreezer("chaindata", config.DatabaseCache, config.DatabaseHandles, config.DatabaseFreezer, "eth/db/chaindata/", false)
+	chainDb, err := stack.OpenDatabaseWithFreezer(ChainData, config.DatabaseCache, config.DatabaseHandles,
+		config.DatabaseFreezer, ChainDBNamespace, false)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +199,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 	var (
+		journalFilePath string
+		path            string
+	)
+	if config.JournalFileEnabled {
+		path = ChainData
+		journalFilePath = stack.ResolvePath(path) + "/" + JournalFileName
+	}
+	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
 		}
@@ -207,6 +222,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			StateScheme:         scheme,
 			TrieCommitInterval:  config.TrieCommitInterval,
 			PathSyncFlush:       config.PathSyncFlush,
+			JournalFilePath:     journalFilePath,
 		}
 	)
 	// Override the chain config with provided settings.

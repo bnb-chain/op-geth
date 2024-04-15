@@ -130,6 +130,7 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger) er
 	if err != nil {
 		return err
 	}
+	triedb.Journal(triedb.Head())
 	triedb.Close() // close the db to prevent memory leak
 
 	if gblock.Hash() != t.json.Genesis.Hash {

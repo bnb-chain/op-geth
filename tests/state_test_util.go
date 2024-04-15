@@ -198,6 +198,7 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config, snapshotter bo
 		postCheck(result, snaps, statedb)
 
 		if triedb != nil {
+			triedb.Journal(triedb.Head())
 			triedb.Close()
 		}
 	}()
@@ -247,6 +248,7 @@ func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapsh
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post, baseFee)
 	if err != nil {
+		triedb.Journal(triedb.Head())
 		triedb.Close()
 		return nil, nil, nil, common.Hash{}, err
 	}
@@ -256,11 +258,13 @@ func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapsh
 		var ttx types.Transaction
 		err := ttx.UnmarshalBinary(post.TxBytes)
 		if err != nil {
+			triedb.Journal(triedb.Head())
 			triedb.Close()
 			return nil, nil, nil, common.Hash{}, err
 		}
 
 		if _, err := types.Sender(types.LatestSigner(config), &ttx); err != nil {
+			triedb.Journal(triedb.Head())
 			triedb.Close()
 			return nil, nil, nil, common.Hash{}, err
 		}

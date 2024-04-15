@@ -43,7 +43,7 @@ type trienodebuffer interface {
 	// the ownership of the nodes map which belongs to the bottom-most diff layer.
 	// It will just hold the node references from the given map which are safe to
 	// copy.
-	commit(nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer
+	commit(root common.Hash, id uint64, block uint64, nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer
 
 	// revert is the reverse operation of commit. It also merges the provided nodes
 	// into the trienodebuffer, the difference is that the provided node set should
@@ -75,15 +75,56 @@ type trienodebuffer interface {
 
 	// waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
 	waitAndStopFlushing()
+
+	// setClean set fastcache to trienodebuffer for cache the trie nodes, used for nodebufferlist.
+	setClean(clean *fastcache.Cache)
+
+	// proposedBlockReader return the world state Reader of block that is proposed to L1.
+	proposedBlockReader(blockRoot common.Hash) (layer, error)
 }
 
-func NewTrieNodeBuffer(sync bool, limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) trienodebuffer {
-	if sync {
-		log.Info("New sync node buffer", "limit", common.StorageSize(limit), "layers", layers)
-		return newNodeBuffer(limit, nodes, layers)
+type NodeBufferType int32
+
+const (
+	AsyncNodeBuffer NodeBufferType = 0
+	SyncNodeBuffer  NodeBufferType = 1
+	NodeBufferList  NodeBufferType = 2
+)
+
+var (
+	nodeBufferStringToType = map[string]NodeBufferType{
+		"async": AsyncNodeBuffer,
+		"sync":  SyncNodeBuffer,
+		"list":  NodeBufferList,
 	}
-	log.Info("New async node buffer", "limit", common.StorageSize(limit), "layers", layers)
-	return newAsyncNodeBuffer(limit, nodes, layers)
+
+	nodeBufferTypeToString = map[NodeBufferType]string{
+		AsyncNodeBuffer: "async",
+		SyncNodeBuffer:  "sync",
+		NodeBufferList:  "list",
+	}
+)
+
+func GetNodeBufferType(name string) NodeBufferType {
+	if _, ok := nodeBufferStringToType[name]; !ok {
+		log.Warn("node buffer type mismatch", "provide", name, "adjust to default", nodeBufferTypeToString[NodeBufferList])
+		return NodeBufferList
+	}
+	return nodeBufferStringToType[name]
+}
+
+func NewTrieNodeBuffer(db ethdb.Database, trieNodeBufferType NodeBufferType, limit int, nodes map[common.Hash]map[string]*trienode.Node, layers, proposeBlockInterval uint64) trienodebuffer {
+	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
+	switch trieNodeBufferType {
+	case NodeBufferList:
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval)
+	case AsyncNodeBuffer:
+		return newAsyncNodeBuffer(limit, nodes, layers)
+	case SyncNodeBuffer:
+		return newNodeBuffer(limit, nodes, layers)
+	default:
+		return newAsyncNodeBuffer(limit, nodes, layers)
+	}
 }
 
 // diskLayer is a low level persistent layer built on top of a key-value store.
@@ -253,7 +294,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	// diff layer, and flush the content in disk layer if there are too
 	// many nodes cached. The clean cache is inherited from the original
 	// disk layer for reusing.
-	ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer.commit(bottom.nodes))
+	ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer.commit(bottom.root, bottom.id, bottom.block, bottom.nodes))
 	err := ndl.buffer.flush(ndl.db.diskdb, ndl.cleans, ndl.id, force)
 	if err != nil {
 		return nil, err

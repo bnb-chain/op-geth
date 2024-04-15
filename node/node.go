@@ -73,6 +73,8 @@ const (
 	closedState
 )
 
+const StateDBNamespace = "eth/db/statedata/"
+
 // New creates a new P2P node, ready for protocol registration.
 func New(conf *Config) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current

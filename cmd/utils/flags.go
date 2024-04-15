@@ -340,6 +340,12 @@ var (
 		Value:    params.FullImmutabilityThreshold,
 		Category: flags.StateCategory,
 	}
+	JournalFileFlag = &cli.BoolFlag{
+		Name:     "journalfile",
+		Usage:    "Enable using journal file to store the TrieJournal instead of KVDB in pbss (default = false)",
+		Value:    false,
+		Category: flags.StateCategory,
+	}
 	StateHistoryFlag = &cli.Uint64Flag{
 		Name:     "history.state",
 		Usage:    "Number of recent blocks to retain state history for (default = 90,000 blocks, 0 = entire chain)",
@@ -1878,6 +1884,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.IsSet(KeepProofBlockSpanFlag.Name) {
 		cfg.KeepProofBlockSpan = ctx.Uint64(KeepProofBlockSpanFlag.Name)
 	}
+	if ctx.IsSet(JournalFileFlag.Name) {
+		cfg.JournalFileEnabled = true
+	}
+
 	if ctx.String(GCModeFlag.Name) == "archive" && cfg.TransactionHistory != 0 {
 		cfg.TransactionHistory = 0
 		log.Warn("Disabled transaction unindexing for archive node")

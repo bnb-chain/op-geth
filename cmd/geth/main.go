@@ -100,6 +100,7 @@ var (
 		utils.PathDBNodeBufferTypeFlag,
 		utils.EnableProofKeeperFlag,
 		utils.KeepProofBlockSpanFlag,
+		utils.JournalFileFlag,
 		utils.LightServeFlag,    // deprecated
 		utils.LightIngressFlag,  // deprecated
 		utils.LightEgressFlag,   // deprecated

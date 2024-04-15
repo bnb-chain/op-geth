@@ -105,6 +105,8 @@ func main() {
 		parsedNodes, err := parseStaticNodes(*staticP2pNodes)
 		if err == nil {
 			staticV4Nodes = parsedNodes
+		} else {
+			utils.Fatalf("-staticnodes: %v", err)
 		}
 	}
 

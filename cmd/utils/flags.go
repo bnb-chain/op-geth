@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"math"
 	"math/big"
 	"net"
@@ -34,6 +33,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -930,7 +931,7 @@ var (
 		Aliases:  []string{"beta.rollup.superchain-upgrades"},
 		Usage:    "Apply superchain-registry config changes to the local chain-configuration",
 		Category: flags.RollupCategory,
-		Value:    true,
+		Value:    false,
 	}
 
 	// Metrics flags

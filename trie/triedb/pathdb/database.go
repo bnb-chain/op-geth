@@ -90,7 +90,7 @@ type layer interface {
 	// journal commits an entire diff hierarchy to disk into a single journal entry.
 	// This is meant to be used during shutdown to persist the layer without
 	// flattening everything down (bad for reorgs).
-	journal(w io.Writer) error
+	journal(w io.Writer, journalFile bool) error
 }
 
 // Config contains the settings for database.
@@ -481,6 +481,10 @@ func (db *Database) modifyAllowed() error {
 		return errDatabaseWaitSync
 	}
 	return nil
+}
+
+func (db *Database) IsEnableJournalFile() bool {
+	return len(db.config.JournalFilePath) != 0
 }
 
 func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {

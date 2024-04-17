@@ -100,6 +100,8 @@ type Config struct {
 	DirtyCacheSize       int            // Maximum memory allowance (in bytes) for caching dirty nodes
 	ReadOnly             bool           // Flag whether the database is opened in read only mode.
 	ProposeBlockInterval uint64         // Propose block to L1 block interval.
+	KeepCh               chan *KeepRecord
+	WaitKeepCh           chan struct{}
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -318,7 +320,7 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval)
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval, db.config.KeepCh, db.config.WaitKeepCh)
 	dl := newDiskLayer(root, 0, db, nil, nb)
 	nb.setClean(dl.cleans)
 	db.tree.reset(dl)

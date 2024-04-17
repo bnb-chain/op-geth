@@ -29,6 +29,12 @@ const (
 	DefaultReserveMultiDifflayerNumber = 3
 )
 
+type KeepRecord struct {
+	BlockID uint64
+	//StateRoot common.Hash
+	//Reader    layer
+}
+
 var _ trienodebuffer = &nodebufferlist{}
 
 // nodebufferlist implements the trienodebuffer interface, it is designed to meet
@@ -61,6 +67,8 @@ type nodebufferlist struct {
 	isFlushing   atomic.Bool // Flag indicates writing disk under background.
 	stopFlushing atomic.Bool // Flag stops writing disk under background.
 	stopCh       chan struct{}
+	notifyKeepCh chan *KeepRecord
+	waitKeepCh   chan struct{}
 }
 
 // newNodeBufferList initializes the node buffer list with the provided nodes
@@ -69,7 +77,9 @@ func newNodeBufferList(
 	limit uint64,
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers uint64,
-	proposeBlockInterval uint64) *nodebufferlist {
+	proposeBlockInterval uint64,
+	keepCh chan *KeepRecord,
+	waitKeepCh chan struct{}) *nodebufferlist {
 	var (
 		rsevMdNum uint64
 		dlInMd    uint64
@@ -99,17 +109,19 @@ func newNodeBufferList(
 	base := newMultiDifflayer(limit, size, common.Hash{}, nodes, layers)
 	ele := newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
 	nf := &nodebufferlist{
-		db:        db,
-		wpBlocks:  wpBlocks,
-		rsevMdNum: rsevMdNum,
-		dlInMd:    dlInMd,
-		limit:     limit,
-		base:      base,
-		head:      ele,
-		tail:      ele,
-		count:     1,
-		persistID: rawdb.ReadPersistentStateID(db),
-		stopCh:    make(chan struct{}),
+		db:           db,
+		wpBlocks:     wpBlocks,
+		rsevMdNum:    rsevMdNum,
+		dlInMd:       dlInMd,
+		limit:        limit,
+		base:         base,
+		head:         ele,
+		tail:         ele,
+		count:        1,
+		persistID:    rawdb.ReadPersistentStateID(db),
+		stopCh:       make(chan struct{}),
+		notifyKeepCh: keepCh,
+		waitKeepCh:   waitKeepCh,
 	}
 	go nf.loop()
 
@@ -228,6 +240,21 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	}
 	if !force {
 		return nil
+	}
+
+	if nf.notifyKeepCh != nil { // maybe keep proof
+		nf.mux.RLock()
+
+		notifyKeeperFunc := func(buffer *multiDifflayer) bool {
+			if buffer.block%nf.wpBlocks == 0 {
+				nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block}
+				<-nf.waitKeepCh
+			}
+			return true
+		}
+		nf.traverseReverse(notifyKeeperFunc)
+
+		nf.mux.RUnlock()
 	}
 
 	// hang user read/write and background write
@@ -454,6 +481,11 @@ func (nf *nodebufferlist) diffToBase() {
 		}
 		if buffer.block%nf.dlInMd != 0 {
 			log.Crit("committed block number misaligned", "block", buffer.block)
+		}
+
+		if buffer.block%nf.wpBlocks == 0 && nf.notifyKeepCh != nil { // maybe keep proof
+			nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block}
+			<-nf.waitKeepCh
 		}
 
 		nf.baseMux.Lock()

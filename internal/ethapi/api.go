@@ -676,19 +676,6 @@ type StorageResult struct {
 	Proof []string     `json:"proof"`
 }
 
-// proofList implements ethdb.KeyValueWriter and collects the proofs as
-// hex-strings for delivery to rpc-caller.
-type proofList []string
-
-func (n *proofList) Put(key []byte, value []byte) error {
-	*n = append(*n, hexutil.Encode(value))
-	return nil
-}
-
-func (n *proofList) Delete(key []byte) error {
-	panic("not supported")
-}
-
 // GetProof returns the Merkle-proof for a given account and optionally some storage keys.
 func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (*AccountResult, error) {
 	header, err := headerByNumberOrHash(ctx, s.b, blockNrOrHash)
@@ -753,7 +740,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 				storageProof[i] = StorageResult{outputKey, &hexutil.Big{}, []string{}}
 				continue
 			}
-			var proof proofList
+			var proof common.ProofList
 			if err := storageTrie.Prove(crypto.Keccak256(key.Bytes()), &proof); err != nil {
 				return nil, err
 			}
@@ -766,7 +753,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 	if err != nil {
 		return nil, err
 	}
-	var accountProof proofList
+	var accountProof common.ProofList
 	if err := tr.Prove(crypto.Keccak256(address.Bytes()), &accountProof); err != nil {
 		return nil, err
 	}

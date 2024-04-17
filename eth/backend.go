@@ -209,6 +209,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			TrieCommitInterval:   config.TrieCommitInterval,
 			PathNodeBuffer:       config.PathNodeBuffer,
 			ProposeBlockInterval: config.ProposeBlockInterval,
+			RpcClient:            stack.Attach(),
 		}
 	)
 	// Override the chain config with provided settings.

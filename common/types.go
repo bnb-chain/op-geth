@@ -475,3 +475,34 @@ func (d *Decimal) UnmarshalJSON(input []byte) error {
 		return err
 	}
 }
+
+// ProofList implements ethdb.KeyValueWriter and collects the proofs as
+// hex-strings for delivery to rpc-caller.
+type ProofList []string
+
+func (n *ProofList) Put(key []byte, value []byte) error {
+	*n = append(*n, hexutil.Encode(value))
+	return nil
+}
+
+func (n *ProofList) Delete(key []byte) error {
+	panic("not supported")
+}
+
+// AccountResult is the result of a GetProof operation.
+type AccountResult struct {
+	Address      Address         `json:"address"`
+	AccountProof []string        `json:"accountProof"`
+	Balance      *big.Int        `json:"balance"`
+	CodeHash     Hash            `json:"codeHash"`
+	Nonce        uint64          `json:"nonce"`
+	StorageHash  Hash            `json:"storageHash"`
+	StorageProof []StorageResult `json:"storageProof"`
+}
+
+// StorageResult provides a proof for a key-value pair.
+type StorageResult struct {
+	Key   string   `json:"key"`
+	Value *big.Int `json:"value"`
+	Proof []string `json:"proof"`
+}

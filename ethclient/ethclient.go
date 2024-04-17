@@ -680,3 +680,24 @@ func (p *rpcProgress) toSyncProgress() *ethereum.SyncProgress {
 		HealingBytecode:     uint64(p.HealingBytecode),
 	}
 }
+
+// todo:
+func (ec *Client) GetProof(ctx context.Context, address common.Address, storage []common.Hash, blockTag string) (*common.AccountResult, error) {
+	var getProofResponse *common.AccountResult
+	err := ec.c.CallContext(ctx, &getProofResponse, "eth_getProof", address, storage, blockTag)
+	if err != nil {
+		return nil, err
+	}
+	if getProofResponse == nil {
+		return nil, ethereum.NotFound
+	}
+	if len(getProofResponse.StorageProof) != len(storage) {
+		return nil, fmt.Errorf("missing storage proof data, got %d proof entries but requested %d storage keys", len(getProofResponse.StorageProof), len(storage))
+	}
+	for i, key := range storage {
+		if key.String() != getProofResponse.StorageProof[i].Key {
+			return nil, fmt.Errorf("unexpected storage proof key difference for entry %d: got %s but requested %s", i, getProofResponse.StorageProof[i].Key, key)
+		}
+	}
+	return getProofResponse, nil
+}

@@ -35,6 +35,10 @@ import (
 	"strings"
 	"time"
 
+	pcsclite "github.com/gballet/go-libpcsclite"
+	gopsutil "github.com/shirou/gopsutil/mem"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
 	"github.com/ethereum/go-ethereum/common"
@@ -74,9 +78,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
-	pcsclite "github.com/gballet/go-libpcsclite"
-	gopsutil "github.com/shirou/gopsutil/mem"
-	"github.com/urfave/cli/v2"
 )
 
 // These are all the command line flags we support.
@@ -267,6 +268,11 @@ var (
 		Name:     "bloomfilter.size",
 		Usage:    "Megabytes of memory allocated to bloom-filter for pruning",
 		Value:    2048,
+		Category: flags.EthCategory,
+	}
+	AllowInsecureNoTriesFlag = &cli.BoolFlag{
+		Name:     "allow-insecure-no-tries",
+		Usage:    `Disable the tries state root verification, the state consistency is no longer 100% guaranteed. Do not enable it unless you know exactly what the consequence it will cause.`,
 		Category: flags.EthCategory,
 	}
 	OverrideCancun = &cli.Uint64Flag{
@@ -1899,6 +1905,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(CacheLogSizeFlag.Name) {
 		cfg.FilterLogCacheSize = ctx.Int(CacheLogSizeFlag.Name)
+	}
+	if ctx.IsSet(AllowInsecureNoTriesFlag.Name) {
+		cfg.NoTries = ctx.Bool(AllowInsecureNoTriesFlag.Name)
 	}
 	if !ctx.Bool(SnapshotFlag.Name) {
 		// If snap-sync is requested, this flag is also required

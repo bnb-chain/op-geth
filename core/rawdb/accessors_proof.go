@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	blockNumberLength = 32
+	blockNumberLength = 8 // uint64 is 8bytes
 )
 
 // Keeper Meta
@@ -33,8 +33,9 @@ func GetLatestProofData(f *ResettableFreezer) []byte {
 	if proofTable == nil {
 		return nil
 	}
-	blob, err := f.Ancient(proposeProofTable, proofTable.items.Load())
+	blob, err := f.Ancient(proposeProofTable, proofTable.items.Load()-1)
 	if err != nil {
+		log.Error("Failed to get latest proof data", "latest_proof_id", proofTable.items.Load()-1, "error", err)
 		return nil
 	}
 	return blob
@@ -56,9 +57,13 @@ func TruncateProofDataHead(f *ResettableFreezer, proofID uint64) {
 	f.freezer.TruncateHead(proofID)
 }
 
-func PutProofData(db ethdb.AncientWriter, id uint64, proof []byte) {
+func PutProofData(db ethdb.AncientWriter, proofID uint64, proof []byte) {
 	db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
-		op.AppendRaw(proposeProofTable, id-1, proof)
+		err := op.AppendRaw(proposeProofTable, proofID, proof)
+		if err != nil {
+			// todo: panic
+			log.Error("Failed to put proof data", "proof_id", proofID, "error", err)
+		}
 		return nil
 	})
 }

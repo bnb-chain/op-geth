@@ -114,11 +114,13 @@ func (keeper *proofKeeper) queryProposedProof(kRecord *pathdb.KeepRecord) (*proo
 
 func (keeper *proofKeeper) eventLoop() {
 	var (
-		putKeeperMetaRecordOnce bool
+		putKeeperMetaRecordOnce bool   // default = false
+		ancientInitSequenceID   uint64 // default = 0
 	)
 	for {
 		select {
 		case r := <-keeper.opts.watchStartKeepCh:
+			log.Info("keep proof", "record", r)
 			var (
 				hasTruncatedMeta bool
 				curProofID       uint64
@@ -127,18 +129,17 @@ func (keeper *proofKeeper) eventLoop() {
 			metaList := keeper.getKeeperMetaRecordList()
 			if len(metaList) == 0 {
 				keeper.proofDataDB.Reset()
-				curProofID = 1
+				curProofID = ancientInitSequenceID
 			} else {
 				keeper.truncateProofDataRecordHeadIfNeeded(r.BlockID)
 				latestProofData := keeper.getLatestProofDataRecord()
 				if latestProofData != nil {
 					curProofID = latestProofData.ProofID + 1
 				} else {
-					curProofID = 1
+					curProofID = ancientInitSequenceID
 				}
 			}
 
-			log.Info("keep proof", "record", r)
 			proofRecord, err := keeper.queryProposedProof(r)
 			if err == nil {
 				if hasTruncatedMeta || !putKeeperMetaRecordOnce {
@@ -175,6 +176,7 @@ func (keeper *proofKeeper) getKeeperMetaRecordList() []keeperMetaRecord {
 		}
 		metaList = append(metaList, m)
 	}
+	log.Info("Succeed to get meta list", "list", metaList)
 	return metaList
 }
 
@@ -205,6 +207,7 @@ func (keeper *proofKeeper) truncateKeeperMetaRecordHeadIfNeeded(blockID uint64) 
 	if err != nil {
 		log.Crit("Failed to truncate keeper meta head", "err", err)
 	}
+	log.Info("Succeed to truncate keeper meta", "block_id", blockID, "has_truncated", hasTruncated)
 	return hasTruncated
 }
 
@@ -222,9 +225,11 @@ func (keeper *proofKeeper) putKeeperMetaRecord(m *keeperMetaRecord) {
 func (keeper *proofKeeper) truncateProofDataRecordHeadIfNeeded(blockID uint64) {
 	latestProofDataRecord := keeper.getLatestProofDataRecord()
 	if latestProofDataRecord == nil {
+		log.Info("Skip to truncate proof data due to proof data is empty")
 		return
 	}
 	if blockID > latestProofDataRecord.BlockID {
+		log.Info("Skip to truncate proof data due to block id is newer")
 		return
 	}
 
@@ -243,11 +248,13 @@ func (keeper *proofKeeper) truncateProofDataRecordHeadIfNeeded(blockID uint64) {
 		proofID = proofID - 1
 	}
 	rawdb.TruncateProofDataHead(keeper.proofDataDB, truncateProofID)
+	log.Info("Succeed to truncate proof data", "block_id", blockID, "truncate_proof_id", truncateProofID)
 }
 
 func (keeper *proofKeeper) getLatestProofDataRecord() *proofDataRecord {
 	latestProofData := rawdb.GetLatestProofData(keeper.proofDataDB)
 	if latestProofData == nil {
+		log.Info("Skip get latest proof data record due to empty")
 		return nil
 	}
 	var data proofDataRecord
@@ -255,12 +262,14 @@ func (keeper *proofKeeper) getLatestProofDataRecord() *proofDataRecord {
 	if err != nil {
 		log.Crit("Failed to unmarshal proof data", "err", err)
 	}
+	log.Info("Succeed to get latest proof data", "record", data)
 	return &data
 }
 
 func (keeper *proofKeeper) getProofDataRecord(proofID uint64) *proofDataRecord {
 	latestProofData := rawdb.GetProofData(keeper.proofDataDB, proofID)
 	if latestProofData == nil {
+		log.Info("Skip get proof data record due not found", "proof_id", proofID)
 		return nil
 	}
 	var data proofDataRecord
@@ -268,6 +277,7 @@ func (keeper *proofKeeper) getProofDataRecord(proofID uint64) *proofDataRecord {
 	if err != nil {
 		log.Crit("Failed to unmarshal proof data", "err", err)
 	}
+	log.Info("Succeed to get proof data", "record", data)
 	return &data
 }
 

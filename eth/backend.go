@@ -170,7 +170,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		"snapshot_cache", common.StorageSize(config.SnapshotCache)*1024*1024)
 	// Assemble the Ethereum object
 	chainDb, err := stack.OpenAndMergeDatabase("chaindata", config.DatabaseCache, config.DatabaseHandles,
-		config.DatabaseFreezer, config.DatabaseDiff, ChainDBNamespace, false, config.PersistDiff, config.PruneAncientData)
+		config.DatabaseFreezer, ChainDBNamespace, false, config.PersistDiff, config.PruneAncientData)
 	if err != nil {
 		return nil, err
 	}
@@ -232,6 +232,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	journalFilePath := fmt.Sprintf("%s/%s", stack.ResolvePath(ChainData), JournalFileName)
+	if config.JournalFileEnabled {
+		if stack.CheckIfMultiDataBase() {
+			path = ChainData + "/state"
+		} else {
+			path = ChainData
+		}
+		journalFilePath = stack.ResolvePath(path) + "/" + JournalFileName
+	}
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording:   config.EnablePreimageRecording,

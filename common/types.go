@@ -497,7 +497,7 @@ type AccountResult struct {
 	CodeHash     Hash            `json:"codeHash"`
 	Nonce        uint64          `json:"nonce"`
 	StorageHash  Hash            `json:"storageHash"`
-	StorageProof []StorageResult `json:"storageProof"`
+	StorageProof []StorageResult `json:"storageProof"` // optional
 }
 
 // StorageResult provides a proof for a key-value pair.

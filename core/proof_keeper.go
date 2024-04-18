@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -43,7 +43,7 @@ type proofKeeper struct {
 	opts         *proofKeeperOptions
 	keeperMetaDB ethdb.Database
 	proofDataDB  *rawdb.ResettableFreezer
-	selfClient   *ethclient.Client
+	selfClient   *gethclient.Client
 }
 
 func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*proofKeeper, error) {
@@ -60,7 +60,7 @@ func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*pro
 	keeper = &proofKeeper{
 		opts:         opts,
 		keeperMetaDB: keeperMetaDB,
-		selfClient:   ethclient.NewClient(opts.rpcClient),
+		selfClient:   gethclient.New(opts.rpcClient),
 	}
 	if keeper.proofDataDB, err = rawdb.NewProofFreezer(ancientDir, false); err != nil {
 		log.Error("Failed to new proof ancient freezer", "error", err)
@@ -74,9 +74,7 @@ func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*pro
 }
 
 func (keeper *proofKeeper) queryProposedProof(kRecord *pathdb.KeepRecord) (*proofDataRecord, error) {
-	//rawPoof, err := keeper.selfClient.GetProof(context.Background(), l2ToL1MessagePasserAddr, nil, hexutil.EncodeUint64(kRecord.BlockID))
-	// rawPoof, err := keeper.selfClient.GetProof(context.Background(), l2ToL1MessagePasserAddr, nil, strconv.FormatUint(kRecord.BlockID, 10))
-	rawPoof, err := keeper.selfClient.GetProof(context.Background(), l2ToL1MessagePasserAddr, nil, hexutil.Uint64(kRecord.BlockID).String())
+	rawPoof, err := keeper.selfClient.GetProof(context.Background(), l2ToL1MessagePasserAddr, nil, big.NewInt(int64(kRecord.BlockID)))
 
 	if err != nil {
 		log.Error("Failed to get proof",

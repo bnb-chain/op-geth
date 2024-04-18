@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -53,25 +54,28 @@ type proofKeeperOptions struct {
 	rpcClient          *rpc.Client
 }
 
-type proofKeeper struct {
+type ProofKeeper struct {
 	opts         *proofKeeperOptions
 	keeperMetaDB ethdb.Database
 	proofDataDB  *rawdb.ResettableFreezer
 	selfClient   *gethclient.Client
+
+	queryProofCh     chan uint64
+	waitQueryProofCh chan *proofDataRecord
 }
 
-func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*proofKeeper, error) {
+func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*ProofKeeper, error) {
 	var (
 		err        error
 		ancientDir string
-		keeper     *proofKeeper
+		keeper     *ProofKeeper
 	)
 
 	if ancientDir, err = keeperMetaDB.AncientDatadir(); err != nil {
 		log.Error("Failed to get ancient data dir", "error", err)
 		return nil, err
 	}
-	keeper = &proofKeeper{
+	keeper = &ProofKeeper{
 		opts:         opts,
 		keeperMetaDB: keeperMetaDB,
 		selfClient:   gethclient.New(opts.rpcClient),
@@ -81,13 +85,16 @@ func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*pro
 		return nil, err
 	}
 
+	keeper.queryProofCh = make(chan uint64)
+	keeper.waitQueryProofCh = make(chan *proofDataRecord)
+
 	go keeper.eventLoop()
 
 	log.Info("Succeed to init proof keeper", "options", opts)
 	return keeper, nil
 }
 
-func (keeper *proofKeeper) queryProposedProof(kRecord *pathdb.KeepRecord) (*proofDataRecord, error) {
+func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofDataRecord, error) {
 	rawPoof, err := keeper.selfClient.GetProof(context.Background(), l2ToL1MessagePasserAddr, nil, big.NewInt(int64(kRecord.BlockID)))
 
 	if err != nil {
@@ -112,26 +119,26 @@ func (keeper *proofKeeper) queryProposedProof(kRecord *pathdb.KeepRecord) (*proo
 	return pRecord, nil
 }
 
-func (keeper *proofKeeper) eventLoop() {
+func (keeper *ProofKeeper) eventLoop() {
 	var (
 		putKeeperMetaRecordOnce bool   // default = false
 		ancientInitSequenceID   uint64 // default = 0
 	)
 	for {
 		select {
-		case r := <-keeper.opts.watchStartKeepCh:
-			log.Info("keep proof", "record", r)
+		case keepRecord := <-keeper.opts.watchStartKeepCh:
+			log.Info("keep proof", "record", keepRecord)
 			var (
 				hasTruncatedMeta bool
 				curProofID       uint64
 			)
-			hasTruncatedMeta = keeper.truncateKeeperMetaRecordHeadIfNeeded(r.BlockID)
+			hasTruncatedMeta = keeper.truncateKeeperMetaRecordHeadIfNeeded(keepRecord.BlockID)
 			metaList := keeper.getKeeperMetaRecordList()
 			if len(metaList) == 0 {
 				keeper.proofDataDB.Reset()
 				curProofID = ancientInitSequenceID
 			} else {
-				keeper.truncateProofDataRecordHeadIfNeeded(r.BlockID)
+				keeper.truncateProofDataRecordHeadIfNeeded(keepRecord.BlockID)
 				latestProofData := keeper.getLatestProofDataRecord()
 				if latestProofData != nil {
 					curProofID = latestProofData.ProofID + 1
@@ -140,13 +147,13 @@ func (keeper *proofKeeper) eventLoop() {
 				}
 			}
 
-			proofRecord, err := keeper.queryProposedProof(r)
+			proofRecord, err := keeper.getInnerProof(keepRecord)
 			if err == nil {
 				if hasTruncatedMeta || !putKeeperMetaRecordOnce {
 					putKeeperMetaRecordOnce = true
 					keeper.putKeeperMetaRecord(&keeperMetaRecord{
 						proposedInterval: keeper.opts.keepInterval,
-						blockID:          r.BlockID,
+						blockID:          keepRecord.BlockID,
 						proofID:          curProofID,
 					})
 				}
@@ -154,13 +161,33 @@ func (keeper *proofKeeper) eventLoop() {
 				keeper.putProofDataRecord(proofRecord)
 			}
 			keeper.opts.notifyFinishKeepCh <- struct{}{}
+		case queryBlockID := <-keeper.queryProofCh:
+			var resultProofRecord *proofDataRecord
+			metaList := keeper.getKeeperMetaRecordList()
+			if len(metaList) != 0 {
+				proofID := uint64(0)
+				index := len(metaList) - 1
+				for index >= 0 {
+					m := metaList[index]
+					if queryBlockID >= m.blockID {
+						if queryBlockID%m.proposedInterval != 0 { // check
+							break
+						}
+						proofID = m.proofID + (queryBlockID-m.blockID)/m.proposedInterval
+						resultProofRecord = keeper.getProofDataRecord(proofID)
+						break
+					}
+					index = index - 1
+				}
+			}
+			keeper.waitQueryProofCh <- resultProofRecord
 		}
 	}
 }
 
 // inner util func list
 // keeper meta func
-func (keeper *proofKeeper) getKeeperMetaRecordList() []keeperMetaRecord {
+func (keeper *ProofKeeper) getKeeperMetaRecordList() []keeperMetaRecord {
 	var (
 		metaList []keeperMetaRecord
 		err      error
@@ -180,7 +207,7 @@ func (keeper *proofKeeper) getKeeperMetaRecordList() []keeperMetaRecord {
 	return metaList
 }
 
-func (keeper *proofKeeper) truncateKeeperMetaRecordHeadIfNeeded(blockID uint64) bool {
+func (keeper *ProofKeeper) truncateKeeperMetaRecordHeadIfNeeded(blockID uint64) bool {
 	var (
 		err          error
 		iter         ethdb.Iterator
@@ -211,7 +238,7 @@ func (keeper *proofKeeper) truncateKeeperMetaRecordHeadIfNeeded(blockID uint64) 
 	return hasTruncated
 }
 
-func (keeper *proofKeeper) putKeeperMetaRecord(m *keeperMetaRecord) {
+func (keeper *ProofKeeper) putKeeperMetaRecord(m *keeperMetaRecord) {
 	meta, err := json.Marshal(*m)
 	if err != nil {
 		log.Crit("Failed to marshal keeper meta record", "err", err)
@@ -222,7 +249,7 @@ func (keeper *proofKeeper) putKeeperMetaRecord(m *keeperMetaRecord) {
 }
 
 // proof data func
-func (keeper *proofKeeper) truncateProofDataRecordHeadIfNeeded(blockID uint64) {
+func (keeper *ProofKeeper) truncateProofDataRecordHeadIfNeeded(blockID uint64) {
 	latestProofDataRecord := keeper.getLatestProofDataRecord()
 	if latestProofDataRecord == nil {
 		log.Info("Skip to truncate proof data due to proof data is empty")
@@ -251,7 +278,7 @@ func (keeper *proofKeeper) truncateProofDataRecordHeadIfNeeded(blockID uint64) {
 	log.Info("Succeed to truncate proof data", "block_id", blockID, "truncate_proof_id", truncateProofID)
 }
 
-func (keeper *proofKeeper) getLatestProofDataRecord() *proofDataRecord {
+func (keeper *ProofKeeper) getLatestProofDataRecord() *proofDataRecord {
 	latestProofData := rawdb.GetLatestProofData(keeper.proofDataDB)
 	if latestProofData == nil {
 		log.Info("Skip get latest proof data record due to empty")
@@ -266,7 +293,7 @@ func (keeper *proofKeeper) getLatestProofDataRecord() *proofDataRecord {
 	return &data
 }
 
-func (keeper *proofKeeper) getProofDataRecord(proofID uint64) *proofDataRecord {
+func (keeper *ProofKeeper) getProofDataRecord(proofID uint64) *proofDataRecord {
 	latestProofData := rawdb.GetProofData(keeper.proofDataDB, proofID)
 	if latestProofData == nil {
 		log.Info("Skip get proof data record due not found", "proof_id", proofID)
@@ -281,11 +308,54 @@ func (keeper *proofKeeper) getProofDataRecord(proofID uint64) *proofDataRecord {
 	return &data
 }
 
-func (keeper *proofKeeper) putProofDataRecord(p *proofDataRecord) {
+func (keeper *ProofKeeper) putProofDataRecord(p *proofDataRecord) {
 	proof, err := json.Marshal(*p)
 	if err != nil {
 		log.Crit("Failed to marshal proof data", "err", err)
 	}
 	rawdb.PutProofData(keeper.proofDataDB, p.ProofID, proof)
 	log.Info("Succeed to add proof data", "record", p)
+}
+
+// IsProposeProofQuery is used to determine whether it is proposed proof.
+func (keeper *ProofKeeper) IsProposeProofQuery(address common.Address, storageKeys []string, blockID uint64) bool {
+	if !keeper.opts.enable {
+		return false
+	}
+	if l2ToL1MessagePasserAddr.Cmp(address) != 0 {
+		return false
+	}
+	if len(storageKeys) != 0 {
+		return false
+	}
+	// blockID%keeper.opts.keepInterval == 0 is not checked because keepInterval may have been adjusted before.
+	_ = blockID
+	return true
+}
+
+// QueryProposeProof is used to get proof which is stored in ancient proof.
+func (keeper *ProofKeeper) QueryProposeProof(blockID uint64, stateRoot common.Hash) (*common.AccountResult, error) {
+	keeper.queryProofCh <- blockID
+	resultProofRecord := <-keeper.waitQueryProofCh
+	if resultProofRecord == nil {
+		// Maybe the keeper was disabled for a certain period of time before.
+		return nil, fmt.Errorf("proof is not found")
+	}
+	if resultProofRecord.BlockID != blockID {
+		// Maybe the keeper was disabled for a certain period of time before.
+		return nil, fmt.Errorf("proof is not found due to block is mismatch")
+	}
+	if resultProofRecord.StateRoot.Cmp(stateRoot) != 0 {
+		// Impossible, unless there is a bug.
+		return nil, fmt.Errorf("proof is not found due to state root is mismatch")
+	}
+	return &common.AccountResult{
+		Address:      resultProofRecord.Address,
+		AccountProof: resultProofRecord.AccountProof,
+		Balance:      resultProofRecord.Balance,
+		CodeHash:     resultProofRecord.CodeHash,
+		Nonce:        resultProofRecord.Nonce,
+		StorageHash:  resultProofRecord.StorageHash,
+		StorageProof: nil,
+	}, nil
 }

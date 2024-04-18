@@ -678,14 +678,18 @@ type StorageResult struct {
 
 // GetProof returns the Merkle-proof for a given account and optionally some storage keys.
 func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (*AccountResult, error) {
-	header, err := headerByNumberOrHash(ctx, s.b, blockNrOrHash)
+	var (
+		err    error
+		header *types.Header
+	)
+	header, err = headerByNumberOrHash(ctx, s.b, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
 	if s.b.ChainConfig().IsOptimismPreBedrock(header.Number) {
 		if s.b.HistoricalRPCService() != nil {
 			var res AccountResult
-			err := s.b.HistoricalRPCService().CallContext(ctx, &res, "eth_getProof", address, storageKeys, blockNrOrHash)
+			err = s.b.HistoricalRPCService().CallContext(ctx, &res, "eth_getProof", address, storageKeys, blockNrOrHash)
 			if err != nil {
 				return nil, fmt.Errorf("historical backend error: %w", err)
 			}
@@ -694,6 +698,15 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 			return nil, rpc.ErrNoHistoricalFallback
 		}
 	}
+
+	defer func() {
+		if proofKeeper := s.b.GetProofKeeper(); err != nil && proofKeeper != nil {
+			if proofKeeper.IsProposeProofQuery(address, storageKeys, header.Number.Uint64()) {
+				// todo
+			}
+		}
+	}()
+
 	var (
 		keys         = make([]common.Hash, len(storageKeys))
 		keyLengths   = make([]int, len(storageKeys))
@@ -701,7 +714,6 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 	)
 	// Deserialize all keys. This prevents state access on invalid input.
 	for i, hexKey := range storageKeys {
-		var err error
 		keys[i], keyLengths[i], err = decodeHash(hexKey)
 		if err != nil {
 			return nil, err
@@ -718,7 +730,8 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 		var storageTrie state.Trie
 		if storageRoot != types.EmptyRootHash && storageRoot != (common.Hash{}) {
 			id := trie.StorageTrieID(header.Root, crypto.Keccak256Hash(address.Bytes()), storageRoot)
-			st, err := trie.NewStateTrie(id, statedb.Database().TrieDB())
+			var st *trie.StateTrie
+			st, err = trie.NewStateTrie(id, statedb.Database().TrieDB())
 			if err != nil {
 				return nil, err
 			}
@@ -741,7 +754,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 				continue
 			}
 			var proof common.ProofList
-			if err := storageTrie.Prove(crypto.Keccak256(key.Bytes()), &proof); err != nil {
+			if err = storageTrie.Prove(crypto.Keccak256(key.Bytes()), &proof); err != nil {
 				return nil, err
 			}
 			value := (*hexutil.Big)(statedb.GetState(address, key).Big())
@@ -754,9 +767,10 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 		return nil, err
 	}
 	var accountProof common.ProofList
-	if err := tr.Prove(crypto.Keccak256(address.Bytes()), &accountProof); err != nil {
+	if err = tr.Prove(crypto.Keccak256(address.Bytes()), &accountProof); err != nil {
 		return nil, err
 	}
+	err = statedb.Error()
 	return &AccountResult{
 		Address:      address,
 		AccountProof: accountProof,
@@ -765,7 +779,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 		Nonce:        hexutil.Uint64(statedb.GetNonce(address)),
 		StorageHash:  storageRoot,
 		StorageProof: storageProof,
-	}, statedb.Error()
+	}, err
 }
 
 // decodeHash parses a hex-encoded 32-byte hash. The input may optionally

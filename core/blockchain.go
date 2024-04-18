@@ -283,7 +283,7 @@ type BlockChain struct {
 	forker     *ForkChoice
 	vmConfig   vm.Config
 
-	proofKeeper *proofKeeper
+	ProofKeeper *ProofKeeper
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -353,7 +353,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			notifyFinishKeepCh: trieConfig.PathDB.WaitKeepCh,
 			rpcClient:          cacheConfig.RpcClient,
 		}
-		bc.proofKeeper, err = newProofKeeper(db, opts)
+		bc.ProofKeeper, err = newProofKeeper(db, opts)
 		if err != nil {
 			return nil, err
 		}

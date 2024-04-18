@@ -202,17 +202,18 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			EnableOpcodeOptimizations: config.EnableOpcodeOptimizing,
 		}
 		cacheConfig = &core.CacheConfig{
-			TrieCleanLimit:      config.TrieCleanCache,
-			TrieCleanNoPrefetch: config.NoPrefetch,
-			TrieDirtyLimit:      config.TrieDirtyCache,
-			TrieDirtyDisabled:   config.NoPruning,
-			TrieTimeLimit:       config.TrieTimeout,
-			SnapshotLimit:       config.SnapshotCache,
-			Preimages:           config.Preimages,
-			StateHistory:        config.StateHistory,
-			StateScheme:         scheme,
-			TrieCommitInterval:  config.TrieCommitInterval,
-			PathSyncFlush:       config.PathSyncFlush,
+			TrieCleanLimit:       config.TrieCleanCache,
+			TrieCleanNoPrefetch:  config.NoPrefetch,
+			TrieDirtyLimit:       config.TrieDirtyCache,
+			TrieDirtyDisabled:    config.NoPruning,
+			TrieTimeLimit:        config.TrieTimeout,
+			SnapshotLimit:        config.SnapshotCache,
+			Preimages:            config.Preimages,
+			StateHistory:         config.StateHistory,
+			StateScheme:          scheme,
+			TrieCommitInterval:   config.TrieCommitInterval,
+			PathNodeBuffer:       config.PathNodeBuffer,
+			ProposeBlockInterval: config.ProposeBlockInterval,
 		}
 	)
 	// Override the chain config with provided settings.

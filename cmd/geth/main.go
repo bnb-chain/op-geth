@@ -96,6 +96,8 @@ var (
 		utils.TxLookupLimitFlag, // deprecated
 		utils.TransactionHistoryFlag,
 		utils.StateHistoryFlag,
+		utils.ProposeBlockIntervalFlag,
+		utils.PathDBNodeBufferTypeFlag,
 		utils.LightServeFlag,    // deprecated
 		utils.LightIngressFlag,  // deprecated
 		utils.LightEgressFlag,   // deprecated

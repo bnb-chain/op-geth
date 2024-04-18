@@ -9,6 +9,9 @@ const (
 	blockNumberLength = 8 // uint64 is 8bytes
 )
 
+// todo: cannot panic
+// todo: more tips
+// todo: inspect proof ancient
 // Keeper Meta
 func IterateKeeperMeta(db ethdb.Iteratee) ethdb.Iterator {
 	return NewKeyLengthIterator(db.NewIterator(proofKeeperMetaPrefix, nil), len(proofKeeperMetaPrefix)+blockNumberLength)

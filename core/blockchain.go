@@ -348,7 +348,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if cacheConfig.StateScheme == rawdb.PathScheme && trieConfig.PathDB.TrieNodeBufferType == pathdb.NodeBufferList {
 		opts := &proofKeeperOptions{
 			enable:             true,
-			keepInterval:       trieConfig.PathDB.ProposeBlockInterval,
 			watchStartKeepCh:   trieConfig.PathDB.KeepCh,
 			notifyFinishKeepCh: trieConfig.PathDB.WaitKeepCh,
 			rpcClient:          cacheConfig.RpcClient,

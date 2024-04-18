@@ -677,12 +677,8 @@ type StorageResult struct {
 }
 
 // GetProof returns the Merkle-proof for a given account and optionally some storage keys.
-func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (*AccountResult, error) {
-	var (
-		err    error
-		header *types.Header
-	)
-	header, err = headerByNumberOrHash(ctx, s.b, blockNrOrHash)
+func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (result *AccountResult, err error) {
+	header, err := headerByNumberOrHash(ctx, s.b, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -700,9 +696,20 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 	}
 
 	defer func() {
-		if proofKeeper := s.b.GetProofKeeper(); err != nil && proofKeeper != nil {
+		if proofKeeper := s.b.GetProofKeeper(); err != nil && proofKeeper != nil && header.Number != nil {
 			if proofKeeper.IsProposeProofQuery(address, storageKeys, header.Number.Uint64()) {
-				// todo
+				if innerResult, innerError := proofKeeper.QueryProposeProof(header.Number.Uint64(), header.Root); innerError == nil {
+					result = &AccountResult{
+						Address:      innerResult.Address,
+						AccountProof: innerResult.AccountProof,
+						Balance:      (*hexutil.Big)(innerResult.Balance),
+						CodeHash:     innerResult.CodeHash,
+						Nonce:        hexutil.Uint64(innerResult.Nonce),
+						StorageHash:  innerResult.StorageHash,
+						StorageProof: make([]StorageResult, 0),
+					}
+					err = nil
+				}
 			}
 		}
 	}()

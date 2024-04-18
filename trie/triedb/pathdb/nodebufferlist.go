@@ -30,8 +30,9 @@ const (
 )
 
 type KeepRecord struct {
-	BlockID   uint64
-	StateRoot common.Hash
+	BlockID      uint64
+	StateRoot    common.Hash
+	KeepInterval uint64
 }
 
 var _ trienodebuffer = &nodebufferlist{}
@@ -66,6 +67,7 @@ type nodebufferlist struct {
 	isFlushing   atomic.Bool // Flag indicates writing disk under background.
 	stopFlushing atomic.Bool // Flag stops writing disk under background.
 	stopCh       chan struct{}
+	waitStopCh   chan struct{}
 	notifyKeepCh chan *KeepRecord
 	waitKeepCh   chan struct{}
 }
@@ -119,6 +121,7 @@ func newNodeBufferList(
 		count:        1,
 		persistID:    rawdb.ReadPersistentStateID(db),
 		stopCh:       make(chan struct{}),
+		waitStopCh:   make(chan struct{}),
 		notifyKeepCh: keepCh,
 		waitKeepCh:   waitKeepCh,
 	}
@@ -246,8 +249,10 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 
 		notifyKeeperFunc := func(buffer *multiDifflayer) bool {
 			if buffer.block%nf.wpBlocks == 0 {
-				nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root}
+				keepRecord := &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks}
+				nf.notifyKeepCh <- keepRecord
 				<-nf.waitKeepCh
+				log.Info("Succeed to keep proof in force flush", "record", keepRecord)
 			}
 			return true
 		}
@@ -362,6 +367,7 @@ func (nf *nodebufferlist) getLayers() uint64 {
 // waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
 func (nf *nodebufferlist) waitAndStopFlushing() {
 	close(nf.stopCh)
+	<-nf.waitStopCh
 	nf.stopFlushing.Store(true)
 	for nf.isFlushing.Load() {
 		time.Sleep(time.Second)
@@ -483,7 +489,7 @@ func (nf *nodebufferlist) diffToBase() {
 		}
 
 		if buffer.block%nf.wpBlocks == 0 && nf.notifyKeepCh != nil { // maybe keep proof
-			nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root}
+			nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks}
 			<-nf.waitKeepCh
 		}
 
@@ -544,6 +550,8 @@ func (nf *nodebufferlist) loop() {
 	for {
 		select {
 		case <-nf.stopCh:
+			nf.flush(nil, nil, 0, true) // force flush to ensure all proposed-block can be kept by proof keeper
+			nf.waitStopCh <- struct{}{}
 			return
 		case <-mergeTicker.C:
 			if nf.stopFlushing.Load() {

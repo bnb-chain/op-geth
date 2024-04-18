@@ -2,9 +2,11 @@ package core
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -27,33 +29,40 @@ var (
 // keeperMetaRecord is used to ensure proof continuous in scenarios such as enable/disable keeper, interval changes, reorg, etc.
 // which is stored in kv db.
 type keeperMetaRecord struct {
-	blockID          uint64
-	proofID          uint64
-	proposedInterval uint64
+	BlockID      uint64 `json:"blockID"`
+	ProofID      uint64 `json:"proofID"`
+	KeepInterval uint64 `json:"keepInterval"`
 }
 
 // proofDataRecord is used to store proposed proof data.
 // which is stored in ancient db.
 type proofDataRecord struct {
-	ProofID      uint64         `json:"proofID"`
-	BlockID      uint64         `json:"blockID"`
-	StateRoot    common.Hash    `json:"stateRoot"`
-	Address      common.Address `json:"address"`
-	AccountProof []string       `json:"accountProof"`
-	Balance      *big.Int       `json:"balance"`
-	CodeHash     common.Hash    `json:"codeHash"`
-	Nonce        uint64         `json:"nonce"`
-	StorageHash  common.Hash    `json:"storageHash"`
+	ProofID   uint64      `json:"proofID"`
+	BlockID   uint64      `json:"blockID"`
+	StateRoot common.Hash `json:"stateRoot"`
+
+	Address      common.Address         `json:"address"`
+	AccountProof []string               `json:"accountProof"`
+	Balance      *big.Int               `json:"balance"`
+	CodeHash     common.Hash            `json:"codeHash"`
+	Nonce        uint64                 `json:"nonce"`
+	StorageHash  common.Hash            `json:"storageHash"`
+	StorageProof []common.StorageResult `json:"storageProof"`
 }
 
+// todo: move metadb to opts.
 type proofKeeperOptions struct {
 	enable             bool
-	keepInterval       uint64
 	watchStartKeepCh   chan *pathdb.KeepRecord
 	notifyFinishKeepCh chan struct{}
 	rpcClient          *rpc.Client
 }
 
+// todo: ensure ancient sync write??
+// add metris
+// add ut
+// polish log
+// todo gc
 type ProofKeeper struct {
 	opts         *proofKeeperOptions
 	keeperMetaDB ethdb.Database
@@ -95,6 +104,9 @@ func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*Pro
 }
 
 func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofDataRecord, error) {
+	// todo: maybe need retry
+	// server maybe closed
+	// directly used inner func replace rpc.
 	rawPoof, err := keeper.selfClient.GetProof(context.Background(), l2ToL1MessagePasserAddr, nil, big.NewInt(int64(kRecord.BlockID)))
 
 	if err != nil {
@@ -114,6 +126,7 @@ func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofData
 		CodeHash:     rawPoof.CodeHash,
 		Nonce:        rawPoof.Nonce,
 		StorageHash:  rawPoof.StorageHash,
+		StorageProof: rawPoof.StorageProof,
 	}
 	log.Info("Succeed to get proof", "proof_record", pRecord)
 	return pRecord, nil
@@ -127,11 +140,13 @@ func (keeper *ProofKeeper) eventLoop() {
 	for {
 		select {
 		case keepRecord := <-keeper.opts.watchStartKeepCh:
-			log.Info("keep proof", "record", keepRecord)
+			// log.Info("keep proof", "record", keepRecord)
 			var (
 				hasTruncatedMeta bool
 				curProofID       uint64
+				startTimestamp   time.Time
 			)
+			startTimestamp = time.Now()
 			hasTruncatedMeta = keeper.truncateKeeperMetaRecordHeadIfNeeded(keepRecord.BlockID)
 			metaList := keeper.getKeeperMetaRecordList()
 			if len(metaList) == 0 {
@@ -152,14 +167,18 @@ func (keeper *ProofKeeper) eventLoop() {
 				if hasTruncatedMeta || !putKeeperMetaRecordOnce {
 					putKeeperMetaRecordOnce = true
 					keeper.putKeeperMetaRecord(&keeperMetaRecord{
-						proposedInterval: keeper.opts.keepInterval,
-						blockID:          keepRecord.BlockID,
-						proofID:          curProofID,
+						BlockID:      keepRecord.BlockID,
+						ProofID:      curProofID,
+						KeepInterval: keepRecord.KeepInterval,
 					})
 				}
 				proofRecord.ProofID = curProofID
 				keeper.putProofDataRecord(proofRecord)
 			}
+			log.Info("Keep a new proof",
+				"block_id", keepRecord.BlockID,
+				"state_root", keepRecord.StateRoot.String(),
+				"error", err, "elapsed", common.PrettyDuration(time.Since(startTimestamp)))
 			keeper.opts.notifyFinishKeepCh <- struct{}{}
 		case queryBlockID := <-keeper.queryProofCh:
 			var resultProofRecord *proofDataRecord
@@ -169,11 +188,11 @@ func (keeper *ProofKeeper) eventLoop() {
 				index := len(metaList) - 1
 				for index >= 0 {
 					m := metaList[index]
-					if queryBlockID >= m.blockID {
-						if queryBlockID%m.proposedInterval != 0 { // check
+					if queryBlockID >= m.BlockID {
+						if m.KeepInterval == 0 || queryBlockID%m.KeepInterval != 0 { // check
 							break
 						}
-						proofID = m.proofID + (queryBlockID-m.blockID)/m.proposedInterval
+						proofID = m.ProofID + (queryBlockID-m.BlockID)/m.KeepInterval
 						resultProofRecord = keeper.getProofDataRecord(proofID)
 						break
 					}
@@ -187,9 +206,9 @@ func (keeper *ProofKeeper) eventLoop() {
 
 // inner util func list
 // keeper meta func
-func (keeper *ProofKeeper) getKeeperMetaRecordList() []keeperMetaRecord {
+func (keeper *ProofKeeper) getKeeperMetaRecordList() []*keeperMetaRecord {
 	var (
-		metaList []keeperMetaRecord
+		metaList []*keeperMetaRecord
 		err      error
 		iter     ethdb.Iterator
 	)
@@ -197,11 +216,18 @@ func (keeper *ProofKeeper) getKeeperMetaRecordList() []keeperMetaRecord {
 	defer iter.Release()
 
 	for iter.Next() {
+		keyBlockID := binary.BigEndian.Uint64(iter.Key()[1:])
 		m := keeperMetaRecord{}
 		if err = json.Unmarshal(iter.Value(), &m); err != nil {
+			log.Error("Failed to unmarshal keeper meta record", "key_block_id", keyBlockID, "error", err)
 			continue
 		}
-		metaList = append(metaList, m)
+		if keyBlockID != m.BlockID {
+			log.Error("Failed to check consistency between key and value", "key_block_id", keyBlockID, "value_block_id", m.BlockID)
+			continue
+		}
+		log.Info("Keep meta", "key_block_id", keyBlockID, "meta_record", m)
+		metaList = append(metaList, &m)
 	}
 	log.Info("Succeed to get meta list", "list", metaList)
 	return metaList
@@ -224,9 +250,9 @@ func (keeper *ProofKeeper) truncateKeeperMetaRecordHeadIfNeeded(blockID uint64) 
 		if err = json.Unmarshal(iter.Value(), &m); err != nil {
 			continue
 		}
-		if m.blockID >= blockID {
+		if m.BlockID >= blockID {
 			hasTruncated = true
-			rawdb.DeleteKeeperMeta(batch, m.blockID)
+			rawdb.DeleteKeeperMeta(batch, m.BlockID)
 		}
 
 	}
@@ -243,8 +269,8 @@ func (keeper *ProofKeeper) putKeeperMetaRecord(m *keeperMetaRecord) {
 	if err != nil {
 		log.Crit("Failed to marshal keeper meta record", "err", err)
 	}
-	rawdb.PutKeeperMeta(keeper.keeperMetaDB, m.blockID, meta)
-	log.Info("Succeed to add keeper meta", "record", m)
+	rawdb.PutKeeperMeta(keeper.keeperMetaDB, m.BlockID, meta)
+	log.Info("Succeed to put keeper meta", "record", m)
 
 }
 
@@ -314,7 +340,7 @@ func (keeper *ProofKeeper) putProofDataRecord(p *proofDataRecord) {
 		log.Crit("Failed to marshal proof data", "err", err)
 	}
 	rawdb.PutProofData(keeper.proofDataDB, p.ProofID, proof)
-	log.Info("Succeed to add proof data", "record", p)
+	log.Info("Succeed to put proof data", "record", p)
 }
 
 // IsProposeProofQuery is used to determine whether it is proposed proof.
@@ -335,27 +361,45 @@ func (keeper *ProofKeeper) IsProposeProofQuery(address common.Address, storageKe
 
 // QueryProposeProof is used to get proof which is stored in ancient proof.
 func (keeper *ProofKeeper) QueryProposeProof(blockID uint64, stateRoot common.Hash) (*common.AccountResult, error) {
+	var (
+		result         *common.AccountResult
+		err            error
+		startTimestamp time.Time
+	)
+	startTimestamp = time.Now()
+	defer func() {
+		log.Info("Query propose proof",
+			"block_id", blockID,
+			"state_root", stateRoot.String(),
+			"error", err, "elapsed", common.PrettyDuration(time.Since(startTimestamp)))
+	}()
 	keeper.queryProofCh <- blockID
 	resultProofRecord := <-keeper.waitQueryProofCh
 	if resultProofRecord == nil {
 		// Maybe the keeper was disabled for a certain period of time before.
-		return nil, fmt.Errorf("proof is not found")
+		err = fmt.Errorf("proof is not found, block_id=%d", blockID)
+		return nil, err
 	}
 	if resultProofRecord.BlockID != blockID {
-		// Maybe the keeper was disabled for a certain period of time before.
-		return nil, fmt.Errorf("proof is not found due to block is mismatch")
+		// Maybe expected_block_id proof is not kept due to disabled or some bug
+		err = fmt.Errorf("proof is not found due to block is mismatch, expected_block_id=%d, actual_block_id=%d",
+			blockID, resultProofRecord.BlockID)
+		return nil, err
 	}
 	if resultProofRecord.StateRoot.Cmp(stateRoot) != 0 {
 		// Impossible, unless there is a bug.
-		return nil, fmt.Errorf("proof is not found due to state root is mismatch")
+		err = fmt.Errorf("proof is not found due to state root is mismatch, expected_state_root=%s, actual_state_root=%s",
+			stateRoot.String(), resultProofRecord.StateRoot.String())
+		return nil, err
 	}
-	return &common.AccountResult{
+	result = &common.AccountResult{
 		Address:      resultProofRecord.Address,
 		AccountProof: resultProofRecord.AccountProof,
 		Balance:      resultProofRecord.Balance,
 		CodeHash:     resultProofRecord.CodeHash,
 		Nonce:        resultProofRecord.Nonce,
 		StorageHash:  resultProofRecord.StorageHash,
-		StorageProof: nil,
-	}, nil
+		StorageProof: resultProofRecord.StorageProof,
+	}
+	return result, nil
 }

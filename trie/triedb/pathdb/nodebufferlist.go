@@ -30,9 +30,8 @@ const (
 )
 
 type KeepRecord struct {
-	BlockID uint64
-	//StateRoot common.Hash
-	//Reader    layer
+	BlockID   uint64
+	StateRoot common.Hash
 }
 
 var _ trienodebuffer = &nodebufferlist{}
@@ -247,7 +246,7 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 
 		notifyKeeperFunc := func(buffer *multiDifflayer) bool {
 			if buffer.block%nf.wpBlocks == 0 {
-				nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block}
+				nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root}
 				<-nf.waitKeepCh
 			}
 			return true
@@ -484,7 +483,7 @@ func (nf *nodebufferlist) diffToBase() {
 		}
 
 		if buffer.block%nf.wpBlocks == 0 && nf.notifyKeepCh != nil { // maybe keep proof
-			nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block}
+			nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root}
 			<-nf.waitKeepCh
 		}
 

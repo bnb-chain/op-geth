@@ -209,7 +209,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			TrieCommitInterval:   config.TrieCommitInterval,
 			PathNodeBuffer:       config.PathNodeBuffer,
 			ProposeBlockInterval: config.ProposeBlockInterval,
-			RpcClient:            stack.Attach(),
 		}
 	)
 	// Override the chain config with provided settings.
@@ -321,7 +320,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// Register the backend on the node
 	stack.RegisterAPIs(eth.APIs())
 	stack.RegisterProtocols(eth.Protocols())
-	stack.RegisterLifecycle(eth) // todo
+	stack.RegisterLifecycle(eth)
 
 	// Successful startup; push a marker and check previous unclean shutdowns.
 	eth.shutdownTracker.MarkStartup()

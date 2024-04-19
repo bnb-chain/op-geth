@@ -244,23 +244,6 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		return nil
 	}
 
-	if nf.notifyKeepCh != nil { // maybe keep proof
-		nf.mux.RLock()
-
-		notifyKeeperFunc := func(buffer *multiDifflayer) bool {
-			if buffer.block%nf.wpBlocks == 0 {
-				keepRecord := &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks}
-				nf.notifyKeepCh <- keepRecord
-				<-nf.waitKeepCh
-				log.Info("Succeed to keep proof in force flush", "record", keepRecord)
-			}
-			return true
-		}
-		nf.traverseReverse(notifyKeeperFunc)
-
-		nf.mux.RUnlock()
-	}
-
 	// hang user read/write and background write
 	nf.mux.Lock()
 	nf.baseMux.Lock()
@@ -488,7 +471,7 @@ func (nf *nodebufferlist) diffToBase() {
 			log.Crit("committed block number misaligned", "block", buffer.block)
 		}
 
-		if buffer.block%nf.wpBlocks == 0 && nf.notifyKeepCh != nil { // maybe keep proof
+		if buffer.block != 0 && buffer.block%nf.wpBlocks == 0 && nf.notifyKeepCh != nil { // maybe keep proof
 			nf.notifyKeepCh <- &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks}
 			<-nf.waitKeepCh
 		}
@@ -550,7 +533,23 @@ func (nf *nodebufferlist) loop() {
 	for {
 		select {
 		case <-nf.stopCh:
-			nf.flush(nil, nil, 0, true) // force flush to ensure all proposed-block can be kept by proof keeper
+			// force flush to ensure all proposed-block can be kept by proof keeper
+			if nf.notifyKeepCh != nil { // maybe keep proof
+				nf.mux.RLock()
+
+				notifyKeeperFunc := func(buffer *multiDifflayer) bool {
+					if buffer.block != 0 && buffer.block%nf.wpBlocks == 0 {
+						keepRecord := &KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks}
+						nf.notifyKeepCh <- keepRecord
+						<-nf.waitKeepCh
+						log.Info("Succeed to keep proof in stop", "record", keepRecord)
+					}
+					return true
+				}
+				nf.traverseReverse(notifyKeeperFunc)
+
+				nf.mux.RUnlock()
+			}
 			nf.waitStopCh <- struct{}{}
 			return
 		case <-mergeTicker.C:

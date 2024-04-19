@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -9,12 +8,14 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rpc"
+	trie2 "github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
@@ -55,7 +56,7 @@ type proofKeeperOptions struct {
 	enable             bool
 	watchStartKeepCh   chan *pathdb.KeepRecord
 	notifyFinishKeepCh chan struct{}
-	rpcClient          *rpc.Client
+	blockChain         *BlockChain
 }
 
 // todo: ensure ancient sync write??
@@ -87,7 +88,6 @@ func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*Pro
 	keeper = &ProofKeeper{
 		opts:         opts,
 		keeperMetaDB: keeperMetaDB,
-		selfClient:   gethclient.New(opts.rpcClient),
 	}
 	if keeper.proofDataDB, err = rawdb.NewProofFreezer(ancientDir, false); err != nil {
 		log.Error("Failed to new proof ancient freezer", "error", err)
@@ -104,32 +104,41 @@ func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*Pro
 }
 
 func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofDataRecord, error) {
-	// todo: maybe need retry
-	// server maybe closed
-	// directly used inner func replace rpc.
-	rawPoof, err := keeper.selfClient.GetProof(context.Background(), l2ToL1MessagePasserAddr, nil, big.NewInt(int64(kRecord.BlockID)))
+	var (
+		err       error
+		header    *types.Header
+		stateDB   *state.StateDB
+		worldTrie *trie2.StateTrie
+		pRecord   *proofDataRecord
+	)
 
-	if err != nil {
-		log.Error("Failed to get proof",
-			"block_id", kRecord.BlockID,
-			"hex_block_id_1", hexutil.EncodeUint64(kRecord.BlockID),
-			"hex_block_id_2", hexutil.Uint64(kRecord.BlockID).String(),
-			"error", err)
+	if header = keeper.opts.blockChain.GetHeaderByNumber(kRecord.BlockID); header == nil {
+		return nil, fmt.Errorf("block is not found, block_id=%d", kRecord.BlockID)
+	}
+	if stateDB, err = keeper.opts.blockChain.StateAt(header.Root); err != nil {
 		return nil, err
 	}
-	pRecord := &proofDataRecord{
+	if worldTrie, err = trie2.NewStateTrie(trie2.StateTrieID(header.Root), stateDB.Database().TrieDB()); err != nil {
+		return nil, err
+	}
+	var accountProof common.ProofList
+	if err = worldTrie.Prove(crypto.Keccak256(l2ToL1MessagePasserAddr.Bytes()), &accountProof); err != nil {
+		return nil, err
+	}
+	pRecord = &proofDataRecord{
 		BlockID:      kRecord.BlockID,
 		StateRoot:    kRecord.StateRoot,
-		Address:      rawPoof.Address,
-		AccountProof: rawPoof.AccountProof,
-		Balance:      rawPoof.Balance,
-		CodeHash:     rawPoof.CodeHash,
-		Nonce:        rawPoof.Nonce,
-		StorageHash:  rawPoof.StorageHash,
-		StorageProof: rawPoof.StorageProof,
+		Address:      l2ToL1MessagePasserAddr,
+		AccountProof: accountProof,
+		Balance:      stateDB.GetBalance(l2ToL1MessagePasserAddr),
+		CodeHash:     stateDB.GetCodeHash(l2ToL1MessagePasserAddr),
+		Nonce:        stateDB.GetNonce(l2ToL1MessagePasserAddr),
+		StorageHash:  stateDB.GetStorageRoot(l2ToL1MessagePasserAddr),
+		StorageProof: make([]common.StorageResult, 0),
 	}
+	err = stateDB.Error()
 	log.Info("Succeed to get proof", "proof_record", pRecord)
-	return pRecord, nil
+	return pRecord, err
 }
 
 func (keeper *ProofKeeper) eventLoop() {
@@ -146,24 +155,25 @@ func (keeper *ProofKeeper) eventLoop() {
 				curProofID       uint64
 				startTimestamp   time.Time
 			)
-			startTimestamp = time.Now()
-			hasTruncatedMeta = keeper.truncateKeeperMetaRecordHeadIfNeeded(keepRecord.BlockID)
-			metaList := keeper.getKeeperMetaRecordList()
-			if len(metaList) == 0 {
-				keeper.proofDataDB.Reset()
-				curProofID = ancientInitSequenceID
-			} else {
-				keeper.truncateProofDataRecordHeadIfNeeded(keepRecord.BlockID)
-				latestProofData := keeper.getLatestProofDataRecord()
-				if latestProofData != nil {
-					curProofID = latestProofData.ProofID + 1
-				} else {
-					curProofID = ancientInitSequenceID
-				}
-			}
 
+			startTimestamp = time.Now()
 			proofRecord, err := keeper.getInnerProof(keepRecord)
 			if err == nil {
+				hasTruncatedMeta = keeper.truncateKeeperMetaRecordHeadIfNeeded(keepRecord.BlockID)
+				metaList := keeper.getKeeperMetaRecordList()
+				if len(metaList) == 0 {
+					keeper.proofDataDB.Reset()
+					curProofID = ancientInitSequenceID
+				} else {
+					keeper.truncateProofDataRecordHeadIfNeeded(keepRecord.BlockID)
+					latestProofData := keeper.getLatestProofDataRecord()
+					if latestProofData != nil {
+						curProofID = latestProofData.ProofID + 1
+					} else {
+						curProofID = ancientInitSequenceID
+					}
+				}
+
 				if hasTruncatedMeta || !putKeeperMetaRecordOnce {
 					putKeeperMetaRecordOnce = true
 					keeper.putKeeperMetaRecord(&keeperMetaRecord{
@@ -222,7 +232,7 @@ func (keeper *ProofKeeper) getKeeperMetaRecordList() []*keeperMetaRecord {
 			log.Error("Failed to unmarshal keeper meta record", "key_block_id", keyBlockID, "error", err)
 			continue
 		}
-		if keyBlockID != m.BlockID {
+		if keyBlockID != m.BlockID { // check
 			log.Error("Failed to check consistency between key and value", "key_block_id", keyBlockID, "value_block_id", m.BlockID)
 			continue
 		}

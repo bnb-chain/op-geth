@@ -291,7 +291,6 @@ func containsLifecycle(lfs []Lifecycle, l Lifecycle) bool {
 // stopServices terminates running services, RPC and p2p networking.
 // It is the inverse of Start.
 func (n *Node) stopServices(running []Lifecycle) error {
-	// todo
 	n.stopRPC()
 
 	// Stop running lifecycles in reverse order.

@@ -446,8 +446,8 @@ func (tx *Transaction) EffectiveGasTipCmp(other *Transaction, baseFee *big.Int) 
 	if baseFee == nil {
 		return tx.GasTipCapCmp(other)
 	}
-	// the EffectiveGasTipValue() always copies two big.Int, so we define another alternative
-	// function to reduce the cost of copying big.Int
+	// the EffectiveGasTipValue() always copies two big.Int, which cost almost 90% cpu resource of the whole function,
+	// so we define an alternative function to improve the performance.
 	effectiveGasTipValue := func(tx *Transaction, baseFee *big.Int) *big.Int {
 		if tx.Type() == DepositTxType {
 			return new(big.Int)

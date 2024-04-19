@@ -1130,7 +1130,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	// TODO delete after debug performance metrics
 	core.DebugInnerExecutionDuration = 0
-	defer func () {
+	defer func() {
 		core.DebugInnerExecutionDuration = 0
 	}()
 
@@ -1193,21 +1193,25 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
+	if block.Root() == (common.Hash{}) {
+		return &newPayloadResult{err: fmt.Errorf("empty block root")}
+	}
+
 	assembleBlockTimer.UpdateSince(start)
 	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
-	accountReadTimer.Update(work.state.AccountReads)                   // Account reads are complete(in commit txs)
-	storageReadTimer.Update(work.state.StorageReads)                   // Storage reads are complete(in commit txs)
-	snapshotAccountReadTimer.Update(work.state.SnapshotAccountReads)   // Account reads are complete(in commit txs)
-	snapshotStorageReadTimer.Update(work.state.SnapshotStorageReads)   // Storage reads are complete(in commit txs)
-	accountUpdateTimer.Update(work.state.AccountUpdates)               // Account updates are complete(in FinalizeAndAssemble)
-	storageUpdateTimer.Update(work.state.StorageUpdates)               // Storage updates are complete(in FinalizeAndAssemble)
-	accountHashTimer.Update(work.state.AccountHashes)                  // Account hashes are complete(in FinalizeAndAssemble)
-	storageHashTimer.Update(work.state.StorageHashes)                  // Storage hashes are complete(in FinalizeAndAssemble)
+	accountReadTimer.Update(work.state.AccountReads)                 // Account reads are complete(in commit txs)
+	storageReadTimer.Update(work.state.StorageReads)                 // Storage reads are complete(in commit txs)
+	snapshotAccountReadTimer.Update(work.state.SnapshotAccountReads) // Account reads are complete(in commit txs)
+	snapshotStorageReadTimer.Update(work.state.SnapshotStorageReads) // Storage reads are complete(in commit txs)
+	accountUpdateTimer.Update(work.state.AccountUpdates)             // Account updates are complete(in FinalizeAndAssemble)
+	storageUpdateTimer.Update(work.state.StorageUpdates)             // Storage updates are complete(in FinalizeAndAssemble)
+	accountHashTimer.Update(work.state.AccountHashes)                // Account hashes are complete(in FinalizeAndAssemble)
+	storageHashTimer.Update(work.state.StorageHashes)                // Storage hashes are complete(in FinalizeAndAssemble)
 
 	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
 
-	log.Debug("build payload statedb metrics",  "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
+	log.Debug("build payload statedb metrics", "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
 
 	return &newPayloadResult{
 		block:    block,

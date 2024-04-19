@@ -6,23 +6,22 @@ import (
 )
 
 const (
-	blockNumberLength = 8 // uint64 is 8bytes
+	blockNumberLength = 8 // uint64 is 8 bytes.
 )
 
-// todo: cannot panic
-// todo: more tips
-// todo: inspect proof ancient
-// Keeper Meta
+// IterateKeeperMeta returns keep meta iterator.
 func IterateKeeperMeta(db ethdb.Iteratee) ethdb.Iterator {
 	return NewKeyLengthIterator(db.NewIterator(proofKeeperMetaPrefix, nil), len(proofKeeperMetaPrefix)+blockNumberLength)
 }
 
+// DeleteKeeperMeta is used to remove the specified keeper meta.
 func DeleteKeeperMeta(db ethdb.KeyValueWriter, blockID uint64) {
 	if err := db.Delete(proofKeeperMetaKey(blockID)); err != nil {
 		log.Crit("Failed to delete keeper meta", "err", err)
 	}
 }
 
+// PutKeeperMeta add a new keeper meta.
 func PutKeeperMeta(db ethdb.KeyValueWriter, blockID uint64, meta []byte) {
 	key := proofKeeperMetaKey(blockID)
 	if err := db.Put(key, meta); err != nil {
@@ -30,7 +29,7 @@ func PutKeeperMeta(db ethdb.KeyValueWriter, blockID uint64, meta []byte) {
 	}
 }
 
-// Proof Data
+// GetLatestProofData returns the latest head proof data.
 func GetLatestProofData(f *ResettableFreezer) []byte {
 	proofTable := f.freezer.tables[proposeProofTable]
 	if proofTable == nil {
@@ -44,6 +43,7 @@ func GetLatestProofData(f *ResettableFreezer) []byte {
 	return blob
 }
 
+// GetProofData returns the specified proof data.
 func GetProofData(f *ResettableFreezer, proofID uint64) []byte {
 	proofTable := f.freezer.tables[proposeProofTable]
 	if proofTable == nil {
@@ -56,17 +56,20 @@ func GetProofData(f *ResettableFreezer, proofID uint64) []byte {
 	return blob
 }
 
+// TruncateProofDataHead truncates [proofID, end...].
 func TruncateProofDataHead(f *ResettableFreezer, proofID uint64) {
 	f.freezer.TruncateHead(proofID)
 }
 
-func PutProofData(db ethdb.AncientWriter, proofID uint64, proof []byte) {
-	db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
-		err := op.AppendRaw(proposeProofTable, proofID, proof)
-		if err != nil {
-			// todo: panic
-			log.Error("Failed to put proof data", "proof_id", proofID, "error", err)
-		}
-		return nil
+// TruncateProofDataTail truncates [start..., proofID).
+func TruncateProofDataTail(f *ResettableFreezer, proofID uint64) {
+	f.freezer.TruncateTail(proofID)
+}
+
+// PutProofData appends a new proof to ancient proof db, the proofID should be continuous.
+func PutProofData(db ethdb.AncientWriter, proofID uint64, proof []byte) error {
+	_, err := db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
+		return op.AppendRaw(proposeProofTable, proofID, proof)
 	})
+	return err
 }

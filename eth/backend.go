@@ -209,6 +209,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			TrieCommitInterval:   config.TrieCommitInterval,
 			PathNodeBuffer:       config.PathNodeBuffer,
 			ProposeBlockInterval: config.ProposeBlockInterval,
+			EnableProofKeeper:    config.EnableProofKeeper,
+			KeepProofBlockSpan:   config.KeepProofBlockSpan,
 		}
 	)
 	// Override the chain config with provided settings.

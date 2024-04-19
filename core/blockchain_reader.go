@@ -425,3 +425,6 @@ func (bc *BlockChain) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscript
 func (bc *BlockChain) SubscribeBlockProcessingEvent(ch chan<- bool) event.Subscription {
 	return bc.scope.Track(bc.blockProcFeed.Subscribe(ch))
 }
+
+// ProofKeeper returns block chain proof keeper.
+func (bc *BlockChain) ProofKeeper() *ProofKeeper { return bc.proofKeeper }

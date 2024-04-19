@@ -243,6 +243,10 @@ func newBackendMock() *backendMock {
 	}
 }
 
+func (b *backendMock) ProofKeeper() *core.ProofKeeper {
+	return nil
+}
+
 func (b *backendMock) activateLondon() {
 	b.current.Number = big.NewInt(1100)
 }

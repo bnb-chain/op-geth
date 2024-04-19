@@ -96,6 +96,8 @@ var (
 		utils.StateHistoryFlag,
 		utils.ProposeBlockIntervalFlag,
 		utils.PathDBNodeBufferTypeFlag,
+		utils.EnableProofKeeperFlag,
+		utils.KeepProofBlockSpanFlag,
 		utils.LightServeFlag,
 		utils.LightIngressFlag,
 		utils.LightEgressFlag,

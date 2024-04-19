@@ -696,7 +696,7 @@ func (s *BlockChainAPI) GetProof(ctx context.Context, address common.Address, st
 	}
 
 	defer func() {
-		if proofKeeper := s.b.GetProofKeeper(); err != nil && proofKeeper != nil && header.Number != nil {
+		if proofKeeper := s.b.ProofKeeper(); err != nil && proofKeeper != nil && header.Number != nil {
 			if proofKeeper.IsProposeProofQuery(address, storageKeys, header.Number.Uint64()) {
 				if innerResult, innerError := proofKeeper.QueryProposeProof(header.Number.Uint64(), header.Root); innerError == nil {
 					result = &AccountResult{

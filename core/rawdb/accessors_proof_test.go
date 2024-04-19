@@ -24,7 +24,6 @@ func setupTestEnv() {
 func cleanupTestEnv() {
 	testAncientProofDB.Close()
 	os.RemoveAll(testAncientProofDir)
-
 }
 
 func TestProofDataAPI(t *testing.T) {
@@ -37,14 +36,17 @@ func TestProofDataAPI(t *testing.T) {
 
 	// case2: mismatch sequence put failed
 	mismatchProofID := uint64(2) // should=0
-	PutProofData(testAncientProofDB, mismatchProofID, mockData1)
+	err := PutProofData(testAncientProofDB, mismatchProofID, mockData1)
+	assert.NotNil(t, err)
 	proofData = GetLatestProofData(testAncientProofDB)
 	assert.Nil(t, proofData)
 
 	// case3: put/get succeed
 	matchProofID := uint64(0)
-	PutProofData(testAncientProofDB, matchProofID, mockData1)
-	PutProofData(testAncientProofDB, matchProofID+1, mockData2)
+	err = PutProofData(testAncientProofDB, matchProofID, mockData1)
+	assert.Nil(t, err)
+	err = PutProofData(testAncientProofDB, matchProofID+1, mockData2)
+	assert.Nil(t, err)
 	proofData = GetLatestProofData(testAncientProofDB)
 	assert.Equal(t, proofData, mockData2)
 	proofData = GetProofData(testAncientProofDB, 0)
@@ -52,7 +54,7 @@ func TestProofDataAPI(t *testing.T) {
 	proofData = GetProofData(testAncientProofDB, 1)
 	assert.Equal(t, proofData, mockData2)
 
-	// case4: truncate
+	// case4: truncate head
 	TruncateProofDataHead(testAncientProofDB, 1)
 	proofData = GetProofData(testAncientProofDB, 1)
 	assert.Nil(t, proofData)
@@ -66,6 +68,20 @@ func TestProofDataAPI(t *testing.T) {
 	assert.Equal(t, proofData, mockData1)
 	proofData = GetLatestProofData(testAncientProofDB)
 	assert.Equal(t, proofData, mockData1)
+
+	// case6: truncate tail
+	PutProofData(testAncientProofDB, matchProofID+1, mockData2)
+	proofData = GetProofData(testAncientProofDB, matchProofID)
+	assert.Equal(t, proofData, mockData1)
+	PutProofData(testAncientProofDB, matchProofID+2, mockData2)
+	TruncateProofDataTail(testAncientProofDB, matchProofID+1)
+	proofData = GetProofData(testAncientProofDB, matchProofID)
+	assert.Nil(t, proofData)
+	proofData = GetProofData(testAncientProofDB, matchProofID+1)
+	assert.Equal(t, proofData, mockData2)
+	TruncateProofDataTail(testAncientProofDB, matchProofID+2)
+	proofData = GetProofData(testAncientProofDB, matchProofID+1)
+	assert.Nil(t, proofData)
 
 	cleanupTestEnv()
 }

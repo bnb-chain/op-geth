@@ -65,13 +65,11 @@ type nodebufferlist struct {
 	baseMux   sync.RWMutex    // The mutex of base multiDifflayer and persistID.
 	flushMux  sync.RWMutex    // The mutex of flushing base multiDifflayer for reorg corner case.
 
-	isFlushing   atomic.Bool // Flag indicates writing disk under background.
-	stopFlushing atomic.Bool // Flag stops writing disk under background.
-	stopCh       chan struct{}
-	waitStopCh   chan struct{}
-	//notifyKeepCh chan *KeepRecord
-	//waitKeepCh   chan struct{}
-	keepFunc KeepRecordWatchFunc
+	isFlushing   atomic.Bool         // Flag indicates writing disk under background.
+	stopFlushing atomic.Bool         // Flag stops writing disk under background.
+	stopCh       chan struct{}       // Trigger stop background event loop.
+	waitStopCh   chan struct{}       // Wait stop background event loop.
+	keepFunc     KeepRecordWatchFunc // Used to keep op-proposal output proof.
 }
 
 // newNodeBufferList initializes the node buffer list with the provided nodes
@@ -136,6 +134,7 @@ func newNodeBufferList(
 // node retrieves the trie node with given node info.
 func (nf *nodebufferlist) node(owner common.Hash, path []byte, hash common.Hash) (node *trienode.Node, err error) {
 	nf.mux.RLock()
+	defer nf.mux.RUnlock()
 	find := func(nc *multiDifflayer) bool {
 		subset, ok := nc.nodes[owner]
 		if !ok {
@@ -155,14 +154,11 @@ func (nf *nodebufferlist) node(owner common.Hash, path []byte, hash common.Hash)
 	}
 	nf.traverse(find)
 	if err != nil {
-		nf.mux.RUnlock()
 		return nil, err
 	}
 	if node != nil {
-		nf.mux.RUnlock()
 		return node, nil
 	}
-	nf.mux.RUnlock()
 
 	nf.baseMux.RLock()
 	node, err = nf.base.node(owner, path, hash)
@@ -242,6 +238,16 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	}
 	if !force {
 		return nil
+	}
+
+	if nf.keepFunc != nil {
+		nf.mux.RLock()
+		traverseKeepFunc := func(buffer *multiDifflayer) bool {
+			nf.keepFunc(&KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks})
+			return true
+		}
+		nf.traverseReverse(traverseKeepFunc)
+		nf.mux.RUnlock()
 	}
 
 	// hang user read/write and background write
@@ -471,7 +477,9 @@ func (nf *nodebufferlist) diffToBase() {
 			log.Crit("committed block number misaligned", "block", buffer.block)
 		}
 
-		nf.keepFunc(&KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks})
+		if nf.keepFunc != nil {
+			nf.keepFunc(&KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks})
+		}
 
 		nf.baseMux.Lock()
 		err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes)
@@ -530,14 +538,15 @@ func (nf *nodebufferlist) loop() {
 	for {
 		select {
 		case <-nf.stopCh:
-			// force flush to ensure all proposed-block can be kept by proof keeper
-			nf.mux.RLock()
-			notifyKeeperFunc := func(buffer *multiDifflayer) bool {
-				nf.keepFunc(&KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks})
-				return true
+			if nf.keepFunc != nil {
+				nf.mux.RLock()
+				traverseKeepFunc := func(buffer *multiDifflayer) bool {
+					nf.keepFunc(&KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks})
+					return true
+				}
+				nf.traverseReverse(traverseKeepFunc)
+				nf.mux.RUnlock()
 			}
-			nf.traverseReverse(notifyKeeperFunc)
-			nf.mux.RUnlock()
 			nf.waitStopCh <- struct{}{}
 			return
 		case <-mergeTicker.C:
@@ -628,7 +637,9 @@ func (w *proposedBlockReader) Node(owner common.Hash, path []byte, hash common.H
 		current = current.next
 	}
 
+	w.nf.baseMux.RLock()
 	node, err := w.nf.base.node(owner, path, hash)
+	w.nf.baseMux.RUnlock()
 	if err != nil {
 		return nil, err
 	}

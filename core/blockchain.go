@@ -47,7 +47,6 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
@@ -157,11 +156,12 @@ type CacheConfig struct {
 	StateScheme          string                // Scheme used to store ethereum states and merkle tree nodes on top
 	PathNodeBuffer       pathdb.NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
 	ProposeBlockInterval uint64                // Propose block to L1 block interval.
+	EnableProofKeeper    bool                  // Whether to enable proof keeper
+	KeepProofBlockSpan   uint64                // Block span of keep proof
 	SnapshotNoBuild      bool                  // Whether the background generation is allowed
 	SnapshotWait         bool                  // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
 
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
-	RpcClient          *rpc.Client
 }
 
 // triedbConfig derives the configures for trie database.
@@ -230,6 +230,7 @@ type BlockChain struct {
 	flushInterval atomic.Int64                     // Time interval (processing time) after which to flush a state
 	triedb        *trie.Database                   // The database handler for maintaining trie nodes.
 	stateCache    state.Database                   // State database to reuse between imports (contains state cache)
+	proofKeeper   *ProofKeeper                     // Store/Query op-proposal proof to ensure consistent.
 
 	// txLookupLimit is the maximum number of blocks from head whose tx indices
 	// are reserved:
@@ -281,8 +282,6 @@ type BlockChain struct {
 	processor  Processor // Block transaction processor interface
 	forker     *ForkChoice
 	vmConfig   vm.Config
-
-	ProofKeeper *ProofKeeper
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -293,7 +292,8 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		cacheConfig = defaultCacheConfig
 	}
 	opts := &proofKeeperOptions{
-		enable:             true, // todo
+		enable:             cacheConfig.EnableProofKeeper,
+		keepProofBlockSpan: cacheConfig.KeepProofBlockSpan,
 		watchStartKeepCh:   make(chan *pathdb.KeepRecord),
 		notifyFinishKeepCh: make(chan struct{}),
 	}
@@ -352,7 +352,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if err != nil {
 		return nil, err
 	}
-	bc.ProofKeeper = proofKeeper
+	bc.proofKeeper = proofKeeper
 
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
@@ -1047,6 +1047,9 @@ func (bc *BlockChain) Stop() {
 		// Ensure that the in-memory trie nodes are journaled to disk properly.
 		if err := bc.triedb.Journal(bc.CurrentBlock().Root); err != nil {
 			log.Info("Failed to journal in-memory trie nodes", "err", err)
+		}
+		if err := bc.proofKeeper.Stop(); err != nil {
+			log.Info("Failed to stop proof keeper", "err", err)
 		}
 	} else {
 		// Ensure the state of a recent block is also stored to disk before exiting.

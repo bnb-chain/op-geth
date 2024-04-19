@@ -67,7 +67,7 @@ var stateFreezerNoSnappy = map[string]bool{
 }
 
 const (
-	proposeProofTable = "propose_proof"
+	proposeProofTable = "propose.proof"
 )
 
 var proofFreezerNoSnappy = map[string]bool{
@@ -82,7 +82,7 @@ var (
 )
 
 // freezers the collections of all builtin freezers.
-var freezers = []string{chainFreezerName, stateFreezerName}
+var freezers = []string{chainFreezerName, stateFreezerName, proofFreezerName}
 
 // NewStateFreezer initializes the freezer for state history.
 func NewStateFreezer(ancientDir string, readOnly bool) (*ResettableFreezer, error) {

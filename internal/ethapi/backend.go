@@ -73,7 +73,7 @@ type Backend interface {
 	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
 	SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) event.Subscription
 
-	GetProofKeeper() *core.ProofKeeper
+	ProofKeeper() *core.ProofKeeper
 
 	// Transaction pool API
 	SendTx(ctx context.Context, signedTx *types.Transaction) error

@@ -54,8 +54,8 @@ type EthAPIBackend struct {
 	gpo                 *gasprice.Oracle
 }
 
-func (b *EthAPIBackend) GetProofKeeper() *core.ProofKeeper {
-	return b.eth.blockchain.ProofKeeper
+func (b *EthAPIBackend) ProofKeeper() *core.ProofKeeper {
+	return b.eth.blockchain.ProofKeeper()
 }
 
 // ChainConfig returns the active chain configuration.

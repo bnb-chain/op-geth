@@ -480,11 +480,13 @@ func (d *Decimal) UnmarshalJSON(input []byte) error {
 // hex-strings for delivery to rpc-caller.
 type ProofList []string
 
+// Put implements ethdb.KeyValueWriter put interface.
 func (n *ProofList) Put(key []byte, value []byte) error {
 	*n = append(*n, hexutil.Encode(value))
 	return nil
 }
 
+// Delete implements ethdb.KeyValueWriter delete interface.
 func (n *ProofList) Delete(key []byte) error {
 	panic("not supported")
 }
@@ -497,7 +499,7 @@ type AccountResult struct {
 	CodeHash     Hash            `json:"codeHash"`
 	Nonce        uint64          `json:"nonce"`
 	StorageHash  Hash            `json:"storageHash"`
-	StorageProof []StorageResult `json:"storageProof"` // optional
+	StorageProof []StorageResult `json:"storageProof"`
 }
 
 // StorageResult provides a proof for a key-value pair.

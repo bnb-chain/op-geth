@@ -48,7 +48,7 @@ type LesApiBackend struct {
 	gpo                 *gasprice.Oracle
 }
 
-func (b *LesApiBackend) GetProofKeeper() *core.ProofKeeper {
+func (b *LesApiBackend) ProofKeeper() *core.ProofKeeper {
 	return nil
 }
 

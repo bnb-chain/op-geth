@@ -165,7 +165,7 @@ type CacheConfig struct {
 }
 
 // triedbConfig derives the configures for trie database.
-func (c *CacheConfig) triedbConfig() *trie.Config {
+func (c *CacheConfig) triedbConfig(keepWatchFunc pathdb.KeepRecordWatchFunc) *trie.Config {
 	config := &trie.Config{Preimages: c.Preimages}
 	if c.StateScheme == rawdb.HashScheme {
 		config.HashDB = &hashdb.Config{
@@ -179,8 +179,7 @@ func (c *CacheConfig) triedbConfig() *trie.Config {
 			CleanCacheSize:       c.TrieCleanLimit * 1024 * 1024,
 			DirtyCacheSize:       c.TrieDirtyLimit * 1024 * 1024,
 			ProposeBlockInterval: c.ProposeBlockInterval,
-			KeepCh:               make(chan *pathdb.KeepRecord),
-			WaitKeepCh:           make(chan struct{}),
+			KeepFunc:             keepWatchFunc,
 		}
 	}
 	return config
@@ -293,9 +292,14 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if cacheConfig == nil {
 		cacheConfig = defaultCacheConfig
 	}
-
+	opts := &proofKeeperOptions{
+		enable:             true, // todo
+		watchStartKeepCh:   make(chan *pathdb.KeepRecord),
+		notifyFinishKeepCh: make(chan struct{}),
+	}
+	proofKeeper := newProofKeeper(opts)
 	// Open trie database with provided config
-	trieConfig := cacheConfig.triedbConfig()
+	trieConfig := cacheConfig.triedbConfig(proofKeeper.GetKeepRecordWatchFunc())
 	triedb := trie.NewDatabase(db, trieConfig)
 
 	// Setup the genesis block, commit the provided genesis specification
@@ -344,19 +348,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
-	var err error
-	if cacheConfig.StateScheme == rawdb.PathScheme && trieConfig.PathDB.TrieNodeBufferType == pathdb.NodeBufferList {
-		opts := &proofKeeperOptions{
-			enable:             true,
-			watchStartKeepCh:   trieConfig.PathDB.KeepCh,
-			notifyFinishKeepCh: trieConfig.PathDB.WaitKeepCh,
-			blockChain:         bc,
-		}
-		bc.ProofKeeper, err = newProofKeeper(db, opts)
-		if err != nil {
-			return nil, err
-		}
+	err := proofKeeper.Start(bc, db)
+	if err != nil {
+		return nil, err
 	}
+	bc.ProofKeeper = proofKeeper
 
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {

@@ -119,13 +119,12 @@ func NewTrieNodeBuffer(
 	limit int,
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers, proposeBlockInterval uint64,
-	keepCh chan *KeepRecord,
-	waitKeepCh chan struct{},
+	keepFunc KeepRecordWatchFunc,
 ) trienodebuffer {
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {
 	case NodeBufferList:
-		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepCh, waitKeepCh)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc)
 	case AsyncNodeBuffer:
 		return newAsyncNodeBuffer(limit, nodes, layers)
 	case SyncNodeBuffer:

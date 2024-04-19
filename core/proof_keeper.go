@@ -12,7 +12,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	trie2 "github.com/ethereum/go-ethereum/trie"
@@ -56,7 +55,6 @@ type proofKeeperOptions struct {
 	enable             bool
 	watchStartKeepCh   chan *pathdb.KeepRecord
 	notifyFinishKeepCh chan struct{}
-	blockChain         *BlockChain
 }
 
 // todo: ensure ancient sync write??
@@ -66,41 +64,71 @@ type proofKeeperOptions struct {
 // todo gc
 type ProofKeeper struct {
 	opts         *proofKeeperOptions
+	blockChain   *BlockChain
 	keeperMetaDB ethdb.Database
 	proofDataDB  *rawdb.ResettableFreezer
-	selfClient   *gethclient.Client
 
 	queryProofCh     chan uint64
 	waitQueryProofCh chan *proofDataRecord
 }
 
-func newProofKeeper(keeperMetaDB ethdb.Database, opts *proofKeeperOptions) (*ProofKeeper, error) {
+func newProofKeeper(opts *proofKeeperOptions) *ProofKeeper {
+	keeper := &ProofKeeper{
+		opts:             opts,
+		queryProofCh:     make(chan uint64),
+		waitQueryProofCh: make(chan *proofDataRecord),
+	}
+	log.Info("Succeed to init proof keeper", "options", opts)
+	return keeper
+}
+
+func (keeper *ProofKeeper) Start(blockChain *BlockChain, keeperMetaDB ethdb.Database) error {
 	var (
 		err        error
 		ancientDir string
-		keeper     *ProofKeeper
 	)
 
-	if ancientDir, err = keeperMetaDB.AncientDatadir(); err != nil {
+	keeper.blockChain = blockChain
+	keeper.keeperMetaDB = keeperMetaDB
+	if ancientDir, err = keeper.keeperMetaDB.AncientDatadir(); err != nil {
 		log.Error("Failed to get ancient data dir", "error", err)
-		return nil, err
-	}
-	keeper = &ProofKeeper{
-		opts:         opts,
-		keeperMetaDB: keeperMetaDB,
+		return err
 	}
 	if keeper.proofDataDB, err = rawdb.NewProofFreezer(ancientDir, false); err != nil {
 		log.Error("Failed to new proof ancient freezer", "error", err)
-		return nil, err
+		return err
 	}
 
-	keeper.queryProofCh = make(chan uint64)
-	keeper.waitQueryProofCh = make(chan *proofDataRecord)
-
 	go keeper.eventLoop()
+	log.Info("Succeed to start proof keeper")
+	return nil
+}
 
-	log.Info("Succeed to init proof keeper", "options", opts)
-	return keeper, nil
+func (keeper *ProofKeeper) Stop() error {
+	return nil
+}
+
+func (keeper *ProofKeeper) GetKeepRecordWatchFunc() pathdb.KeepRecordWatchFunc {
+	return func(keepRecord *pathdb.KeepRecord) {
+		if keeper == nil {
+			return
+		}
+		if keeper.opts == nil || keeper.opts.watchStartKeepCh == nil || keeper.opts.notifyFinishKeepCh == nil {
+			return
+		}
+		if !keeper.opts.enable {
+			return
+		}
+		if keepRecord.BlockID == 0 || keepRecord.KeepInterval == 0 {
+			return
+		}
+		if keepRecord.BlockID%keepRecord.KeepInterval != 0 {
+			return
+		}
+		keeper.opts.watchStartKeepCh <- keepRecord
+		<-keeper.opts.notifyFinishKeepCh
+		log.Info("Succeed to keep proof in stop", "record", keepRecord)
+	}
 }
 
 func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofDataRecord, error) {
@@ -112,10 +140,10 @@ func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofData
 		pRecord   *proofDataRecord
 	)
 
-	if header = keeper.opts.blockChain.GetHeaderByNumber(kRecord.BlockID); header == nil {
+	if header = keeper.blockChain.GetHeaderByNumber(kRecord.BlockID); header == nil {
 		return nil, fmt.Errorf("block is not found, block_id=%d", kRecord.BlockID)
 	}
-	if stateDB, err = keeper.opts.blockChain.StateAt(header.Root); err != nil {
+	if stateDB, err = keeper.blockChain.StateAt(header.Root); err != nil {
 		return nil, err
 	}
 	if worldTrie, err = trie2.NewStateTrie(trie2.StateTrieID(header.Root), stateDB.Database().TrieDB()); err != nil {
@@ -264,7 +292,6 @@ func (keeper *ProofKeeper) truncateKeeperMetaRecordHeadIfNeeded(blockID uint64) 
 			hasTruncated = true
 			rawdb.DeleteKeeperMeta(batch, m.BlockID)
 		}
-
 	}
 	err = batch.Write()
 	if err != nil {

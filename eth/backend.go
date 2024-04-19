@@ -202,10 +202,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		journalFilePath string
 		path            string
 	)
-	if config.JournalFileEnabled {
-		path = ChainData
-		journalFilePath = stack.ResolvePath(path) + "/" + JournalFileName
-	}
+	path = ChainData
+	journalFilePath = stack.ResolvePath(path) + "/" + JournalFileName
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
@@ -223,6 +221,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			TrieCommitInterval:  config.TrieCommitInterval,
 			PathSyncFlush:       config.PathSyncFlush,
 			JournalFilePath:     journalFilePath,
+			JournalFile:         config.JournalFileEnabled,
 		}
 	)
 	// Override the chain config with provided settings.

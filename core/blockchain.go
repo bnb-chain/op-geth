@@ -148,6 +148,7 @@ type CacheConfig struct {
 	StateScheme         string        // Scheme used to store ethereum states and merkle tree nodes on top
 	PathSyncFlush       bool          // Whether sync flush the trienodebuffer of pathdb to disk.
 	JournalFilePath     string
+	JournalFile         bool
 
 	SnapshotNoBuild bool // Whether the background generation is allowed
 	SnapshotWait    bool // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
@@ -170,6 +171,7 @@ func (c *CacheConfig) triedbConfig() *trie.Config {
 			CleanCacheSize:  c.TrieCleanLimit * 1024 * 1024,
 			DirtyCacheSize:  c.TrieDirtyLimit * 1024 * 1024,
 			JournalFilePath: c.JournalFilePath,
+			JournalFile:     c.JournalFile,
 		}
 	}
 	return config

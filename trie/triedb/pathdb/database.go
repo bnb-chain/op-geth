@@ -63,6 +63,13 @@ const (
 	DefaultBatchRedundancyRate = 1.1
 )
 
+type JournalType int
+
+const (
+	JournalKVType JournalType = iota
+	JournalFileType
+)
+
 // layer is the interface implemented by all state layers which includes some
 // public methods and some additional methods for internal usage.
 type layer interface {
@@ -90,7 +97,7 @@ type layer interface {
 	// journal commits an entire diff hierarchy to disk into a single journal entry.
 	// This is meant to be used during shutdown to persist the layer without
 	// flattening everything down (bad for reorgs).
-	journal(w io.Writer, journalFile bool) error
+	journal(w io.Writer, journalType JournalType) error
 }
 
 // Config contains the settings for database.
@@ -103,6 +110,7 @@ type Config struct {
 	ProposeBlockInterval uint64         // Propose block to L1 block interval.
 	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
 	JournalFilePath      string
+	JournalFile     bool
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -512,23 +520,40 @@ func (db *Database) modifyAllowed() error {
 	return nil
 }
 
-func (db *Database) IsEnableJournalFile() bool {
-	return len(db.config.JournalFilePath) != 0
+// DetermineJournalTypeForWriter is used when persisting the journal. It determines JournalType based on the config passed in by the Config.
+func (db *Database) DetermineJournalTypeForWriter() JournalType {
+	if db.config.JournalFile {
+		return JournalFileType
+	} else {
+		return JournalKVType
+	}
+}
+
+// DetermineJournalTypeForReader is used when loading the journal. It loads based on whether JournalKV or JournalFile currently exists.
+func (db *Database) DetermineJournalTypeForReader() JournalType {
+	if journal := rawdb.ReadTrieJournal(db.diskdb); len(journal) != 0 {
+		return JournalKVType
+	}
+
+	if fileInfo, stateErr := os.Stat(db.config.JournalFilePath); stateErr == nil && !fileInfo.IsDir() {
+		return JournalFileType
+	}
+
+	return JournalKVType
 }
 
 func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {
+	// To prevent any remnants of old journals after converting from JournalKV to JournalFile or vice versa, all deletions must be completed.
+	rawdb.DeleteTrieJournal(writer)
+
+	// delete from journal file, may not exist
 	filePath := db.config.JournalFilePath
-	if len(filePath) == 0 {
-		rawdb.DeleteTrieJournal(writer)
-	} else {
-		_, err := os.Stat(filePath)
-		if os.IsNotExist(err) {
-			return err
-		}
-		errRemove := os.Remove(filePath)
-		if errRemove != nil {
-			log.Crit("Failed to remove tries journal", "journal path", filePath, "err", err)
-		}
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil
+	}
+	errRemove := os.Remove(filePath)
+	if errRemove != nil {
+		log.Crit("Failed to remove tries journal", "journal path", filePath, "err", errRemove)
 	}
 	return nil
 }

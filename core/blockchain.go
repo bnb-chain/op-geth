@@ -163,6 +163,7 @@ type CacheConfig struct {
 	SnapshotNoBuild      bool                  // Whether the background generation is allowed
 	SnapshotWait         bool                  // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
 	JournalFilePath      string
+	JournalFile          bool
 
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 }
@@ -187,6 +188,7 @@ func (c *CacheConfig) triedbConfig(keepFunc pathdb.NotifyKeepFunc) *trie.Config 
 			ProposeBlockInterval: c.ProposeBlockInterval,
 			NotifyKeep:           keepFunc,
 			JournalFilePath:      c.JournalFilePath,
+			JournalFile:          c.JournalFile,
 		}
 	}
 	return config

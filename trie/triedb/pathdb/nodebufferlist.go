@@ -602,11 +602,10 @@ func (w *proposedBlockReader) Node(owner common.Hash, path []byte, hash common.H
 
 	w.nf.baseMux.RLock()
 	node, err := w.nf.base.node(owner, path, hash)
+	w.nf.baseMux.RUnlock()
 	if err != nil {
-		w.nf.baseMux.RUnlock()
 		return nil, err
 	}
-	w.nf.baseMux.RUnlock()
 	if node != nil {
 		return node.Blob, nil
 	}

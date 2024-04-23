@@ -228,6 +228,7 @@ var (
 		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
 		CancunTime:  newUint64(1715754600), // May-15-2024 06:30 AM +UTC
 		EcotoneTime: newUint64(1715754600), // May-15-2024 06:30 AM +UTC
+		HaberTime:   newUint64(1717048800), // May-30-2024 06:00 AM +UTC
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{
@@ -261,6 +262,7 @@ var (
 		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
 		CancunTime:  newUint64(1714995000), // May-06-2024 11:30 AM +UTC
 		EcotoneTime: newUint64(1714995000), // May-06-2024 11:30 AM +UTC
+		HaberTime:   newUint64(1716361200), // May-22-2024 07:00 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -472,6 +474,7 @@ type ChainConfig struct {
 	CanyonTime   *uint64  `json:"canyonTime,omitempty"`   // Canyon switch time (nil = no fork, 0 = already on optimism canyon)
 	// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
 	EcotoneTime *uint64 `json:"ecotoneTime,omitempty"` // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
+	HaberTime   *uint64 `json:"haberTime,omitempty"`   // Haber switch time (nil = no fork, 0 = already on haber)
 
 	InteropTime *uint64 `json:"interopTime,omitempty"` // Interop switch time (nil = no fork, 0 = already on optimism interop)
 
@@ -635,8 +638,14 @@ func (c *ChainConfig) Description() string {
 	if c.PreContractForkBlock != nil {
 		banner += fmt.Sprintf(" - PreContractForkBlock:        #%-8v\n", c.PreContractForkBlock)
 	}
-	// TODO: add bep
-	banner += fmt.Sprintf(" - Fermat:              #%-8v\n", c.Fermat)
+	if c.Fermat != nil {
+		banner += fmt.Sprintf(" - Fermat:              #%-8v (https://github.com/bnb-chain/BEPs/blob/master/BEPs/BEP-293.md)\n", c.Fermat)
+	}
+	banner += "OPBNB hard forks (timestamp based):\n"
+	if c.HaberTime != nil {
+		banner += fmt.Sprintf(" - Haber:                    @%-10v\n", *c.HaberTime)
+	}
+
 	return banner
 }
 
@@ -755,6 +764,10 @@ func (c *ChainConfig) IsCanyon(time uint64) bool {
 
 func (c *ChainConfig) IsEcotone(time uint64) bool {
 	return isTimestampForked(c.EcotoneTime, time)
+}
+
+func (c *ChainConfig) IsHaber(time uint64) bool {
+	return isTimestampForked(c.HaberTime, time)
 }
 
 func (c *ChainConfig) IsInterop(time uint64) bool {
@@ -1119,6 +1132,7 @@ type Rules struct {
 	IsOptimismBedrock, IsOptimismRegolith                   bool
 	IsOptimismCanyon                                        bool
 	IsFermat                                                bool
+	IsHaber                                                 bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1150,5 +1164,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsOptimismCanyon:   c.IsOptimismCanyon(timestamp),
 		// OPBNB
 		IsFermat: c.IsFermat(num),
+		IsHaber:  c.IsHaber(timestamp),
 	}
 }

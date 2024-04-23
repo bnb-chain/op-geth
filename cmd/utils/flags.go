@@ -1167,12 +1167,12 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.SepoliaBootnodes
 		case ctx.Bool(GoerliFlag.Name):
 			urls = params.GoerliBootnodes
+		case ctx.Bool(OpBNBTestnetFlag.Name):
+			urls = params.OpBNBTestnetBootnodes
 		case ctx.Bool(NetworkIdFlag.Name):
 			if ctx.Uint64(NetworkIdFlag.Name) == params.OpBNBTestnet {
 				urls = params.OpBNBTestnetBootnodes
 			}
-		case ctx.Bool(OpBNBTestnetFlag.Name):
-			urls = params.OpBNBTestnetBootnodes
 		}
 	}
 	cfg.BootstrapNodes = mustParseBootnodes(urls)

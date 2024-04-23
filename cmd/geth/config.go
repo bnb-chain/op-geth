@@ -115,6 +115,17 @@ func loadConfig(file string, cfg *gethConfig) error {
 
 func defaultNodeConfig() node.Config {
 	git, _ := version.VCS()
+	cfg := node.DefaultConfig
+	cfg.Name = clientIdentifier
+	cfg.Version = params.VersionWithCommit(git.Commit, git.Date)
+	cfg.HTTPModules = append(cfg.HTTPModules, "eth")
+	cfg.WSModules = append(cfg.WSModules, "eth")
+	cfg.IPCPath = "geth.ipc"
+	return cfg
+}
+
+func defaultOpBNBNodeConfig() node.Config {
+	git, _ := version.VCS()
 	cfg := node.DefaultOpBNBConfig
 	cfg.Name = clientIdentifier
 	cfg.Version = params.VersionWithCommit(git.Commit, git.Date)
@@ -129,9 +140,18 @@ func defaultNodeConfig() node.Config {
 func loadBaseConfig(ctx *cli.Context) gethConfig {
 	// Load defaults.
 	cfg := gethConfig{
-		Eth:     ethconfig.OpBNBDefaults,
+		Eth:     ethconfig.Defaults,
 		Node:    defaultNodeConfig(),
-		Metrics: metrics.DefaultOpBNBConfig,
+		Metrics: metrics.DefaultConfig,
+	}
+
+	if ctx.Bool(utils.OpBNBMainnetFlag.Name) || ctx.Bool(utils.OpBNBTestnetFlag.Name) {
+		cfg.Eth = ethconfig.OpBNBDefaults
+		cfg.Node = defaultOpBNBNodeConfig()
+		cfg.Metrics = metrics.DefaultOpBNBConfig
+		if ctx.Bool(utils.OpBNBTestnetFlag.Name) {
+			cfg.Eth.NetworkId = 5611
+		}
 	}
 
 	// Load config file.

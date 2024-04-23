@@ -1829,7 +1829,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	godebug.SetGCPercent(int(gogc))
 
 	// set gc mode default value is archive for opBNB
-	if !ctx.IsSet(GCModeFlag.Name) {
+	if !ctx.IsSet(GCModeFlag.Name) && (ctx.Bool(OpBNBMainnetFlag.Name) || ctx.Bool(OpBNBTestnetFlag.Name)) {
 		err = ctx.Set(GCModeFlag.Name, "archive")
 		if err != nil {
 			log.Error("can't set gc mode", "err", err)

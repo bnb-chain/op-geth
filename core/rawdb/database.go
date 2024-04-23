@@ -449,6 +449,28 @@ func (s *stat) Count() string {
 	return s.count.String()
 }
 
+func PruneHashTrieNodeInDatabase(db ethdb.Database) error {
+	it := db.NewIterator([]byte{}, []byte{})
+	defer it.Release()
+
+	total_num := 0
+	for it.Next() {
+		var key = it.Key()
+		switch {
+		case IsLegacyTrieNode(key, it.Value()):
+			db.Delete(key)
+			total_num++
+			if total_num%100000 == 0 {
+				log.Info("Pruning hash-base trie nodes", "complete progress", total_num)
+			}
+		default:
+			continue
+		}
+	}
+	log.Info("Pruning hash-base trie nodes", "complete progress", total_num)
+	return nil
+}
+
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {

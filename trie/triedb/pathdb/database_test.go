@@ -443,6 +443,8 @@ func TestDisable(t *testing.T) {
 	tester := newTester(t)
 	defer tester.release()
 
+	index := len(tester.roots)/2 + 1
+	tester.db.Commit(tester.roots[index], false)
 	_, stored := rawdb.ReadAccountTrieNode(tester.db.diskdb, nil)
 	if err := tester.db.Disable(); err != nil {
 		t.Fatal("Failed to deactivate database")

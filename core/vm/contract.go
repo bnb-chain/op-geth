@@ -17,10 +17,10 @@
 package vm
 
 import (
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"github.com/holiman/uint256"
+	"math/big"
 )
 
 // ContractRef is a reference to the contract's backing object
@@ -58,8 +58,9 @@ type Contract struct {
 	CodeAddr *common.Address
 	Input    []byte
 
-	Gas   uint64
-	value *big.Int
+	Gas       uint64
+	value     *big.Int
+	optimized bool
 }
 
 // NewContract returns a new contract environment for the execution of EVM.
@@ -112,8 +113,17 @@ func (c *Contract) isCode(udest uint64) bool {
 		if !exist {
 			// Do the analysis and save in parent context
 			// We do not need to store it in c.analysis
-			analysis = codeBitmap(c.Code)
-			c.jumpdests[c.CodeHash] = analysis
+			if c.optimized {
+				analysis = compiler.LoadBitvec(c.CodeHash)
+				if analysis == nil {
+					analysis = codeBitmap(c.Code)
+					compiler.StoreBitvec(c.CodeHash, analysis)
+				}
+				c.jumpdests[c.CodeHash] = analysis
+			} else {
+				analysis = codeBitmap(c.Code)
+				c.jumpdests[c.CodeHash] = analysis
+			}
 		}
 		// Also stash it in current contract for faster access
 		c.analysis = analysis

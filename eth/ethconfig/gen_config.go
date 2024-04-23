@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/ethereum/go-ethereum/miner"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 // MarshalTOML marshals as TOML.
@@ -28,7 +29,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TransactionHistory                      uint64                 `toml:",omitempty"`
 		StateHistory                            uint64                 `toml:",omitempty"`
 		StateScheme                             string                 `toml:",omitempty"`
-		PathSyncFlush           				bool                   `toml:",omitempty"`
+		ProposeBlockInterval 					uint64 				   `toml:",omitempty"`
+		PathNodeBuffer           				pathdb.NodeBufferType  `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               int                    `toml:",omitempty"`
 		LightIngress                            int                    `toml:",omitempty"`
@@ -79,7 +81,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.TransactionHistory = c.TransactionHistory
 	enc.StateHistory = c.StateHistory
 	enc.StateScheme = c.StateScheme
-	enc.PathSyncFlush = c.PathSyncFlush
+	enc.ProposeBlockInterval = c.ProposeBlockInterval
+	enc.PathNodeBuffer = c.PathNodeBuffer
 	enc.RequiredBlocks = c.RequiredBlocks
 	enc.LightServ = c.LightServ
 	enc.LightIngress = c.LightIngress
@@ -134,7 +137,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TransactionHistory                      *uint64                `toml:",omitempty"`
 		StateHistory                            *uint64                `toml:",omitempty"`
 		StateScheme                             *string                `toml:",omitempty"`
-		PathSyncFlush           				*bool                  `toml:",omitempty"`
+		ProposeBlockInterval 					*uint64 			   `toml:",omitempty"`
+		PathNodeBuffer           				*pathdb.NodeBufferType `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               *int                   `toml:",omitempty"`
 		LightIngress                            *int                   `toml:",omitempty"`
@@ -210,8 +214,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.StateScheme != nil {
 		c.StateScheme = *dec.StateScheme
 	}
-	if dec.PathSyncFlush != nil {
-		c.PathSyncFlush = *dec.PathSyncFlush
+	if dec.ProposeBlockInterval != nil {
+		c.ProposeBlockInterval = *dec.ProposeBlockInterval
+	}
+	if dec.PathNodeBuffer != nil {
+		c.PathNodeBuffer = *dec.PathNodeBuffer
 	}
 	if dec.RequiredBlocks != nil {
 		c.RequiredBlocks = dec.RequiredBlocks

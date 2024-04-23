@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"math"
 	"math/big"
 	"net"
@@ -300,10 +301,16 @@ var (
 		Usage:    "Scheme to use for storing ethereum state ('hash' or 'path')",
 		Category: flags.StateCategory,
 	}
-	PathDBSyncFlag = &cli.BoolFlag{
-		Name:     "pathdb.sync",
-		Usage:    "sync flush nodes cache to disk in path schema",
-		Value:    false,
+	PathDBNodeBufferTypeFlag = &cli.StringFlag{
+		Name:     "pathdb.nodebuffer",
+		Usage:    "Type of trienodebuffer to cache trie nodes in disklayer('list', 'sync', or 'async')",
+		Value:    "async",
+		Category: flags.StateCategory,
+	}
+	ProposeBlockIntervalFlag = &cli.Uint64Flag{
+		Name:     "pathdb.proposeblock",
+		Usage:    "keep the same with op-proposer propose block interval",
+		Value:    pathdb.DefaultProposeBlockInterval,
 		Category: flags.StateCategory,
 	}
 	StateHistoryFlag = &cli.Uint64Flag{
@@ -1049,6 +1056,12 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Usage:    "InfluxDB organization name (v2 only)",
 		Value:    metrics.DefaultConfig.InfluxDBOrganization,
 		Category: flags.MetricsCategory,
+	}
+
+	VMOpcodeOptimizeFlag = &cli.BoolFlag{
+		Name:     "vm.opcode.optimize",
+		Usage:    "enable opcode optimization",
+		Category: flags.VMCategory,
 	}
 )
 
@@ -1862,8 +1875,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		log.Warn("The flag --txlookuplimit is deprecated and will be removed, please use --history.transactions")
 		cfg.TransactionHistory = ctx.Uint64(TxLookupLimitFlag.Name)
 	}
-	if ctx.IsSet(PathDBSyncFlag.Name) {
-		cfg.PathSyncFlush = true
+	if ctx.IsSet(PathDBNodeBufferTypeFlag.Name) {
+		cfg.PathNodeBuffer = pathdb.GetNodeBufferType(ctx.String(PathDBNodeBufferTypeFlag.Name))
+	}
+	if ctx.IsSet(ProposeBlockIntervalFlag.Name) {
+		cfg.ProposeBlockInterval = ctx.Uint64(ProposeBlockIntervalFlag.Name)
 	}
 	if ctx.String(GCModeFlag.Name) == "archive" && cfg.TransactionHistory != 0 {
 		cfg.TransactionHistory = 0
@@ -1899,6 +1915,13 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.IsSet(VMEnableDebugFlag.Name) {
 		// TODO(fjl): force-enable this in --dev mode
 		cfg.EnablePreimageRecording = ctx.Bool(VMEnableDebugFlag.Name)
+	}
+
+	if ctx.IsSet(VMOpcodeOptimizeFlag.Name) {
+		cfg.EnableOpcodeOptimizing = ctx.Bool(VMOpcodeOptimizeFlag.Name)
+		if cfg.EnableOpcodeOptimizing {
+			compiler.EnableOptimization()
+		}
 	}
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
@@ -2387,8 +2410,12 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readonly bool) (*core.BlockCh
 	if ctx.IsSet(CacheFlag.Name) || ctx.IsSet(CacheGCFlag.Name) {
 		cache.TrieDirtyLimit = ctx.Int(CacheFlag.Name) * ctx.Int(CacheGCFlag.Name) / 100
 	}
-	vmcfg := vm.Config{EnablePreimageRecording: ctx.Bool(VMEnableDebugFlag.Name)}
+	vmcfg := vm.Config{EnablePreimageRecording: ctx.Bool(VMEnableDebugFlag.Name),
+		EnableOpcodeOptimizations: ctx.Bool(VMOpcodeOptimizeFlag.Name)}
 
+	if vmcfg.EnableOpcodeOptimizations {
+		compiler.EnableOptimization()
+	}
 	// Disable transaction indexing/unindexing by default.
 	chain, err := core.NewBlockChain(chainDb, cache, gspec, nil, engine, vmcfg, nil, nil)
 	if err != nil {

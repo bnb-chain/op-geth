@@ -94,6 +94,8 @@ var (
 		utils.TxLookupLimitFlag,
 		utils.TransactionHistoryFlag,
 		utils.StateHistoryFlag,
+		utils.ProposeBlockIntervalFlag,
+		utils.PathDBNodeBufferTypeFlag,
 		utils.LightServeFlag,
 		utils.LightIngressFlag,
 		utils.LightEgressFlag,
@@ -156,6 +158,7 @@ var (
 		utils.RollupHaltOnIncompatibleProtocolVersionFlag,
 		utils.RollupSuperchainUpgradesFlag,
 		configFileFlag,
+		utils.VMOpcodeOptimizeFlag,
 	}, utils.NetworkFlags, utils.DatabaseFlags)
 
 	rpcFlags = []cli.Flag{

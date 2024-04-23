@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -83,26 +84,27 @@ var OpBNBDefaults = Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	SyncMode:           downloader.SnapSync,
-	NetworkId:          1,
-	TxLookupLimit:      2350000,
-	TransactionHistory: 2350000,
-	StateHistory:       params.FullImmutabilityThreshold,
-	LightPeers:         100,
-	DatabaseCache:      512,
-	TrieCleanCache:     154,
-	TrieDirtyCache:     256,
-	TrieTimeout:        60 * time.Minute,
-	TrieCommitInterval: 0,
-	SnapshotCache:      102,
-	FilterLogCacheSize: 32,
-	Miner:              miner.DefaultConfig,
-	TxPool:             legacypool.DefaultConfig,
-	BlobPool:           blobpool.DefaultConfig,
-	RPCGasCap:          50000000,
-	RPCEVMTimeout:      5 * time.Second,
-	GPO:                FullNodeGPO,
-	RPCTxFeeCap:        1, // 1 ether
+	SyncMode:               downloader.SnapSync,
+	NetworkId:              1,
+	TxLookupLimit:          2350000,
+	TransactionHistory:     2350000,
+	StateHistory:           params.FullImmutabilityThreshold,
+	LightPeers:             100,
+	DatabaseCache:          512,
+	TrieCleanCache:         154,
+	TrieDirtyCache:         256,
+	TrieTimeout:            60 * time.Minute,
+	TrieCommitInterval:     0,
+	SnapshotCache:          102,
+	FilterLogCacheSize:     32,
+	Miner:                  miner.DefaultConfig,
+	TxPool:                 legacypool.DefaultConfig,
+	BlobPool:               blobpool.DefaultConfig,
+	RPCGasCap:              50000000,
+	RPCEVMTimeout:          5 * time.Second,
+	GPO:                    FullNodeGPO,
+	RPCTxFeeCap:            1, // 1 ether
+	EnableOpcodeOptimizing: false,
 }
 
 //go:generate go run github.com/fjl/gencodec -type Config -formats toml -out gen_config.go
@@ -133,8 +135,9 @@ type Config struct {
 	// State scheme represents the scheme used to store ethereum states and trie
 	// nodes on top. It can be 'hash', 'path', or none which means use the scheme
 	// consistent with persistent state.
-	StateScheme   string `toml:",omitempty"`
-	PathSyncFlush bool   `toml:",omitempty"` // State scheme used to store ethereum state and merkle trie nodes on top
+	StateScheme          string                `toml:",omitempty"`
+	PathNodeBuffer       pathdb.NodeBufferType `toml:",omitempty"` // Type of trienodebuffer to cache trie nodes in disklayer
+	ProposeBlockInterval uint64                `toml:",omitempty"` // Keep the same with op-proposer propose block interval
 
 	// RequiredBlocks is a set of block number -> hash mappings which must be in the
 	// canonical chain of all remote peers. Setting the option makes geth verify the
@@ -208,6 +211,8 @@ type Config struct {
 	RollupDisableTxPoolGossip               bool
 	RollupDisableTxPoolAdmission            bool
 	RollupHaltOnIncompatibleProtocolVersion string
+
+	EnableOpcodeOptimizing bool
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.

@@ -115,7 +115,7 @@ func loadConfig(file string, cfg *gethConfig) error {
 
 func defaultNodeConfig() node.Config {
 	git, _ := version.VCS()
-	cfg := node.DefaultConfig
+	cfg := node.DefaultOpBNBConfig
 	cfg.Name = clientIdentifier
 	cfg.Version = params.VersionWithCommit(git.Commit, git.Date)
 	cfg.HTTPModules = append(cfg.HTTPModules, "eth")
@@ -129,9 +129,9 @@ func defaultNodeConfig() node.Config {
 func loadBaseConfig(ctx *cli.Context) gethConfig {
 	// Load defaults.
 	cfg := gethConfig{
-		Eth:     ethconfig.Defaults,
+		Eth:     ethconfig.OpBNBDefaults,
 		Node:    defaultNodeConfig(),
-		Metrics: metrics.DefaultConfig,
+		Metrics: metrics.DefaultOpBNBConfig,
 	}
 
 	// Load config file.

@@ -54,3 +54,23 @@ var DefaultConfig = Config{
 	InfluxDBBucket:       "geth",
 	InfluxDBOrganization: "geth",
 }
+
+// DefaultOpBNBConfig is the default config for metrics used in opBNB.
+var DefaultOpBNBConfig = Config{
+	Enabled:          true,
+	EnabledExpensive: false,
+	HTTP:             "0.0.0.0",
+	Port:             6060,
+	EnableInfluxDB:   false,
+	InfluxDBEndpoint: "http://localhost:8086",
+	InfluxDBDatabase: "geth",
+	InfluxDBUsername: "test",
+	InfluxDBPassword: "test",
+	InfluxDBTags:     "host=localhost",
+
+	// influxdbv2-specific flags
+	EnableInfluxDBV2:     false,
+	InfluxDBToken:        "test",
+	InfluxDBBucket:       "geth",
+	InfluxDBOrganization: "geth",
+}

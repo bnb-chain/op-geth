@@ -1171,6 +1171,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			if ctx.Uint64(NetworkIdFlag.Name) == params.OpBNBTestnet {
 				urls = params.OpBNBTestnetBootnodes
 			}
+		case ctx.Bool(OpBNBTestnetFlag.Name):
+			urls = params.OpBNBTestnetBootnodes
 		}
 	}
 	cfg.BootstrapNodes = mustParseBootnodes(urls)
@@ -1825,6 +1827,14 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	log.Debug("Sanitizing Go's GC trigger", "percent", int(gogc))
 	godebug.SetGCPercent(int(gogc))
+
+	// set gc mode default value is archive for opBNB
+	if !ctx.IsSet(GCModeFlag.Name) {
+		err = ctx.Set(GCModeFlag.Name, "archive")
+		if err != nil {
+			log.Error("can't set gc mode", "err", err)
+		}
+	}
 
 	if ctx.IsSet(SyncTargetFlag.Name) {
 		cfg.SyncMode = downloader.FullSync // dev sync target forces full sync

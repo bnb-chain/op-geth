@@ -58,10 +58,10 @@ var LightClientGPO = gasprice.Config{
 	IgnorePrice:      gasprice.DefaultIgnorePrice,
 }
 
-// OpBNBDefaults contains default settings for use on the opBNB main net.
-var OpBNBDefaults = Config{
-	SyncMode:           downloader.FullSync,
-	NetworkId:          204,
+// Defaults contains default settings for use on the Ethereum main net.
+var Defaults = Config{
+	SyncMode:           downloader.SnapSync,
+	NetworkId:          1,
 	TxLookupLimit:      2350000,
 	TransactionHistory: 2350000,
 	StateHistory:       params.FullImmutabilityThreshold,
@@ -82,10 +82,10 @@ var OpBNBDefaults = Config{
 	RPCTxFeeCap:        1, // 1 ether
 }
 
-// Defaults contains default settings for use on the Ethereum main net.
-var Defaults = Config{
-	SyncMode:               downloader.SnapSync,
-	NetworkId:              1,
+// OpBNBDefaults contains default settings for use on the opBNB main net.
+var OpBNBDefaults = Config{
+	SyncMode:               downloader.FullSync,
+	NetworkId:              204,
 	TxLookupLimit:          2350000,
 	TransactionHistory:     2350000,
 	StateHistory:           params.FullImmutabilityThreshold,
@@ -97,13 +97,14 @@ var Defaults = Config{
 	TrieCommitInterval:     0,
 	SnapshotCache:          102,
 	FilterLogCacheSize:     32,
-	Miner:                  miner.DefaultConfig,
-	TxPool:                 legacypool.DefaultConfig,
+	Miner:                  miner.DefaultOpBNBConfig,
+	TxPool:                 legacypool.DefaultOpBNBConfig,
 	BlobPool:               blobpool.DefaultConfig,
 	RPCGasCap:              50000000,
 	RPCEVMTimeout:          5 * time.Second,
 	GPO:                    FullNodeGPO,
 	RPCTxFeeCap:            1, // 1 ether
+	Preimages:              true,
 	EnableOpcodeOptimizing: false,
 }
 

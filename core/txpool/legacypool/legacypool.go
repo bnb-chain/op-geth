@@ -171,6 +171,24 @@ var DefaultConfig = Config{
 	ReannounceTime: 10 * 365 * 24 * time.Hour,
 }
 
+// DefaultOpBNBConfig contains the default opBNB configurations for the transaction pool.
+var DefaultOpBNBConfig = Config{
+	Journal:   "transactions.rlp",
+	Rejournal: time.Hour,
+
+	PriceLimit: 1,
+	PriceBump:  10,
+
+	AccountSlots: 200,
+	GlobalSlots:  10000, // urgent + floating queue capacity with 4:1 ratio
+	AccountQueue: 200,
+	GlobalQueue:  5000,
+
+	Lifetime: 3 * time.Hour,
+
+	ReannounceTime: 10 * 365 * 24 * time.Hour,
+}
+
 // sanitize checks the provided user configurations and changes anything that's
 // unreasonable or unworkable.
 func (config *Config) sanitize() Config {

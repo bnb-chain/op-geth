@@ -328,7 +328,7 @@ func prepare(ctx *cli.Context) {
 		log.Info("Starting geth on an opBNB QAnet network...", "network", ctx.String(utils.OpBNBQANetFlag.Name))
 
 	case !ctx.IsSet(utils.NetworkIdFlag.Name):
-		log.Info("Starting Geth on opBNB mainnet...")
+		log.Info("Starting Geth on Ethereum mainnet...")
 	}
 	// If we're a full node on mainnet without --cache specified, bump default cache allowance
 	if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) && !ctx.IsSet(utils.NetworkIdFlag.Name) {
@@ -348,17 +348,16 @@ func prepare(ctx *cli.Context) {
 			log.Info("Bumping default cache on mainnet", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 4096, "network", ctx.String(utils.OPNetworkFlag.Name))
 			ctx.Set(utils.CacheFlag.Name, strconv.Itoa(4096))
 		}
+	} else if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) &&
+		(ctx.IsSet(utils.OpBNBMainnetFlag.Name) || ctx.IsSet(utils.OpBNBTestnetFlag.Name)) {
+		// we're really on opBNB network. Bump that cache up
+		log.Info("Bumping default cache on opBNB", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 32000)
+		ctx.Set(utils.CacheFlag.Name, strconv.Itoa(32000))
 	}
 	// If we're running a light client on any network, drop the cache to some meaningfully low amount
 	if ctx.String(utils.SyncModeFlag.Name) == "light" && !ctx.IsSet(utils.CacheFlag.Name) {
 		log.Info("Dropping default light client cache", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 128)
 		ctx.Set(utils.CacheFlag.Name, strconv.Itoa(128))
-	}
-
-	// For opBNB, we set default cache to 32000, can override by setting cache flag
-	if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) {
-		log.Info("Bumping default cache on opBNB", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 32000)
-		ctx.Set(utils.CacheFlag.Name, strconv.Itoa(32000))
 	}
 
 	// Start metrics export if enabled

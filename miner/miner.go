@@ -41,10 +41,10 @@ import (
 
 var (
 	commitDepositTxsTimer = metrics.NewRegisteredTimer("miner/commit/deposit/txs", nil)
-	packFromTxpoolTimer   = metrics.NewRegisteredTimer("miner/pack/txpool/txs", nil)
-	commitTxpoolTxsTimer  = metrics.NewRegisteredTimer("miner/commit/txpool/txs", nil)
-	assembleBlockTimer    = metrics.NewRegisteredTimer("miner/assemble/block", nil)
-	buildBlockTimer       = metrics.NewRegisteredTimer("miner/build/block", nil)
+	packFromTxpoolTimer = metrics.NewRegisteredTimer("miner/pack/txpool/txs", nil)
+	commitTxpoolTxsTimer = metrics.NewRegisteredTimer("miner/commit/txpool/txs", nil)
+	assembleBlockTimer = metrics.NewRegisteredTimer("miner/assemble/block", nil)
+	buildBlockTimer = metrics.NewRegisteredTimer("miner/build/block", nil)
 
 	accountReadTimer   = metrics.NewRegisteredTimer("miner/account/reads", nil)
 	accountHashTimer   = metrics.NewRegisteredTimer("miner/account/hashes", nil)

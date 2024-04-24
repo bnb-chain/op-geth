@@ -76,6 +76,8 @@ type StateDB struct {
 	expectedRoot common.Hash // The state root in the block header
 	stateRoot    common.Hash // The calculation result of IntermediateRoot
 
+	fullProcessed bool
+
 	// These maps hold the state changes (including the corresponding
 	// original value) that occurred in this **block**.
 	AccountMux     sync.Mutex                                // Mutex for accounts access
@@ -202,6 +204,11 @@ func (s *StateDB) StopPrefetcher() {
 		s.prefetcher.close()
 		s.prefetcher = nil
 	}
+}
+
+// Mark that the block is full processed
+func (s *StateDB) MarkFullProcessed() {
+	s.fullProcessed = true
 }
 
 // setError remembers the first non-nil error it is called with.
@@ -1233,16 +1240,12 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 		nodes      = trienode.NewMergedNodeSet()
 		incomplete map[common.Address]struct{}
 	)
-	if block == 0 {
-		if s.stateRoot = s.StateIntermediateRoot(); s.expectedRoot != s.stateRoot {
-			s.expectedRoot = s.stateRoot
-		}
-	}
+
 	commmitTrie := func() error {
 		if metrics.EnabledExpensive {
 			defer func(start time.Time) { s.TrieCommits += time.Since(start) }(time.Now())
 		}
-		if s.stateRoot = s.StateIntermediateRoot(); s.expectedRoot != s.stateRoot {
+		if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
 			log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
 			return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
 		}

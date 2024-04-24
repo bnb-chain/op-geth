@@ -1626,9 +1626,9 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 	case ctx.IsSet(OPNetworkFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OPNetworkFlag.Name))
 	case ctx.IsSet(OpBNBMainnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
-		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OpBNBMainnetFlag.Name))
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "opBNBMainnet")
 	case ctx.IsSet(OpBNBTestnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
-		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OpBNBTestnetFlag.Name))
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "opBNBTestnet")
 	}
 }
 

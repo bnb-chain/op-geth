@@ -77,6 +77,7 @@ var DefaultConfig = Config{
 // DefaultOpBNBConfig contains reasonable default opBNB settings.
 var DefaultOpBNBConfig = Config{
 	DataDir:              DefaultDataDir(),
+	HTTPHost:             DefaultHTTPHost,
 	HTTPPort:             DefaultHTTPPort,
 	AuthAddr:             DefaultAuthHost,
 	AuthPort:             DefaultAuthPort,
@@ -84,6 +85,7 @@ var DefaultOpBNBConfig = Config{
 	HTTPModules:          []string{"net", "web3", "engine"},
 	HTTPVirtualHosts:     []string{"localhost"},
 	HTTPTimeouts:         rpc.DefaultHTTPTimeouts,
+	WSHost:               DefaultWSHost,
 	WSPort:               DefaultWSPort,
 	WSModules:            []string{"net", "web3", "engine"},
 	BatchRequestLimit:    1000,

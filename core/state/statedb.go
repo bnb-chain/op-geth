@@ -26,10 +26,12 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
@@ -1216,127 +1218,190 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 	if s.dbErr != nil {
 		return common.Hash{}, fmt.Errorf("commit aborted due to earlier error: %v", s.dbErr)
 	}
-	// Finalize any pending changes and merge everything into the tries
-	s.IntermediateRoot(deleteEmptyObjects)
-
-	// Commit objects to the trie, measuring the elapsed time
 	var (
-		accountTrieNodesUpdated int
-		accountTrieNodesDeleted int
-		storageTrieNodesUpdated int
-		storageTrieNodesDeleted int
-		nodes                   = trienode.NewMergedNodeSet()
-		codeWriter              = s.db.DiskDB().NewBatch()
+		stateRoot  = s.IntermediateRoot(deleteEmptyObjects)
+		nodes      = trienode.NewMergedNodeSet()
+		incomplete map[common.Address]struct{}
 	)
-	// Handle all state deletions first
-	incomplete, err := s.handleDestruction(nodes)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	// Handle all state updates afterwards
-	for addr := range s.stateObjectsDirty {
-		obj := s.stateObjects[addr]
-		if obj.deleted {
-			continue
-		}
-		// Write any contract code associated with the state object
-		if obj.code != nil && obj.dirtyCode {
-			rawdb.WriteCode(codeWriter, common.BytesToHash(obj.CodeHash()), obj.code)
-			obj.dirtyCode = false
-		}
-		// Write any storage changes in the state object to its storage trie
-		set, err := obj.commit()
-		if err != nil {
-			return common.Hash{}, err
-		}
-		// Merge the dirty nodes of storage trie into global set. It is possible
-		// that the account was destructed and then resurrected in the same block.
-		// In this case, the node set is shared by both accounts.
-		if set != nil {
-			if err := nodes.Merge(set); err != nil {
-				return common.Hash{}, err
+	commitFuncs := []func() error{
+		func() error {
+			var err error
+			// Handle all state deletions first
+			incomplete, err = s.handleDestruction(nodes)
+			if err != nil {
+				return err
 			}
-			updates, deleted := set.Size()
-			storageTrieNodesUpdated += updates
-			storageTrieNodesDeleted += deleted
-		}
-	}
-	if codeWriter.ValueSize() > 0 {
-		if err := codeWriter.Write(); err != nil {
-			log.Crit("Failed to commit dirty codes", "error", err)
-		}
-	}
-	// Write the account trie changes, measuring the amount of wasted time
-	var start time.Time
-	if metrics.EnabledExpensive {
-		start = time.Now()
-	}
-	root, set, err := s.trie.Commit(true)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	// Merge the dirty nodes of account trie into global set
-	if set != nil {
-		if err := nodes.Merge(set); err != nil {
-			return common.Hash{}, err
-		}
-		accountTrieNodesUpdated, accountTrieNodesDeleted = set.Size()
-	}
-	if metrics.EnabledExpensive {
-		s.AccountCommits += time.Since(start)
+			tasks := make(chan func())
+			type taskResult struct {
+				err     error
+				nodeSet *trienode.NodeSet
+			}
+			taskResults := make(chan taskResult, len(s.stateObjectsDirty))
+			tasksNum := 0
+			finishCh := make(chan struct{})
 
-		accountUpdatedMeter.Mark(int64(s.AccountUpdated))
-		storageUpdatedMeter.Mark(int64(s.StorageUpdated))
-		accountDeletedMeter.Mark(int64(s.AccountDeleted))
-		storageDeletedMeter.Mark(int64(s.StorageDeleted))
-		accountTrieUpdatedMeter.Mark(int64(accountTrieNodesUpdated))
-		accountTrieDeletedMeter.Mark(int64(accountTrieNodesDeleted))
-		storageTriesUpdatedMeter.Mark(int64(storageTrieNodesUpdated))
-		storageTriesDeletedMeter.Mark(int64(storageTrieNodesDeleted))
-		s.AccountUpdated, s.AccountDeleted = 0, 0
-		s.StorageUpdated, s.StorageDeleted = 0, 0
-	}
-	// If snapshotting is enabled, update the snapshot tree with this new version
-	if s.snap != nil {
-		start := time.Now()
-		// Only update if there's a state transition (skip empty Clique blocks)
-		if parent := s.snap.Root(); parent != root {
-			if err := s.snaps.Update(root, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages); err != nil {
-				log.Warn("Failed to update snapshot tree", "from", parent, "to", root, "err", err)
+			threads := gopool.Threads(len(s.stateObjectsDirty))
+			wg := sync.WaitGroup{}
+			for i := 0; i < threads; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for {
+						select {
+						case task := <-tasks:
+							task()
+						case <-finishCh:
+							return
+						}
+					}
+				}()
 			}
-			// Keep 128 diff layers in the memory, persistent layer is 129th.
-			// - head layer is paired with HEAD state
-			// - head-1 layer is paired with HEAD-1 state
-			// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
-			if err := s.snaps.Cap(root, 128); err != nil {
-				log.Warn("Failed to cap snapshot tree", "root", root, "layers", 128, "err", err)
+
+			for addr := range s.stateObjectsDirty {
+				if obj := s.stateObjects[addr]; !obj.deleted {
+					tasks <- func() {
+						// Write any storage changes in the state object to its storage trie
+						if set, err := obj.commit(); err != nil {
+							taskResults <- taskResult{err, nil}
+							return
+						} else {
+							taskResults <- taskResult{nil, set}
+						}
+
+					}
+					tasksNum++
+				}
 			}
-		}
-		if metrics.EnabledExpensive {
-			s.SnapshotCommits += time.Since(start)
-		}
-		s.snap = nil
+
+			for i := 0; i < tasksNum; i++ {
+				res := <-taskResults
+				if res.err != nil {
+					close(finishCh)
+					return res.err
+				}
+				// Merge the dirty nodes of storage trie into global set. It is possible
+				// that the account was destructed and then resurrected in the same block.
+				// In this case, the node set is shared by both accounts.
+				if res.nodeSet != nil {
+					if err := nodes.Merge(res.nodeSet); err != nil {
+						return err
+					}
+				}
+			}
+			close(finishCh)
+
+			var start time.Time
+			if metrics.EnabledExpensive {
+				start = time.Now()
+			}
+			root, set, err := s.trie.Commit(true)
+			if err != nil {
+				return err
+			}
+			// Merge the dirty nodes of account trie into global set
+			if set != nil {
+				if err := nodes.Merge(set); err != nil {
+					return err
+				}
+			}
+			if metrics.EnabledExpensive {
+				s.AccountCommits += time.Since(start)
+			}
+
+			origin := s.originalRoot
+			if origin == (common.Hash{}) {
+				origin = types.EmptyRootHash
+			}
+
+			if root != origin {
+				start := time.Now()
+				set := triestate.New(s.accountsOrigin, s.storagesOrigin, incomplete)
+				if err := s.db.TrieDB().Update(root, origin, block, nodes, set); err != nil {
+					return err
+				}
+				s.originalRoot = root
+				if metrics.EnabledExpensive {
+					s.TrieDBCommits += time.Since(start)
+				}
+				if s.onCommit != nil {
+					s.onCommit(set)
+				}
+			}
+
+			// If snapshotting is enabled, update the snapshot tree with this new version
+			if s.snap != nil {
+				if metrics.EnabledExpensive {
+					defer func(start time.Time) { s.SnapshotCommits += time.Since(start) }(time.Now())
+				}
+				// Only update if there's a state transition (skip empty Clique blocks)
+				if parent := s.snap.Root(); parent != root {
+					err := s.snaps.Update(root, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
+
+					if err != nil {
+						log.Warn("Failed to update snapshot tree", "from", parent, "to", root, "err", err)
+					}
+
+					// Keep n diff layers in the memory
+					// - head layer is paired with HEAD state
+					// - head-1 layer is paired with HEAD-1 state
+					// - head-(n-1) layer(bottom-most diff layer) is paired with HEAD-(n-1)state
+					go func() {
+						if err := s.snaps.Cap(root, 128); err != nil {
+							log.Warn("Failed to cap snapshot tree", "root", root, "layers", 128, "err", err)
+						}
+					}()
+				}
+			}
+			wg.Wait()
+			return nil
+		},
+		func() error {
+			codeWriter := s.db.DiskDB().NewBatch()
+			for addr := range s.stateObjectsDirty {
+				if obj := s.stateObjects[addr]; !obj.deleted {
+					// Write any contract code associated with the state object
+					if obj.code != nil && obj.dirtyCode {
+						rawdb.WriteCode(codeWriter, common.BytesToHash(obj.CodeHash()), obj.code)
+						obj.dirtyCode = false
+						if codeWriter.ValueSize() > ethdb.IdealBatchSize {
+							if err := codeWriter.Write(); err != nil {
+								return err
+							}
+							codeWriter.Reset()
+						}
+					}
+				}
+			}
+			if codeWriter.ValueSize() > 0 {
+				if err := codeWriter.Write(); err != nil {
+					log.Crit("Failed to commit dirty codes", "error", err)
+					return err
+				}
+			}
+			return nil
+		},
 	}
+
+	defer s.StopPrefetcher()
+	commitRes := make(chan error, len(commitFuncs))
+	for _, f := range commitFuncs {
+		// commitFuncs[0] and commitFuncs[1] both read map `stateObjects`, but no conflicts
+		tmpFunc := f
+		go func() {
+			commitRes <- tmpFunc()
+		}()
+	}
+	for i := 0; i < len(commitFuncs); i++ {
+		r := <-commitRes
+		if r != nil {
+			return common.Hash{}, r
+		}
+	}
+
+	root := stateRoot
+	s.snap = nil
 	if root == (common.Hash{}) {
 		root = types.EmptyRootHash
-	}
-	origin := s.originalRoot
-	if origin == (common.Hash{}) {
-		origin = types.EmptyRootHash
-	}
-	if root != origin {
-		start := time.Now()
-		set := triestate.New(s.accountsOrigin, s.storagesOrigin, incomplete)
-		if err := s.db.TrieDB().Update(root, origin, block, nodes, set); err != nil {
-			return common.Hash{}, err
-		}
-		s.originalRoot = root
-		if metrics.EnabledExpensive {
-			s.TrieDBCommits += time.Since(start)
-		}
-		if s.onCommit != nil {
-			s.onCommit(set)
-		}
 	}
 	// Clear all internal flags at the end of commit operation.
 	s.accounts = make(map[common.Hash][]byte)
@@ -1346,6 +1411,137 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 	s.stateObjectsDirty = make(map[common.Address]struct{})
 	s.stateObjectsDestruct = make(map[common.Address]*types.StateAccount)
 	return root, nil
+
+	//// Finalize any pending changes and merge everything into the tries
+	//s.IntermediateRoot(deleteEmptyObjects)
+	//
+	//// Commit objects to the trie, measuring the elapsed time
+	//var (
+	//	accountTrieNodesUpdated int
+	//	accountTrieNodesDeleted int
+	//	storageTrieNodesUpdated int
+	//	storageTrieNodesDeleted int
+	//	nodes                   = trienode.NewMergedNodeSet()
+	//	codeWriter              = s.db.DiskDB().NewBatch()
+	//)
+	//// Handle all state deletions first
+	//incomplete, err := s.handleDestruction(nodes)
+	//if err != nil {
+	//	return common.Hash{}, err
+	//}
+	//// Handle all state updates afterwards
+	//for addr := range s.stateObjectsDirty {
+	//	obj := s.stateObjects[addr]
+	//	if obj.deleted {
+	//		continue
+	//	}
+	//	// Write any contract code associated with the state object
+	//	if obj.code != nil && obj.dirtyCode {
+	//		rawdb.WriteCode(codeWriter, common.BytesToHash(obj.CodeHash()), obj.code)
+	//		obj.dirtyCode = false
+	//	}
+	//	// Write any storage changes in the state object to its storage trie
+	//	set, err := obj.commit()
+	//	if err != nil {
+	//		return common.Hash{}, err
+	//	}
+	//	// Merge the dirty nodes of storage trie into global set. It is possible
+	//	// that the account was destructed and then resurrected in the same block.
+	//	// In this case, the node set is shared by both accounts.
+	//	if set != nil {
+	//		if err := nodes.Merge(set); err != nil {
+	//			return common.Hash{}, err
+	//		}
+	//		updates, deleted := set.Size()
+	//		storageTrieNodesUpdated += updates
+	//		storageTrieNodesDeleted += deleted
+	//	}
+	//}
+	//if codeWriter.ValueSize() > 0 {
+	//	if err := codeWriter.Write(); err != nil {
+	//		log.Crit("Failed to commit dirty codes", "error", err)
+	//	}
+	//}
+	//// Write the account trie changes, measuring the amount of wasted time
+	//var start time.Time
+	//if metrics.EnabledExpensive {
+	//	start = time.Now()
+	//}
+	//root, set, err := s.trie.Commit(true)
+	//if err != nil {
+	//	return common.Hash{}, err
+	//}
+	//// Merge the dirty nodes of account trie into global set
+	//if set != nil {
+	//	if err := nodes.Merge(set); err != nil {
+	//		return common.Hash{}, err
+	//	}
+	//	accountTrieNodesUpdated, accountTrieNodesDeleted = set.Size()
+	//}
+	//if metrics.EnabledExpensive {
+	//	s.AccountCommits += time.Since(start)
+	//
+	//	accountUpdatedMeter.Mark(int64(s.AccountUpdated))
+	//	storageUpdatedMeter.Mark(int64(s.StorageUpdated))
+	//	accountDeletedMeter.Mark(int64(s.AccountDeleted))
+	//	storageDeletedMeter.Mark(int64(s.StorageDeleted))
+	//	accountTrieUpdatedMeter.Mark(int64(accountTrieNodesUpdated))
+	//	accountTrieDeletedMeter.Mark(int64(accountTrieNodesDeleted))
+	//	storageTriesUpdatedMeter.Mark(int64(storageTrieNodesUpdated))
+	//	storageTriesDeletedMeter.Mark(int64(storageTrieNodesDeleted))
+	//	s.AccountUpdated, s.AccountDeleted = 0, 0
+	//	s.StorageUpdated, s.StorageDeleted = 0, 0
+	//}
+	//// If snapshotting is enabled, update the snapshot tree with this new version
+	//if s.snap != nil {
+	//	start := time.Now()
+	//	// Only update if there's a state transition (skip empty Clique blocks)
+	//	if parent := s.snap.Root(); parent != root {
+	//		if err := s.snaps.Update(root, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages); err != nil {
+	//			log.Warn("Failed to update snapshot tree", "from", parent, "to", root, "err", err)
+	//		}
+	//		// Keep 128 diff layers in the memory, persistent layer is 129th.
+	//		// - head layer is paired with HEAD state
+	//		// - head-1 layer is paired with HEAD-1 state
+	//		// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
+	//		if err := s.snaps.Cap(root, 128); err != nil {
+	//			log.Warn("Failed to cap snapshot tree", "root", root, "layers", 128, "err", err)
+	//		}
+	//	}
+	//	if metrics.EnabledExpensive {
+	//		s.SnapshotCommits += time.Since(start)
+	//	}
+	//	s.snap = nil
+	//}
+	//if root == (common.Hash{}) {
+	//	root = types.EmptyRootHash
+	//}
+	//origin := s.originalRoot
+	//if origin == (common.Hash{}) {
+	//	origin = types.EmptyRootHash
+	//}
+	//if root != origin {
+	//	start := time.Now()
+	//	set := triestate.New(s.accountsOrigin, s.storagesOrigin, incomplete)
+	//	if err := s.db.TrieDB().Update(root, origin, block, nodes, set); err != nil {
+	//		return common.Hash{}, err
+	//	}
+	//	s.originalRoot = root
+	//	if metrics.EnabledExpensive {
+	//		s.TrieDBCommits += time.Since(start)
+	//	}
+	//	if s.onCommit != nil {
+	//		s.onCommit(set)
+	//	}
+	//}
+	//// Clear all internal flags at the end of commit operation.
+	//s.accounts = make(map[common.Hash][]byte)
+	//s.storages = make(map[common.Hash]map[common.Hash][]byte)
+	//s.accountsOrigin = make(map[common.Address][]byte)
+	//s.storagesOrigin = make(map[common.Address]map[common.Hash][]byte)
+	//s.stateObjectsDirty = make(map[common.Address]struct{})
+	//s.stateObjectsDestruct = make(map[common.Address]*types.StateAccount)
+	//return root, nil
 }
 
 // Prepare handles the preparatory steps for executing a state transition with.

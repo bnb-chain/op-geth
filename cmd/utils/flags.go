@@ -1828,7 +1828,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	log.Debug("Sanitizing Go's GC trigger", "percent", int(gogc))
 	godebug.SetGCPercent(int(gogc))
 
-	// set gc mode default value is archive for opBNB
+	// set gc mode default value is full for opBNB
 	if !ctx.IsSet(GCModeFlag.Name) && (ctx.Bool(OpBNBMainnetFlag.Name) || ctx.Bool(OpBNBTestnetFlag.Name)) {
 		err = ctx.Set(GCModeFlag.Name, "full")
 		if err != nil {

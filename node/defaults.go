@@ -77,7 +77,6 @@ var DefaultConfig = Config{
 // DefaultOpBNBConfig contains reasonable default opBNB settings.
 var DefaultOpBNBConfig = Config{
 	DataDir:              DefaultDataDir(),
-	HTTPHost:             DefaultHTTPHost,
 	HTTPPort:             DefaultHTTPPort,
 	AuthAddr:             DefaultAuthHost,
 	AuthPort:             DefaultAuthPort,

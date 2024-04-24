@@ -274,7 +274,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 	)
 	if db.DetermineJournalTypeForReader() == JournalFileType {
 		if err := r.Decode(&journalEncodedBuff); err != nil {
-			return nil, fmt.Errorf("load disk journal: %v", err)
+			return nil, fmt.Errorf("failed to load disk journal: %v", err)
 		}
 		journalBuf = rlp.NewStream(bytes.NewReader(journalEncodedBuff), 0)
 	} else {
@@ -282,14 +282,14 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 	}
 
 	if err := journalBuf.Decode(&root); err != nil {
-		return nil, fmt.Errorf("load disk root: %v", err)
+		return nil, fmt.Errorf("failed to load disk root: %v", err)
 	}
 	// Resolve the state id of disk layer, it can be different
 	// with the persistent id tracked in disk, the id distance
 	// is the number of transitions aggregated in disk layer.
 	var id uint64
 	if err := journalBuf.Decode(&id); err != nil {
-		return nil, fmt.Errorf("load state id: %v", err)
+		return nil, fmt.Errorf("failed to load state id: %v", err)
 	}
 	stored := rawdb.ReadPersistentStateID(db.diskdb)
 	if stored > id {
@@ -298,7 +298,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 	// Resolve nodes cached in node buffer
 	var encoded []journalNodes
 	if err := journalBuf.Decode(&encoded); err != nil {
-		return nil, fmt.Errorf("load disk nodes: %v", err)
+		return nil, fmt.Errorf("failed to load disk nodes: %v", err)
 	}
 	nodes := make(map[common.Hash]map[string]*trienode.Node)
 	for _, entry := range encoded {
@@ -316,12 +316,12 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 	if db.DetermineJournalTypeForReader() == JournalFileType {
 		var shaSum [32]byte
 		if err := r.Decode(&shaSum); err != nil {
-			return nil, fmt.Errorf("load shasum: %v", err)
+			return nil, fmt.Errorf("failed to load shasum: %v", err)
 		}
 
-		expectSum := sha256.Sum256(journalEncodedBuff)
-		if shaSum != expectSum {
-			return nil, fmt.Errorf("expect shaSum: %v, real:%v", expectSum, shaSum)
+		expectedSum := sha256.Sum256(journalEncodedBuff)
+		if shaSum != expectedSum {
+			return nil, fmt.Errorf("expected shaSum: %v, real:%v", expectedSum, shaSum)
 		}
 	}
 
@@ -347,7 +347,7 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream) (layer, error) {
 			if err == io.EOF {
 				return parent, nil
 			}
-			return nil, fmt.Errorf("load disk journal buffer: %v", err)
+			return nil, fmt.Errorf("failed to load disk journal buffer: %v", err)
 		}
 		journalBuf = rlp.NewStream(bytes.NewReader(journalEncodedBuff), 0)
 	} else {
@@ -359,16 +359,16 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream) (layer, error) {
 		if err == io.EOF {
 			return parent, nil
 		}
-		return nil, fmt.Errorf("load diff root: %v", err)
+		return nil, fmt.Errorf("failed to load diff root: %v", err)
 	}
 	var block uint64
 	if err := journalBuf.Decode(&block); err != nil {
-		return nil, fmt.Errorf("load block number: %v", err)
+		return nil, fmt.Errorf("failed to load block number: %v", err)
 	}
 	// Read in-memory trie nodes from journal
 	var encoded []journalNodes
 	if err := journalBuf.Decode(&encoded); err != nil {
-		return nil, fmt.Errorf("load diff nodes: %v", err)
+		return nil, fmt.Errorf("failed to load diff nodes: %v", err)
 	}
 	nodes := make(map[common.Hash]map[string]*trienode.Node)
 	for _, entry := range encoded {
@@ -391,7 +391,7 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream) (layer, error) {
 		incomplete = make(map[common.Address]struct{})
 	)
 	if err := journalBuf.Decode(&jaccounts); err != nil {
-		return nil, fmt.Errorf("load diff accounts: %v", err)
+		return nil, fmt.Errorf("failed to load diff accounts: %v", err)
 	}
 	for i, addr := range jaccounts.Addresses {
 		accounts[addr] = jaccounts.Accounts[i]
@@ -417,12 +417,12 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream) (layer, error) {
 	if db.DetermineJournalTypeForReader() == JournalFileType {
 		var shaSum [32]byte
 		if err := r.Decode(&shaSum); err != nil {
-			return nil, fmt.Errorf("load shasum: %v", err)
+			return nil, fmt.Errorf("failed to load shaSum: %v", err)
 		}
 
-		expectSum := sha256.Sum256(journalEncodedBuff)
-		if shaSum != expectSum {
-			return nil, fmt.Errorf("expect shaSum: %v, real:%v", expectSum, shaSum)
+		expectedSum := sha256.Sum256(journalEncodedBuff)
+		if shaSum != expectedSum {
+			return nil, fmt.Errorf("expected shaSum: %v, real:%v", expectedSum, shaSum)
 		}
 	}
 
@@ -468,11 +468,11 @@ func (dl *diskLayer) journal(w io.Writer, journalType JournalType) error {
 
 	// Store the journal buf into w and calculate checksum
 	if journalType == JournalFileType {
-		shasum := sha256.Sum256(journalBuf.Bytes())
+		shaSum := sha256.Sum256(journalBuf.Bytes())
 		if err := rlp.Encode(w, journalBuf.Bytes()); err != nil {
 			return err
 		}
-		if err := rlp.Encode(w, shasum); err != nil {
+		if err := rlp.Encode(w, shaSum); err != nil {
 			return err
 		}
 	} else {
@@ -543,11 +543,11 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 
 	// Store the journal buf into w and calculate checksum
 	if journalType == JournalFileType {
-		shasum := sha256.Sum256(journalBuf.Bytes())
+		shaSum := sha256.Sum256(journalBuf.Bytes())
 		if err := rlp.Encode(w, journalBuf.Bytes()); err != nil {
 			return err
 		}
-		if err := rlp.Encode(w, shasum); err != nil {
+		if err := rlp.Encode(w, shaSum); err != nil {
 			return err
 		}
 	} else {
@@ -556,7 +556,8 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 		}
 	}
 
-	log.Info("Journaled pathdb diff layer", "root", dl.root, "parent", dl.parent.rootHash(), "id", dl.stateID(), "block", dl.block, "nodes", len(dl.nodes))
+	log.Info("Journaled pathdb diff layer", "root", dl.root, "parent", dl.parent.rootHash(),
+		"id", dl.stateID(), "block", dl.block, "nodes", len(dl.nodes))
 	return nil
 }
 

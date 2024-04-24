@@ -109,8 +109,8 @@ type Config struct {
 	ReadOnly             bool           // Flag whether the database is opened in read only mode.
 	ProposeBlockInterval uint64         // Propose block to L1 block interval.
 	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
-	JournalFilePath      string
-	JournalFile     bool
+	JournalFilePath      string         // The journal file path
+	JournalFile          bool           // Whether to use journal file mode
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -520,7 +520,8 @@ func (db *Database) modifyAllowed() error {
 	return nil
 }
 
-// DetermineJournalTypeForWriter is used when persisting the journal. It determines JournalType based on the config passed in by the Config.
+// DetermineJournalTypeForWriter is used when persisting the journal.
+// It determines JournalType based on the config passed in by the Config.
 func (db *Database) DetermineJournalTypeForWriter() JournalType {
 	if db.config.JournalFile {
 		return JournalFileType
@@ -529,7 +530,8 @@ func (db *Database) DetermineJournalTypeForWriter() JournalType {
 	}
 }
 
-// DetermineJournalTypeForReader is used when loading the journal. It loads based on whether JournalKV or JournalFile currently exists.
+// DetermineJournalTypeForReader is used when loading the journal.
+// It loads based on whether JournalKV or JournalFile currently exists.
 func (db *Database) DetermineJournalTypeForReader() JournalType {
 	if journal := rawdb.ReadTrieJournal(db.diskdb); len(journal) != 0 {
 		return JournalKVType
@@ -542,8 +544,10 @@ func (db *Database) DetermineJournalTypeForReader() JournalType {
 	return JournalKVType
 }
 
+// DeleteTrieJournal deletes trie journal data.
 func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {
-	// To prevent any remnants of old journals after converting from JournalKV to JournalFile or vice versa, all deletions must be completed.
+	// To prevent any remnants of old journals after converting from JournalKV to JournalFile
+	// or vice versa, all deletions must be completed.
 	rawdb.DeleteTrieJournal(writer)
 
 	// delete from journal file, may not exist

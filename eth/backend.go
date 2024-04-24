@@ -203,12 +203,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion)
 		}
 	}
-	var (
-		journalFilePath string
-		path            string
-	)
-	path = ChainData
-	journalFilePath = stack.ResolvePath(path) + "/" + JournalFileName
+
+	journalFilePath := fmt.Sprintf("%s/%s", stack.ResolvePath(ChainData), JournalFileName)
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording:   config.EnablePreimageRecording,

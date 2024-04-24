@@ -351,8 +351,8 @@ func prepare(ctx *cli.Context) {
 	} else if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) &&
 		(ctx.IsSet(utils.OpBNBMainnetFlag.Name) || ctx.IsSet(utils.OpBNBTestnetFlag.Name)) {
 		// we're really on opBNB network. Bump that cache up
-		log.Info("Bumping default cache on opBNB", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 32000)
-		ctx.Set(utils.CacheFlag.Name, strconv.Itoa(32000))
+		log.Info("Bumping default cache on opBNB", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 22000)
+		ctx.Set(utils.CacheFlag.Name, strconv.Itoa(22000))
 	}
 	// If we're running a light client on any network, drop the cache to some meaningfully low amount
 	if ctx.String(utils.SyncModeFlag.Name) == "light" && !ctx.IsSet(utils.CacheFlag.Name) {

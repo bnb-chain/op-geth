@@ -20,6 +20,7 @@ package state
 import (
 	"fmt"
 	"math/big"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -878,7 +879,55 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
+	s.AccountsIntermediateRoot()
+	return s.StateIntermediateRoot()
+}
 
+func (s *StateDB) AccountsIntermediateRoot() {
+	tasks := make(chan func())
+	finishCh := make(chan struct{})
+	defer close(finishCh)
+	wg := sync.WaitGroup{}
+	for i := 0; i < runtime.NumCPU(); i++ {
+		go func() {
+			for {
+				select {
+				case task := <-tasks:
+					task()
+				case <-finishCh:
+					return
+				}
+			}
+		}()
+	}
+
+	// Although naively it makes sense to retrieve the account trie and then do
+	// the contract storage and account updates sequentially, that short circuits
+	// the account prefetcher. Instead, let's process all the storage updates
+	// first, giving the account prefetches just a few more milliseconds of time
+	// to pull useful data from disk.
+	for addr := range s.stateObjectsPending {
+		if obj := s.stateObjects[addr]; !obj.deleted {
+			wg.Add(1)
+			tasks <- func() {
+				obj.updateRoot()
+
+				// Cache the data until commit. Note, this update mechanism is not symmetric
+				// to the deletion, because whereas it is enough to track account updates
+				// at commit time, deletions need tracking at transaction boundary level to
+				// ensure we capture state clearing.
+				s.AccountMux.Lock()
+				s.accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
+				s.AccountMux.Unlock()
+
+				wg.Done()
+			}
+		}
+	}
+	wg.Wait()
+}
+
+func (s *StateDB) StateIntermediateRoot() common.Hash {
 	// If there was a trie prefetcher operating, it gets aborted and irrevocably
 	// modified after we start retrieving tries. Remove it from the statedb after
 	// this round of use.
@@ -893,16 +942,7 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 			s.prefetcher = nil
 		}()
 	}
-	// Although naively it makes sense to retrieve the account trie and then do
-	// the contract storage and account updates sequentially, that short circuits
-	// the account prefetcher. Instead, let's process all the storage updates
-	// first, giving the account prefetches just a few more milliseconds of time
-	// to pull useful data from disk.
-	for addr := range s.stateObjectsPending {
-		if obj := s.stateObjects[addr]; !obj.deleted {
-			obj.updateRoot()
-		}
-	}
+
 	// Now we're about to start to write changes to the trie. The trie is so far
 	// _untouched_. We can check with the prefetcher, if it can give us a trie
 	// which has the same root, but also has some content loaded into it.
@@ -911,14 +951,20 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 			s.trie = trie
 		}
 	}
+	if s.trie == nil {
+		tr, err := s.db.OpenTrie(s.originalRoot)
+		if err != nil {
+			panic(fmt.Sprintf("failed to open trie tree %s", s.originalRoot))
+		}
+		s.trie = tr
+	}
+
 	usedAddrs := make([][]byte, 0, len(s.stateObjectsPending))
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; obj.deleted {
 			s.deleteStateObject(obj)
-			s.AccountDeleted += 1
 		} else {
 			s.updateStateObject(obj)
-			s.AccountUpdated += 1
 		}
 		usedAddrs = append(usedAddrs, common.CopyBytes(addr[:])) // Copy needed for closure
 	}

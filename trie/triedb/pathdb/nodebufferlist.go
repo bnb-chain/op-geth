@@ -122,6 +122,7 @@ func newNodeBufferList(
 // node retrieves the trie node with given node info.
 func (nf *nodebufferlist) node(owner common.Hash, path []byte, hash common.Hash) (node *trienode.Node, err error) {
 	nf.mux.RLock()
+	defer nf.mux.RUnlock()
 	find := func(nc *multiDifflayer) bool {
 		subset, ok := nc.nodes[owner]
 		if !ok {
@@ -141,14 +142,11 @@ func (nf *nodebufferlist) node(owner common.Hash, path []byte, hash common.Hash)
 	}
 	nf.traverse(find)
 	if err != nil {
-		nf.mux.RUnlock()
 		return nil, err
 	}
 	if node != nil {
-		nf.mux.RUnlock()
 		return node, nil
 	}
-	nf.mux.RUnlock()
 
 	nf.baseMux.RLock()
 	node, err = nf.base.node(owner, path, hash)
@@ -602,7 +600,9 @@ func (w *proposedBlockReader) Node(owner common.Hash, path []byte, hash common.H
 		current = current.next
 	}
 
+	w.nf.baseMux.RLock()
 	node, err := w.nf.base.node(owner, path, hash)
+	w.nf.baseMux.RUnlock()
 	if err != nil {
 		return nil, err
 	}

@@ -1625,6 +1625,10 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "holesky")
 	case ctx.IsSet(OPNetworkFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OPNetworkFlag.Name))
+	case ctx.IsSet(OpBNBMainnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OpBNBMainnetFlag.Name))
+	case ctx.IsSet(OpBNBTestnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OpBNBTestnetFlag.Name))
 	}
 }
 

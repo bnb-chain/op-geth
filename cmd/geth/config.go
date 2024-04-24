@@ -148,7 +148,6 @@ func loadBaseConfig(ctx *cli.Context) gethConfig {
 	if ctx.Bool(utils.OpBNBMainnetFlag.Name) || ctx.Bool(utils.OpBNBTestnetFlag.Name) {
 		cfg.Eth = ethconfig.OpBNBDefaults
 		cfg.Node = defaultOpBNBNodeConfig()
-		cfg.Metrics = metrics.DefaultOpBNBConfig
 		if ctx.Bool(utils.OpBNBTestnetFlag.Name) {
 			cfg.Eth.NetworkId = 5611
 			cfg.Eth.TrieCommitInterval = 240

@@ -1828,14 +1828,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	log.Debug("Sanitizing Go's GC trigger", "percent", int(gogc))
 	godebug.SetGCPercent(int(gogc))
 
-	// set gc mode default value is full for opBNB
-	if !ctx.IsSet(GCModeFlag.Name) && (ctx.Bool(OpBNBMainnetFlag.Name) || ctx.Bool(OpBNBTestnetFlag.Name)) {
-		err = ctx.Set(GCModeFlag.Name, "full")
-		if err != nil {
-			log.Error("can't set gc mode", "err", err)
-		}
-	}
-
 	if ctx.IsSet(SyncTargetFlag.Name) {
 		cfg.SyncMode = downloader.FullSync // dev sync target forces full sync
 	} else if ctx.IsSet(SyncModeFlag.Name) {

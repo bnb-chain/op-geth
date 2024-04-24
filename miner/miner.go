@@ -102,19 +102,6 @@ var DefaultConfig = Config{
 	NewPayloadTimeout: 2 * time.Second,
 }
 
-// DefaultOpBNBConfig contains default opBNB settings for miner.
-var DefaultOpBNBConfig = Config{
-	GasCeil:  150000000,
-	GasPrice: big.NewInt(params.GWei),
-
-	// The default recommit time is chosen as two seconds since
-	// consensus-layer usually will wait a half slot of time(6s)
-	// for payload generation. It should be enough for Geth to
-	// run 3 rounds.
-	Recommit:          2 * time.Second,
-	NewPayloadTimeout: 2 * time.Second,
-}
-
 // Miner creates blocks and searches for proof-of-work values.
 type Miner struct {
 	mux     *event.TypeMux

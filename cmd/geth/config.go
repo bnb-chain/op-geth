@@ -151,6 +151,7 @@ func loadBaseConfig(ctx *cli.Context) gethConfig {
 		cfg.Metrics = metrics.DefaultOpBNBConfig
 		if ctx.Bool(utils.OpBNBTestnetFlag.Name) {
 			cfg.Eth.NetworkId = 5611
+			cfg.Eth.TrieCommitInterval = 240
 		}
 	}
 

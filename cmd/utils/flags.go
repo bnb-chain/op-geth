@@ -1830,7 +1830,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	// set gc mode default value is archive for opBNB
 	if !ctx.IsSet(GCModeFlag.Name) && (ctx.Bool(OpBNBMainnetFlag.Name) || ctx.Bool(OpBNBTestnetFlag.Name)) {
-		err = ctx.Set(GCModeFlag.Name, "archive")
+		err = ctx.Set(GCModeFlag.Name, "full")
 		if err != nil {
 			log.Error("can't set gc mode", "err", err)
 		}

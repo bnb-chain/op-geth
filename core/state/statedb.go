@@ -1327,31 +1327,6 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 					s.onCommit(set)
 				}
 			}
-
-			// If snapshotting is enabled, update the snapshot tree with this new version
-			if s.snap != nil {
-				if metrics.EnabledExpensive {
-					defer func(start time.Time) { s.SnapshotCommits += time.Since(start) }(time.Now())
-				}
-				// Only update if there's a state transition (skip empty Clique blocks)
-				if parent := s.snap.Root(); parent != root {
-					err := s.snaps.Update(root, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
-
-					if err != nil {
-						log.Warn("Failed to update snapshot tree", "from", parent, "to", root, "err", err)
-					}
-
-					// Keep n diff layers in the memory
-					// - head layer is paired with HEAD state
-					// - head-1 layer is paired with HEAD-1 state
-					// - head-(n-1) layer(bottom-most diff layer) is paired with HEAD-(n-1)state
-					go func() {
-						if err := s.snaps.Cap(root, 128); err != nil {
-							log.Warn("Failed to cap snapshot tree", "root", root, "layers", 128, "err", err)
-						}
-					}()
-				}
-			}
 			wg.Wait()
 			return nil
 		},
@@ -1376,6 +1351,33 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 				if err := codeWriter.Write(); err != nil {
 					log.Crit("Failed to commit dirty codes", "error", err)
 					return err
+				}
+			}
+			return nil
+		},
+		func() error {
+			// If snapshotting is enabled, update the snapshot tree with this new version
+			if s.snap != nil {
+				if metrics.EnabledExpensive {
+					defer func(start time.Time) { s.SnapshotCommits += time.Since(start) }(time.Now())
+				}
+				// Only update if there's a state transition (skip empty Clique blocks)
+				if parent := s.snap.Root(); parent != stateRoot {
+					err := s.snaps.Update(stateRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
+
+					if err != nil {
+						log.Warn("Failed to update snapshot tree", "from", parent, "to", stateRoot, "err", err)
+					}
+
+					// Keep n diff layers in the memory
+					// - head layer is paired with HEAD state
+					// - head-1 layer is paired with HEAD-1 state
+					// - head-(n-1) layer(bottom-most diff layer) is paired with HEAD-(n-1)state
+					go func() {
+						if err := s.snaps.Cap(stateRoot, 128); err != nil {
+							log.Warn("Failed to cap snapshot tree", "root", stateRoot, "layers", 128, "err", err)
+						}
+					}()
 				}
 			}
 			return nil

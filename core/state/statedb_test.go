@@ -1124,7 +1124,9 @@ func TestResetObject(t *testing.T) {
 	state.CreateAccount(addr)
 	state.SetBalance(addr, big.NewInt(2))
 	state.SetState(addr, slotB, common.BytesToHash([]byte{0x2}))
-	root, _ := state.Commit(0, true)
+	root := state.IntermediateRoot(true)
+	state.SetExpectedStateRoot(root)
+	state.Commit(0, true)
 
 	// Ensure the original account is wiped properly
 	snap := snaps.Snapshot(root)

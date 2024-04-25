@@ -1173,6 +1173,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.SepoliaBootnodes
 		case ctx.Bool(GoerliFlag.Name):
 			urls = params.GoerliBootnodes
+		case ctx.Bool(OpBNBTestnetFlag.Name):
+			urls = params.OpBNBTestnetBootnodes
 		case ctx.Bool(NetworkIdFlag.Name):
 			if ctx.Uint64(NetworkIdFlag.Name) == params.OpBNBTestnet {
 				urls = params.OpBNBTestnetBootnodes
@@ -1629,6 +1631,10 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "holesky")
 	case ctx.IsSet(OPNetworkFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OPNetworkFlag.Name))
+	case ctx.IsSet(OpBNBMainnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "opBNBMainnet")
+	case ctx.IsSet(OpBNBTestnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "opBNBTestnet")
 	}
 }
 

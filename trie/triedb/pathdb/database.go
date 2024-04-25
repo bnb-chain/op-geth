@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -148,6 +147,13 @@ type Database struct {
 	tree       *layerTree               // The group for all known layers
 	freezer    *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
 	lock       sync.RWMutex             // Lock to prevent mutations from happening at the same time
+
+	capRoots       []common.Hash
+	capRootsRecord map[common.Hash]struct{}
+	capCh          chan common.Hash
+	stopCh         chan struct{}
+	capLock        sync.Mutex
+	capDoingLock   sync.Mutex
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -160,10 +166,14 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 	config = config.sanitize()
 
 	db := &Database{
-		readOnly:   config.ReadOnly,
-		bufferSize: config.DirtyCacheSize,
-		config:     config,
-		diskdb:     diskdb,
+		readOnly:       config.ReadOnly,
+		bufferSize:     config.DirtyCacheSize,
+		config:         config,
+		diskdb:         diskdb,
+		capRoots:       make([]common.Hash, 0),
+		capRootsRecord: make(map[common.Hash]struct{}),
+		capCh:          make(chan common.Hash, 1024),
+		stopCh:         make(chan struct{}),
 	}
 	// Construct the layer tree by resolving the in-disk singleton state
 	// and in-memory layer journal.
@@ -198,8 +208,65 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 			log.Crit("Failed to disable database", "err", err) // impossible to happen
 		}
 	}
+	go db.loop()
 	log.Warn("Path-based state scheme is an experimental feature")
 	return db
+}
+
+func (db *Database) loop() {
+	for {
+		select {
+		case newCapRoot := <-db.capCh:
+			db.capLock.Lock()
+			if _, ok := db.capRootsRecord[newCapRoot]; ok {
+				db.capLock.Unlock()
+				continue
+			}
+			db.capRoots = append(db.capRoots, newCapRoot)
+			db.capRootsRecord[newCapRoot] = struct{}{}
+			db.capLock.Unlock()
+			db.capDifflayers()
+		case <-db.stopCh:
+			return
+		}
+	}
+}
+
+func (db *Database) capDifflayers() {
+	db.capDoingLock.Lock()
+	defer db.capDoingLock.Unlock()
+
+	capRootsShadow := make([]common.Hash, 0)
+	db.capLock.Lock()
+	capRootsShadow = append(capRootsShadow, db.capRoots...)
+	db.capLock.Unlock()
+	if len(capRootsShadow) == 0 {
+		return
+	}
+	for _, capRoot := range capRootsShadow {
+		// Keep 128 diff layers in the memory, persistent layer is 129th.
+		// - head layer is paired with HEAD state
+		// - head-1 layer is paired with HEAD-1 state
+		// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
+		// - head-128 layer(disk layer) is paired with HEAD-128 state
+		err := db.tree.cap(capRoot, maxDiffLayers)
+		if err != nil {
+			log.Crit("failed to cap layer tree", "root", capRoot, "error", err)
+		}
+	}
+	db.capLock.Lock()
+	db.capRoots = db.capRoots[len(capRootsShadow):]
+	for _, delRoot := range capRootsShadow {
+		delete(db.capRootsRecord, delRoot)
+	}
+	db.capLock.Unlock()
+}
+
+func (db *Database) cappingRoot(root common.Hash) bool {
+	db.capLock.Lock()
+	_, ok := db.capRootsRecord[root]
+	db.capLock.Unlock()
+	return ok
 }
 
 // Reader retrieves a layer belonging to the given state root.
@@ -234,17 +301,7 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, block uint6
 	if err := db.tree.add(root, parentRoot, block, nodes, states); err != nil {
 		return err
 	}
-	gopool.Submit(func() {
-		// Keep 128 diff layers in the memory, persistent layer is 129th.
-		// - head layer is paired with HEAD state
-		// - head-1 layer is paired with HEAD-1 state
-		// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
-		// - head-128 layer(disk layer) is paired with HEAD-128 state
-		err := db.tree.cap(root, maxDiffLayers)
-		if err != nil {
-			log.Crit("failed to cap layer tree", "root", root, "error", err)
-		}
-	})
+	db.capCh <- root
 	return nil
 }
 
@@ -254,7 +311,11 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, block uint6
 func (db *Database) Commit(root common.Hash, report bool) error {
 	// Hold the lock to prevent concurrent mutations.
 	db.lock.Lock()
+	db.capDoingLock.Lock()
+	db.capLock.Lock()
 	defer db.lock.Unlock()
+	defer db.capDoingLock.Unlock()
+	defer db.capLock.Unlock()
 
 	// Short circuit if the mutation is not allowed.
 	if err := db.modifyAllowed(); err != nil {
@@ -392,6 +453,9 @@ func (db *Database) Recoverable(root common.Hash) bool {
 	if id == nil {
 		return false
 	}
+	if db.cappingRoot(root) {
+		db.capDifflayers()
+	}
 	// Recoverable state must below the disk layer. The recoverable
 	// state only refers the state that is currently not available,
 	// but can be restored by applying state history.
@@ -419,6 +483,7 @@ func (db *Database) Close() error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
+	close(db.stopCh)
 	// Set the database to read-only mode to prevent all
 	// following mutations.
 	db.readOnly = true

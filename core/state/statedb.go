@@ -1241,129 +1241,127 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 		incomplete map[common.Address]struct{}
 	)
 
-	commmitTrie := func() error {
-		if metrics.EnabledExpensive {
-			defer func(start time.Time) { s.TrieCommits += time.Since(start) }(time.Now())
-		}
-		if s.fullProcessed {
-			if s.stateRoot = s.StateIntermediateRoot(); s.expectedRoot != s.stateRoot {
-				log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
-				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
+	if !s.fullProcessed {
+		s.stateRoot = s.IntermediateRoot(deleteEmptyObjects)
+	}
+	commitFuncs := []func() error{
+		func() error {
+			if metrics.EnabledExpensive {
+				defer func(start time.Time) { s.TrieCommits += time.Since(start) }(time.Now())
 			}
-		} else {
-			s.stateRoot = s.IntermediateRoot(deleteEmptyObjects)
-			s.expectedRoot = s.stateRoot
-		}
+			if s.fullProcessed {
+				if s.stateRoot = s.StateIntermediateRoot(); s.expectedRoot != s.stateRoot {
+					log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
+					return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
+				}
+			}
+			var err error
+			// Handle all state deletions first
+			incomplete, err = s.handleDestruction(nodes)
+			if err != nil {
+				return err
+			}
 
-		var err error
-		// Handle all state deletions first
-		incomplete, err = s.handleDestruction(nodes)
-		if err != nil {
-			return err
-		}
+			tasks := make(chan func())
+			type taskResult struct {
+				err     error
+				nodeSet *trienode.NodeSet
+			}
+			taskResults := make(chan taskResult, len(s.stateObjectsDirty))
+			tasksNum := 0
+			finishCh := make(chan struct{})
 
-		tasks := make(chan func())
-		type taskResult struct {
-			err     error
-			nodeSet *trienode.NodeSet
-		}
-		taskResults := make(chan taskResult, len(s.stateObjectsDirty))
-		tasksNum := 0
-		finishCh := make(chan struct{})
+			threads := gopool.Threads(len(s.stateObjectsDirty))
+			wg := sync.WaitGroup{}
+			for i := 0; i < threads; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for {
+						select {
+						case task := <-tasks:
+							task()
+						case <-finishCh:
+							return
+						}
+					}
+				}()
+			}
 
-		threads := gopool.Threads(len(s.stateObjectsDirty))
-		wg := sync.WaitGroup{}
-		for i := 0; i < threads; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for {
-					select {
-					case task := <-tasks:
-						task()
-					case <-finishCh:
-						return
+			for addr := range s.stateObjectsDirty {
+				if obj := s.stateObjects[addr]; !obj.deleted {
+					tasks <- func() {
+						// Write any storage changes in the state object to its storage trie
+						if set, err := obj.commit(); err != nil {
+							taskResults <- taskResult{err, nil}
+							return
+						} else {
+							taskResults <- taskResult{nil, set}
+						}
+
+					}
+					tasksNum++
+				}
+			}
+
+			for i := 0; i < tasksNum; i++ {
+				res := <-taskResults
+				if res.err != nil {
+					close(finishCh)
+					return res.err
+				}
+				// Merge the dirty nodes of storage trie into global set. It is possible
+				// that the account was destructed and then resurrected in the same block.
+				// In this case, the node set is shared by both accounts.
+				if res.nodeSet != nil {
+					if err := nodes.Merge(res.nodeSet); err != nil {
+						return err
 					}
 				}
-			}()
-		}
-
-		for addr := range s.stateObjectsDirty {
-			if obj := s.stateObjects[addr]; !obj.deleted {
-				tasks <- func() {
-					// Write any storage changes in the state object to its storage trie
-					if set, err := obj.commit(); err != nil {
-						taskResults <- taskResult{err, nil}
-						return
-					} else {
-						taskResults <- taskResult{nil, set}
-					}
-
-				}
-				tasksNum++
 			}
-		}
+			close(finishCh)
 
-		for i := 0; i < tasksNum; i++ {
-			res := <-taskResults
-			if res.err != nil {
-				close(finishCh)
-				return res.err
+			var start time.Time
+			if metrics.EnabledExpensive {
+				start = time.Now()
 			}
-			// Merge the dirty nodes of storage trie into global set. It is possible
-			// that the account was destructed and then resurrected in the same block.
-			// In this case, the node set is shared by both accounts.
-			if res.nodeSet != nil {
-				if err := nodes.Merge(res.nodeSet); err != nil {
+			root, set, err := s.trie.Commit(true)
+			if err != nil {
+				return err
+			}
+			// Merge the dirty nodes of account trie into global set
+			if set != nil {
+				if err := nodes.Merge(set); err != nil {
 					return err
 				}
 			}
-		}
-		close(finishCh)
-
-		var start time.Time
-		if metrics.EnabledExpensive {
-			start = time.Now()
-		}
-		root, set, err := s.trie.Commit(true)
-		if err != nil {
-			return err
-		}
-		// Merge the dirty nodes of account trie into global set
-		if set != nil {
-			if err := nodes.Merge(set); err != nil {
-				return err
-			}
-		}
-		if metrics.EnabledExpensive {
-			s.AccountCommits += time.Since(start)
-		}
-
-		origin := s.originalRoot
-		if origin == (common.Hash{}) {
-			origin = types.EmptyRootHash
-		}
-
-		if root != origin {
-			start := time.Now()
-			set := triestate.New(s.accountsOrigin, s.storagesOrigin, incomplete)
-			if err := s.db.TrieDB().Update(root, origin, block, nodes, set); err != nil {
-				return err
-			}
-			s.originalRoot = root
 			if metrics.EnabledExpensive {
-				s.TrieDBCommits += time.Since(start)
+				s.AccountCommits += time.Since(start)
 			}
-			if s.onCommit != nil {
-				s.onCommit(set)
+
+			origin := s.originalRoot
+			if origin == (common.Hash{}) {
+				origin = types.EmptyRootHash
 			}
-		}
 
-		wg.Wait()
-		return nil
+			if root != origin {
+				start := time.Now()
+				set := triestate.New(s.accountsOrigin, s.storagesOrigin, incomplete)
+				if err := s.db.TrieDB().Update(root, origin, block, nodes, set); err != nil {
+					return err
+				}
+				s.originalRoot = root
+				if metrics.EnabledExpensive {
+					s.TrieDBCommits += time.Since(start)
+				}
+				if s.onCommit != nil {
+					s.onCommit(set)
+				}
+			}
 
-	}
-	commitFuncs := []func() error{
+			wg.Wait()
+			return nil
+		},
 		func() error {
 			if metrics.EnabledExpensive {
 				defer func(start time.Time) { s.CodeCommits += time.Since(start) }(time.Now())
@@ -1421,7 +1419,6 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 		},
 	}
 	defer s.StopPrefetcher()
-	commitFuncs = append(commitFuncs, commmitTrie)
 	commitRes := make(chan error, len(commitFuncs))
 	for _, f := range commitFuncs {
 		// commitFuncs[0] and commitFuncs[1] both read map `stateObjects`, but no conflicts

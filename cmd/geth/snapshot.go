@@ -24,19 +24,23 @@ import (
 	"os"
 	"time"
 
+	cli "github.com/urfave/cli/v2"
+
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/pruner"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
-	cli "github.com/urfave/cli/v2"
 )
 
 var (
@@ -159,6 +163,29 @@ block is used.
 				Description: `
 The export-preimages command exports hash preimages to a flat file, in exactly
 the expected order for the overlay tree migration.
+`,
+			},
+			{
+				Name: "insecure-prune-all",
+				Usage: "Prune all trie state data except genesis block, it will break storage for fullnode, only suitable for fast node " +
+					"who do not need trie storage at all",
+				ArgsUsage: "<pathOfGenesisFile>",
+				Action:    pruneAllState,
+				Category:  "MISCELLANEOUS COMMANDS",
+				Flags: []cli.Flag{
+					utils.DataDirFlag,
+					utils.AncientFlag,
+				},
+				Description: `
+will prune all historical trie state data except genesis block.
+All trie nodes will be deleted from the database. 
+
+It expects the genesis file as argument.
+
+WARNING: It's necessary to delete the trie clean cache after the pruning.
+If you specify another directory for the trie clean cache via "--cache.trie.journal"
+during the use of Geth, please also specify it here for correct deletion. Otherwise
+the trie clean cache with default directory will be deleted.
 `,
 			},
 		},
@@ -687,5 +714,48 @@ func checkAccount(ctx *cli.Context) error {
 		return err
 	}
 	log.Info("Checked the snapshot journalled storage", "time", common.PrettyDuration(time.Since(start)))
+	return nil
+}
+
+func pruneAllState(ctx *cli.Context) error {
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	genesisPath := ctx.Args().First()
+	if len(genesisPath) == 0 {
+		utils.Fatalf("Must supply path to genesis JSON file")
+	}
+	file, err := os.Open(genesisPath)
+	if err != nil {
+		utils.Fatalf("Failed to read genesis file: %v", err)
+	}
+	defer file.Close()
+
+	g := new(core.Genesis)
+	if err := json.NewDecoder(file).Decode(g); err != nil {
+		cfg := gethConfig{
+			Eth:     ethconfig.Defaults,
+			Node:    defaultNodeConfig(),
+			Metrics: metrics.DefaultConfig,
+		}
+
+		// Load config file.
+		if err := loadConfig(genesisPath, &cfg); err != nil {
+			utils.Fatalf("%v", err)
+		}
+		g = cfg.Eth.Genesis
+	}
+
+	chaindb := utils.MakeChainDatabase(ctx, stack, false)
+	defer chaindb.Close()
+	pruner, err := pruner.NewAllPruner(chaindb)
+	if err != nil {
+		log.Error("Failed to open snapshot tree", "err", err)
+		return err
+	}
+	if err = pruner.PruneAll(g); err != nil {
+		log.Error("Failed to prune state", "err", err)
+		return err
+	}
 	return nil
 }

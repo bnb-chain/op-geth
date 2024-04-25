@@ -36,6 +36,7 @@ type Config struct {
 	IsVerkle  bool           // Flag whether the db is holding a verkle tree
 	HashDB    *hashdb.Config // Configs for hash-based scheme
 	PathDB    *pathdb.Config // Configs for experimental path-based scheme
+	NoTries   bool
 }
 
 // HashDefaults represents a config for using hash-based scheme with
@@ -357,4 +358,8 @@ func (db *Database) Head() common.Hash {
 // IsVerkle returns the indicator if the database is holding a verkle tree.
 func (db *Database) IsVerkle() bool {
 	return db.config.IsVerkle
+}
+
+func (db *Database) Config() *Config {
+	return db.config
 }

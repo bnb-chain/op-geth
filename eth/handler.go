@@ -173,7 +173,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		if fullBlock.Number.Uint64() == 0 && snapBlock.Number.Uint64() > 0 {
 			h.snapSync.Store(true)
 			log.Warn("Switch sync mode from full sync to snap sync", "reason", "snap sync incomplete")
-		} else if !h.chain.HasState(fullBlock.Root) {
+		} else if !h.chain.NoTries() && !h.chain.HasState(fullBlock.Root) {
 			h.snapSync.Store(true)
 			log.Warn("Switch sync mode from full sync to snap sync", "reason", "head state missing")
 		}

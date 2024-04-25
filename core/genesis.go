@@ -173,6 +173,11 @@ func (ga *GenesisAlloc) hash(isVerkle bool) (common.Hash, error) {
 // states will be persisted into the given database. Also, the genesis state
 // specification will be flushed as well.
 func (ga *GenesisAlloc) flush(db ethdb.Database, triedb *trie.Database, blockhash common.Hash) error {
+	triedbConfig := triedb.Config()
+	if triedbConfig != nil {
+		triedbConfig.NoTries = false
+	}
+
 	statedb, err := state.New(types.EmptyRootHash, state.NewDatabaseWithNodeDB(db, triedb), nil)
 	if err != nil {
 		return err
@@ -371,7 +376,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 	// execute the pre-bedrock STF.
 	header := rawdb.ReadHeader(db, stored, 0)
 	transitionedNetwork := genesis != nil && genesis.Config != nil && genesis.Config.BedrockBlock != nil && genesis.Config.BedrockBlock.Uint64() != 0
-	if header.Root != types.EmptyRootHash && !triedb.Initialized(header.Root) && !transitionedNetwork {
+	if header.Root != types.EmptyRootHash && !triedb.Initialized(header.Root) && !transitionedNetwork && !triedb.Config().NoTries {
 		if genesis == nil {
 			genesis = DefaultGenesisBlock()
 		}

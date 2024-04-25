@@ -51,7 +51,7 @@ var FullNodeGPO = gasprice.Config{
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	SyncMode:           downloader.SnapSync,
-	NetworkId:          0, // enable auto configuration of networkID == chainID
+	NetworkId:          0,
 	TxLookupLimit:      2350000,
 	TransactionHistory: 2350000,
 	StateHistory:       params.FullImmutabilityThreshold,
@@ -60,7 +60,7 @@ var Defaults = Config{
 	TrieCleanCache:     154,
 	TrieDirtyCache:     256,
 	TrieTimeout:        60 * time.Minute,
-	TrieCommitInterval:     0,
+	TrieCommitInterval: 0,
 	SnapshotCache:      102,
 	FilterLogCacheSize: 32,
 	Miner:              miner.DefaultConfig,
@@ -70,6 +70,33 @@ var Defaults = Config{
 	RPCEVMTimeout:      5 * time.Second,
 	GPO:                FullNodeGPO,
 	RPCTxFeeCap:        1, // 1 ether
+	EnableOpcodeOptimizing: false,
+}
+
+// OpBNBDefaults contains default settings for use on the opBNB main net.
+var OpBNBDefaults = Config{
+	SyncMode:               downloader.FullSync,
+	NetworkId:              204,
+	TxLookupLimit:          2350000,
+	TransactionHistory:     2350000,
+	StateHistory:           params.FullImmutabilityThreshold,
+	LightPeers:             100,
+	DatabaseCache:          512,
+	TrieCleanCache:         154,
+	TrieDirtyCache:         256,
+	TrieTimeout:            60 * time.Minute,
+	TrieCommitInterval:     3600,
+	NoTries:                false,
+	SnapshotCache:          102,
+	FilterLogCacheSize:     32,
+	Miner:                  miner.DefaultConfig,
+	TxPool:                 legacypool.DefaultConfig,
+	BlobPool:               blobpool.DefaultConfig,
+	RPCGasCap:              50000000,
+	RPCEVMTimeout:          5 * time.Second,
+	GPO:                    FullNodeGPO,
+	RPCTxFeeCap:            1, // 1 ether
+	Preimages:              true,
 	EnableOpcodeOptimizing: false,
 }
 
@@ -131,6 +158,7 @@ type Config struct {
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 	SnapshotCache      int
 	Preimages          bool
+	NoTries            bool
 
 	// This is the number of blocks for which logs will be cached in the filter system.
 	FilterLogCacheSize int

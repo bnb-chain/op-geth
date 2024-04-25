@@ -123,6 +123,17 @@ func defaultNodeConfig() node.Config {
 	return cfg
 }
 
+func defaultOpBNBNodeConfig() node.Config {
+	git, _ := version.VCS()
+	cfg := node.DefaultOpBNBConfig
+	cfg.Name = clientIdentifier
+	cfg.Version = params.VersionWithCommit(git.Commit, git.Date)
+	cfg.HTTPModules = append(cfg.HTTPModules, "eth")
+	cfg.WSModules = append(cfg.WSModules, "eth")
+	cfg.IPCPath = "geth.ipc"
+	return cfg
+}
+
 // loadBaseConfig loads the gethConfig based on the given command line
 // parameters and config file.
 func loadBaseConfig(ctx *cli.Context) gethConfig {
@@ -131,6 +142,15 @@ func loadBaseConfig(ctx *cli.Context) gethConfig {
 		Eth:     ethconfig.Defaults,
 		Node:    defaultNodeConfig(),
 		Metrics: metrics.DefaultConfig,
+	}
+
+	if ctx.Bool(utils.OpBNBMainnetFlag.Name) || ctx.Bool(utils.OpBNBTestnetFlag.Name) {
+		cfg.Eth = ethconfig.OpBNBDefaults
+		cfg.Node = defaultOpBNBNodeConfig()
+		if ctx.Bool(utils.OpBNBTestnetFlag.Name) {
+			cfg.Eth.NetworkId = 5611
+			cfg.Eth.TrieCommitInterval = 240
+		}
 	}
 
 	// Load config file.

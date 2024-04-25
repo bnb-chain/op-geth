@@ -34,6 +34,10 @@ import (
 	"strings"
 	"time"
 
+	pcsclite "github.com/gballet/go-libpcsclite"
+	gopsutil "github.com/shirou/gopsutil/mem"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 
 	"github.com/ethereum/go-ethereum/accounts"
@@ -74,9 +78,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
-	pcsclite "github.com/gballet/go-libpcsclite"
-	gopsutil "github.com/shirou/gopsutil/mem"
-	"github.com/urfave/cli/v2"
 )
 
 // These are all the command line flags we support.
@@ -267,6 +268,11 @@ var (
 		Name:     "bloomfilter.size",
 		Usage:    "Megabytes of memory allocated to bloom-filter for pruning",
 		Value:    2048,
+		Category: flags.EthCategory,
+	}
+	AllowInsecureNoTriesFlag = &cli.BoolFlag{
+		Name:     "allow-insecure-no-tries",
+		Usage:    `Disable the tries state root verification, the state consistency is no longer 100% guaranteed. Do not enable it unless you know exactly what the consequence it will cause.`,
 		Category: flags.EthCategory,
 	}
 	OverrideCancun = &cli.Uint64Flag{
@@ -1144,6 +1150,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			urls = params.SepoliaBootnodes
 		case ctx.Bool(GoerliFlag.Name):
 			urls = params.GoerliBootnodes
+		case ctx.Bool(OpBNBTestnetFlag.Name):
+			urls = params.OpBNBTestnetBootnodes
 		case ctx.Bool(NetworkIdFlag.Name):
 			if ctx.Uint64(NetworkIdFlag.Name) == params.OpBNBTestnet {
 				urls = params.OpBNBTestnetBootnodes
@@ -1591,6 +1599,10 @@ func SetDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "holesky")
 	case ctx.IsSet(OPNetworkFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), ctx.String(OPNetworkFlag.Name))
+	case ctx.IsSet(OpBNBMainnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "opBNBMainnet")
+	case ctx.IsSet(OpBNBTestnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "opBNBTestnet")
 	}
 }
 
@@ -1858,6 +1870,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(CacheLogSizeFlag.Name) {
 		cfg.FilterLogCacheSize = ctx.Int(CacheLogSizeFlag.Name)
+	}
+	if ctx.IsSet(AllowInsecureNoTriesFlag.Name) {
+		cfg.NoTries = ctx.Bool(AllowInsecureNoTriesFlag.Name)
 	}
 	if !ctx.Bool(SnapshotFlag.Name) || cfg.SnapshotCache == 0 {
 		// If snap-sync is requested, this flag is also required

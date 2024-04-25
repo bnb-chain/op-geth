@@ -68,6 +68,9 @@ type Database interface {
 
 	// TrieDB returns the underlying trie database for managing trie nodes.
 	TrieDB() *trie.Database
+
+	// NoTries returns whether the database has tries storage.
+	NoTries() bool
 }
 
 // Trie is a Ethereum Merkle Patricia trie.
@@ -156,6 +159,7 @@ func NewDatabaseWithConfig(db ethdb.Database, config *trie.Config) Database {
 		codeSizeCache: lru.NewCache[common.Hash, int](codeSizeCacheSize),
 		codeCache:     lru.NewSizeConstrainedCache[common.Hash, []byte](codeCacheSize),
 		triedb:        trie.NewDatabase(db, config),
+		noTries:       config != nil && config.NoTries,
 	}
 }
 
@@ -166,6 +170,7 @@ func NewDatabaseWithNodeDB(db ethdb.Database, triedb *trie.Database) Database {
 		codeSizeCache: lru.NewCache[common.Hash, int](codeSizeCacheSize),
 		codeCache:     lru.NewSizeConstrainedCache[common.Hash, []byte](codeCacheSize),
 		triedb:        triedb,
+		noTries:       triedb != nil && triedb.Config() != nil && triedb.Config().NoTries,
 	}
 }
 
@@ -174,10 +179,15 @@ type cachingDB struct {
 	codeSizeCache *lru.Cache[common.Hash, int]
 	codeCache     *lru.SizeConstrainedCache[common.Hash, []byte]
 	triedb        *trie.Database
+	noTries       bool
 }
 
 // OpenTrie opens the main account trie at a specific root hash.
 func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
+	if db.noTries {
+		return trie.NewEmptyTrie(), nil
+	}
+
 	if db.triedb.IsVerkle() {
 		return trie.NewVerkleTrie(root, db.triedb, utils.NewPointCache(commitmentCacheItems))
 	}
@@ -190,6 +200,9 @@ func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
 
 // OpenStorageTrie opens the storage trie of an account.
 func (db *cachingDB) OpenStorageTrie(stateRoot common.Hash, address common.Address, root common.Hash, self Trie) (Trie, error) {
+	if db.noTries {
+		return trie.NewEmptyTrie(), nil
+	}
 	// In the verkle case, there is only one tree. But the two-tree structure
 	// is hardcoded in the codebase. So we need to return the same trie in this
 	// case.
@@ -207,6 +220,8 @@ func (db *cachingDB) OpenStorageTrie(stateRoot common.Hash, address common.Addre
 func (db *cachingDB) CopyTrie(t Trie) Trie {
 	switch t := t.(type) {
 	case *trie.StateTrie:
+		return t.Copy()
+	case *trie.EmptyTrie:
 		return t.Copy()
 	default:
 		panic(fmt.Errorf("unknown trie type %T", t))
@@ -262,4 +277,8 @@ func (db *cachingDB) DiskDB() ethdb.KeyValueStore {
 // TrieDB retrieves any intermediate trie-node caching layer.
 func (db *cachingDB) TrieDB() *trie.Database {
 	return db.triedb
+}
+
+func (db *cachingDB) NoTries() bool {
+	return db.noTries
 }

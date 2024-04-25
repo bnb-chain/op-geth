@@ -117,6 +117,7 @@ var (
 		utils.CacheSnapshotFlag,
 		utils.CacheNoPrefetchFlag,
 		utils.CachePreimagesFlag,
+		utils.AllowInsecureNoTriesFlag,
 		utils.CacheLogSizeFlag,
 		utils.FDLimitFlag,
 		utils.CryptoKZGFlag,
@@ -354,10 +355,11 @@ func prepare(ctx *cli.Context) {
 			log.Info("Bumping default cache on mainnet", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 4096, "network", ctx.String(utils.OPNetworkFlag.Name))
 			ctx.Set(utils.CacheFlag.Name, strconv.Itoa(4096))
 		}
-	} else if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) && ctx.IsSet(utils.OpBNBMainnetFlag.Name) {
-		// we're really on opBNB mainnet. Bump that cache up
-		log.Info("Bumping default cache on mainnet", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 4096, "network", ctx.String(utils.OpBNBMainnetFlag.Name))
-		ctx.Set(utils.CacheFlag.Name, strconv.Itoa(4096))
+	} else if ctx.String(utils.SyncModeFlag.Name) != "light" && !ctx.IsSet(utils.CacheFlag.Name) &&
+		(ctx.IsSet(utils.OpBNBMainnetFlag.Name) || ctx.IsSet(utils.OpBNBTestnetFlag.Name)) {
+		// we're really on opBNB network. Bump that cache up
+		log.Info("Bumping default cache on opBNB", "provided", ctx.Int(utils.CacheFlag.Name), "updated", 22000)
+		ctx.Set(utils.CacheFlag.Name, strconv.Itoa(22000))
 	}
 
 	// Start metrics export if enabled

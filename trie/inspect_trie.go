@@ -62,7 +62,7 @@ func (trieStat *TrieTreeStat) AtomicAdd(theNode node, height uint32) {
 		atomic.AddUint64(&trieStat.totalNodeStat.ValueNodeCnt, 1)
 		atomic.AddUint64(&((trieStat.theNodeStatByLevel[height]).ValueNodeCnt), 1)
 	default:
-		panic(errors.New("Invalid node type to statistics"))
+		panic(errors.New("invalid node type to statistics"))
 	}
 }
 
@@ -138,7 +138,7 @@ func (inspect *Inspector) Run() {
 	if _, ok := inspect.result[""]; !ok {
 		inspect.result[""] = accountTrieStat
 	}
-	log.Info("Find Account Trie Tree", "rootHash: ", inspect.trie.Hash().String(), "BlockNum: ", inspect.blocknum)
+	log.Info("Find account trie tree", "root hash", inspect.trie.Hash().String(), "block num", inspect.blocknum)
 	inspect.ConcurrentTraversal(inspect.trie, accountTrieStat, inspect.root, 0, path)
 	inspect.wg.Wait()
 }
@@ -154,7 +154,8 @@ func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *Tr
 	// print process progress
 	total_num := atomic.AddUint64(&inspect.totalNum, 1)
 	if total_num%100000 == 0 {
-		fmt.Printf("Complete progress: %v, go routines Num: %v, inspect concurrentQueue: %v\n", total_num, runtime.NumGoroutine(), len(inspect.concurrentQueue))
+		fmt.Printf("Complete progress: %v, go routines num: %v, inspect concurrent queue: %v\n",
+			total_num, runtime.NumGoroutine(), len(inspect.concurrentQueue))
 	}
 
 	// nil node
@@ -181,9 +182,10 @@ func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *Tr
 			}
 		}
 	case hashNode:
-		n, err := theTrie.resloveWithoutTrack(current, path)
+		n, err := theTrie.resolveWithoutTrack(current, path)
 		if err != nil {
-			fmt.Printf("Resolve HashNode error: %v, TrieRoot: %v, Height: %v, Path: %v\n", err, theTrie.Hash().String(), height+1, path)
+			fmt.Printf("Failed to resolve hash node, error: %v, TrieRoot: %v, Height: %v, Path: %v\n", err,
+				theTrie.Hash().String(), height+1, path)
 			return
 		}
 		inspect.ConcurrentTraversal(theTrie, theTrieTreeStat, n, height, path)
@@ -219,7 +221,7 @@ func (inspect *Inspector) ConcurrentTraversal(theTrie *Trie, theTrieTreeStat *Tr
 		inspect.wg.Add(1)
 		go inspect.SubConcurrentTraversal(contractTrie, trieStat, contractTrie.root, 0, contractPath)
 	default:
-		panic(errors.New("Invalid node type to traverse."))
+		panic(errors.New("invalid node type to traverse"))
 	}
 	theTrieTreeStat.AtomicAdd(theNode, height)
 }

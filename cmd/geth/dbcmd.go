@@ -346,13 +346,13 @@ func inspectTrie(ctx *cli.Context) error {
 	var (
 		blockNumber  uint64
 		trieRootHash common.Hash
-		jobnum       uint64
+		jobNum       uint64
 	)
 
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	db := utils.MakeChainDatabase(ctx, stack, true)
 	defer db.Close()
 
 	var headerBlockHash common.Hash
@@ -367,24 +367,24 @@ func inspectTrie(ctx *cli.Context) error {
 			var err error
 			blockNumber, err = strconv.ParseUint(ctx.Args().Get(0), 10, 64)
 			if err != nil {
-				return fmt.Errorf("failed to Parse blocknum, Args[0]: %v, err: %v", ctx.Args().Get(0), err)
+				return fmt.Errorf("Failed to parse block number, Args[0]: %v, err: %v", ctx.Args().Get(0), err)
 			}
 		}
 
 		if ctx.NArg() == 1 {
-			jobnum = 1000
+			jobNum = 1000
 		} else {
 			var err error
-			jobnum, err = strconv.ParseUint(ctx.Args().Get(1), 10, 64)
+			jobNum, err = strconv.ParseUint(ctx.Args().Get(1), 10, 64)
 			if err != nil {
-				return fmt.Errorf("failed to Parse jobnum, Args[1]: %v, err: %v", ctx.Args().Get(1), err)
+				return fmt.Errorf("Failed to parse job number, Args[1]: %v, err: %v", ctx.Args().Get(1), err)
 			}
 		}
 
 		if blockNumber != math.MaxUint64 {
 			headerBlockHash = rawdb.ReadCanonicalHash(db, blockNumber)
 			if headerBlockHash == (common.Hash{}) {
-				return fmt.Errorf("ReadHeadBlockHash empry hash")
+				return fmt.Errorf("ReadHeadBlockHash empty hash")
 			}
 			blockHeader := rawdb.ReadHeader(db, headerBlockHash, blockNumber)
 			trieRootHash = blockHeader.Root
@@ -392,7 +392,7 @@ func inspectTrie(ctx *cli.Context) error {
 		if (trieRootHash == common.Hash{}) {
 			log.Error("Empty root hash")
 		}
-		fmt.Printf("ReadBlockHeader, root: %v, blocknum: %v\n", trieRootHash, blockNumber)
+		fmt.Printf("ReadBlockHeader, root: %v, block number: %v\n", trieRootHash, blockNumber)
 
 		dbScheme := rawdb.ReadStateScheme(db)
 		var config *trie.Config
@@ -407,10 +407,10 @@ func inspectTrie(ctx *cli.Context) error {
 		triedb := trie.NewDatabase(db, config)
 		theTrie, err := trie.New(trie.TrieID(trieRootHash), triedb)
 		if err != nil {
-			fmt.Printf("fail to new trie tree, err: %v, rootHash: %v\n", err, trieRootHash.String())
+			fmt.Printf("Failed to new trie tree, err: %v, root hash: %v\n", err, trieRootHash.String())
 			return err
 		}
-		theInspect, err := trie.NewInspector(theTrie, triedb, trieRootHash, blockNumber, jobnum)
+		theInspect, err := trie.NewInspector(theTrie, triedb, trieRootHash, blockNumber, jobNum)
 		if err != nil {
 			return err
 		}

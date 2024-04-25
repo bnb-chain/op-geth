@@ -74,6 +74,32 @@ var DefaultConfig = Config{
 	DBEngine: "", // Use whatever exists, will default to Pebble if non-existent and supported
 }
 
+// DefaultOpBNBConfig contains reasonable default opBNB settings.
+var DefaultOpBNBConfig = Config{
+	DataDir:              DefaultDataDir(),
+	HTTPHost:             DefaultHTTPHost,
+	HTTPPort:             DefaultHTTPPort,
+	AuthAddr:             DefaultAuthHost,
+	AuthPort:             DefaultAuthPort,
+	AuthVirtualHosts:     DefaultAuthVhosts,
+	HTTPModules:          []string{"net", "web3", "engine"},
+	HTTPVirtualHosts:     []string{"localhost"},
+	HTTPTimeouts:         rpc.DefaultHTTPTimeouts,
+	WSHost:               DefaultWSHost,
+	WSPort:               DefaultWSPort,
+	WSModules:            []string{"net", "web3", "engine"},
+	BatchRequestLimit:    1000,
+	BatchResponseMaxSize: 25 * 1000 * 1000,
+	GraphQLVirtualHosts:  []string{"localhost"},
+	P2P: p2p.Config{
+		ListenAddr: ":30303",
+		MaxPeers:   10,
+		NAT:        nat.Any(),
+	},
+	DBEngine:              "", // Use whatever exists, will default to Pebble if non-existent and supported
+	InsecureUnlockAllowed: true,
+}
+
 // DefaultDataDir is the default data directory to use for the databases and other
 // persistence requirements.
 func DefaultDataDir() string {

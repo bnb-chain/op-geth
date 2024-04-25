@@ -1238,7 +1238,6 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 	)
 	if !s.fullProcessed {
 		s.stateRoot = s.IntermediateRoot(deleteEmptyObjects)
-		s.expectedRoot = s.stateRoot
 	}
 	commitFuncs := []func() error{
 		func() error {

@@ -95,6 +95,7 @@ var OpBNBDefaults = Config{
 	TrieDirtyCache:         256,
 	TrieTimeout:            60 * time.Minute,
 	TrieCommitInterval:     3600,
+	NoTries:                false,
 	SnapshotCache:          102,
 	FilterLogCacheSize:     32,
 	Miner:                  miner.DefaultConfig,
@@ -165,6 +166,7 @@ type Config struct {
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 	SnapshotCache      int
 	Preimages          bool
+	NoTries            bool
 
 	// This is the number of blocks for which logs will be cached in the filter system.
 	FilterLogCacheSize int

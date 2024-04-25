@@ -448,17 +448,18 @@ func (tx *Transaction) EffectiveGasTipCmp(other *Transaction, baseFee *big.Int) 
 	}
 	// the EffectiveGasTipValue() always copies two big.Int, which cost almost 90% cpu resource of the whole function,
 	// so we define an alternative function to improve the performance.
-	effectiveGasTipValue := func(tx *Transaction, baseFee *big.Int) *big.Int {
-		if tx.Type() == DepositTxType {
-			return new(big.Int)
-		}
-		if baseFee == nil {
-			return tx.inner.gasTipCap()
-		}
-		gasFeeCap := tx.inner.gasFeeCap()
-		return math.BigMin(tx.inner.gasTipCap(), new(big.Int).Sub(gasFeeCap, baseFee))
-	}
 	return effectiveGasTipValue(tx, baseFee).Cmp(effectiveGasTipValue(other, baseFee))
+}
+
+func effectiveGasTipValue(tx *Transaction, baseFee *big.Int) *big.Int {
+	if tx.Type() == DepositTxType {
+		return new(big.Int)
+	}
+	if baseFee == nil {
+		return tx.inner.gasTipCap()
+	}
+	gasFeeCap := tx.inner.gasFeeCap()
+	return math.BigMin(tx.inner.gasTipCap(), new(big.Int).Sub(gasFeeCap, baseFee))
 }
 
 // EffectiveGasTipIntCmp compares the effective gasTipCap of a transaction to the given gasTipCap.

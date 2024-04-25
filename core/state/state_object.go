@@ -386,6 +386,13 @@ func (s *stateObject) updateTrie() (Trie, error) {
 // updateRoot flushes all cached storage mutations to trie, recalculating the
 // new storage trie root.
 func (s *stateObject) updateRoot() {
+	// If node runs in no trie mode, set root to empty.
+	defer func() {
+		if s.db.db.NoTries() {
+			s.data.Root = types.EmptyRootHash
+		}
+	}()
+
 	// Flush cached storage mutations into trie, short circuit if any error
 	// is occurred or there is not change in the trie.
 	tr, err := s.updateTrie()

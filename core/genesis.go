@@ -162,6 +162,11 @@ func (ga *GenesisAlloc) hash() (common.Hash, error) {
 // states will be persisted into the given database. Also, the genesis state
 // specification will be flushed as well.
 func (ga *GenesisAlloc) flush(db ethdb.Database, triedb *trie.Database, blockhash common.Hash) error {
+	triedbConfig := triedb.Config()
+	if triedbConfig != nil {
+		triedbConfig.NoTries = false
+	}
+
 	statedb, err := state.New(types.EmptyRootHash, state.NewDatabaseWithNodeDB(db, triedb), nil)
 	if err != nil {
 		return err
@@ -346,7 +351,7 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 	// is initialized with an external ancient store. Commit genesis state
 	// in this case.
 	header := rawdb.ReadHeader(db, stored, 0)
-	if header.Root != types.EmptyRootHash && !triedb.Initialized(header.Root) {
+	if header.Root != types.EmptyRootHash && !triedb.Initialized(header.Root) && !triedb.Config().NoTries {
 		if genesis == nil {
 			genesis = DefaultGenesisBlock()
 		}

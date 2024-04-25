@@ -28,6 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/exp/slices"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/common/mclock"
@@ -50,7 +52,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
-	"golang.org/x/exp/slices"
 )
 
 var (
@@ -152,6 +153,7 @@ type CacheConfig struct {
 	TrieTimeLimit        time.Duration         // Time limit after which to flush the current in-memory trie to disk
 	SnapshotLimit        int                   // Memory allowance (MB) to use for caching snapshot entries in memory
 	Preimages            bool                  // Whether to store preimage of trie key to the disk
+	NoTries              bool                  // Insecure settings. Do not have any tries in databases if enabled.
 	StateHistory         uint64                // Number of blocks from head whose state histories are reserved.
 	StateScheme          string                // Scheme used to store ethereum states and merkle tree nodes on top
 	PathNodeBuffer       pathdb.NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
@@ -164,7 +166,10 @@ type CacheConfig struct {
 
 // triedbConfig derives the configures for trie database.
 func (c *CacheConfig) triedbConfig() *trie.Config {
-	config := &trie.Config{Preimages: c.Preimages}
+	config := &trie.Config{
+		Preimages: c.Preimages,
+		NoTries:   c.NoTries,
+	}
 	if c.StateScheme == rawdb.HashScheme {
 		config.HashDB = &hashdb.Config{
 			CleanCacheSize: c.TrieCleanLimit * 1024 * 1024,
@@ -367,7 +372,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	// Make sure the state associated with the block is available, or log out
 	// if there is no available state, waiting for state sync.
 	head := bc.CurrentBlock()
-	if !bc.HasState(head.Root) {
+	if !bc.NoTries() && !bc.HasState(head.Root) {
 		if head.Number.Uint64() == 0 {
 			// The genesis state is missing, which is only possible in the path-based
 			// scheme. This situation occurs when the initial state sync is not finished
@@ -478,6 +483,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			Recovery:   recover,
 			NoBuild:    bc.cacheConfig.SnapshotNoBuild,
 			AsyncBuild: !bc.cacheConfig.SnapshotWait,
+			NoTries:    bc.stateCache.NoTries(),
 		}
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
 	}
@@ -862,7 +868,7 @@ func (bc *BlockChain) SnapSyncCommitHead(hash common.Hash) error {
 			return err
 		}
 	}
-	if !bc.HasState(root) {
+	if !bc.NoTries() && !bc.HasState(root) {
 		return fmt.Errorf("non existent state [%x..]", root[:4])
 	}
 	// If all checks out, manually set the head block.
@@ -1896,6 +1902,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				}
 			}
 
+			statedb.SetExpectedStateRoot(block.Root())
+
 			// Process block using the parent state as reference point
 			pstart = time.Now()
 			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
@@ -2683,4 +2691,8 @@ func (bc *BlockChain) SetTrieFlushInterval(interval time.Duration) {
 // GetTrieFlushInterval gets the in-memory tries flush interval
 func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 	return time.Duration(bc.flushInterval.Load())
+}
+
+func (bc *BlockChain) NoTries() bool {
+	return bc.stateCache.NoTries()
 }

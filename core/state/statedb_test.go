@@ -30,6 +30,8 @@ import (
 	"testing"
 	"testing/quick"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
@@ -40,7 +42,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 	"github.com/ethereum/go-ethereum/trie/trienode"
-	"github.com/holiman/uint256"
 )
 
 // Tests that updating a state trie does not leak any database writes prior to

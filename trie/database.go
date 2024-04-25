@@ -35,6 +35,7 @@ type Config struct {
 	Preimages bool           // Flag whether the preimage of node key is recorded
 	HashDB    *hashdb.Config // Configs for hash-based scheme
 	PathDB    *pathdb.Config // Configs for experimental path-based scheme
+	NoTries   bool
 }
 
 // HashDefaults represents a config for using hash-based scheme with
@@ -362,4 +363,8 @@ func (db *Database) Head() common.Hash {
 		return common.Hash{}
 	}
 	return pdb.Head()
+}
+
+func (db *Database) Config() *Config {
+	return db.config
 }

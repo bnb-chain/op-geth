@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -234,18 +233,7 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, block uint6
 	if err := db.tree.add(root, parentRoot, block, nodes, states); err != nil {
 		return err
 	}
-	gopool.Submit(func() {
-		// Keep 128 diff layers in the memory, persistent layer is 129th.
-		// - head layer is paired with HEAD state
-		// - head-1 layer is paired with HEAD-1 state
-		// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
-		// - head-128 layer(disk layer) is paired with HEAD-128 state
-		err := db.tree.cap(root, maxDiffLayers)
-		if err != nil {
-			log.Crit("failed to cap layer tree", "root", root, "error", err)
-		}
-	})
-	return nil
+	return db.tree.cap(root, maxDiffLayers)
 }
 
 // Commit traverses downwards the layer tree from a specified layer with the

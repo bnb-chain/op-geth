@@ -153,6 +153,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 			err = blockchain.validator.ValidateBody(block)
 		}
 		if err != nil {
+			fmt.Println(err)
 			if err == ErrKnownBlock {
 				continue
 			}

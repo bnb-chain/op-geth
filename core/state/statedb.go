@@ -73,6 +73,10 @@ type StateDB struct {
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
 	originalRoot common.Hash
+	expectedRoot common.Hash // The state root in the block header
+	stateRoot    common.Hash // The calculation result of IntermediateRoot
+
+	fullProcessed bool
 
 	// These maps hold the state changes (including the corresponding
 	// original value) that occurred in this **block**.
@@ -198,6 +202,16 @@ func (s *StateDB) StopPrefetcher() {
 		s.prefetcher.close()
 		s.prefetcher = nil
 	}
+}
+
+// Mark that the block is processed by diff layer
+func (s *StateDB) SetExpectedStateRoot(root common.Hash) {
+	s.expectedRoot = root
+}
+
+// Mark that the block is full processed
+func (s *StateDB) MarkFullProcessed() {
+	s.fullProcessed = true
 }
 
 // setError remembers the first non-nil error it is called with.
@@ -1219,12 +1233,21 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 		return common.Hash{}, fmt.Errorf("commit aborted due to earlier error: %v", s.dbErr)
 	}
 	var (
-		stateRoot  = s.IntermediateRoot(deleteEmptyObjects)
 		nodes      = trienode.NewMergedNodeSet()
 		incomplete map[common.Address]struct{}
 	)
+	if !s.fullProcessed {
+		s.stateRoot = s.IntermediateRoot(deleteEmptyObjects)
+		s.expectedRoot = s.stateRoot
+	}
 	commitFuncs := []func() error{
 		func() error {
+			if s.fullProcessed {
+				if s.stateRoot = s.StateIntermediateRoot(); s.expectedRoot != s.stateRoot {
+					log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
+					return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
+				}
+			}
 			var err error
 			// Handle all state deletions first
 			incomplete, err = s.handleDestruction(nodes)
@@ -1362,11 +1385,11 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 					defer func(start time.Time) { s.SnapshotCommits += time.Since(start) }(time.Now())
 				}
 				// Only update if there's a state transition (skip empty Clique blocks)
-				if parent := s.snap.Root(); parent != stateRoot {
-					err := s.snaps.Update(stateRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
+				if parent := s.snap.Root(); parent != s.expectedRoot {
+					err := s.snaps.Update(s.expectedRoot, parent, s.convertAccountSet(s.stateObjectsDestruct), s.accounts, s.storages)
 
 					if err != nil {
-						log.Warn("Failed to update snapshot tree", "from", parent, "to", stateRoot, "err", err)
+						log.Warn("Failed to update snapshot tree", "from", parent, "to", s.expectedRoot, "err", err)
 					}
 
 					// Keep n diff layers in the memory
@@ -1374,8 +1397,8 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 					// - head-1 layer is paired with HEAD-1 state
 					// - head-(n-1) layer(bottom-most diff layer) is paired with HEAD-(n-1)state
 					go func() {
-						if err := s.snaps.Cap(stateRoot, 128); err != nil {
-							log.Warn("Failed to cap snapshot tree", "root", stateRoot, "layers", 128, "err", err)
+						if err := s.snaps.Cap(s.expectedRoot, 128); err != nil {
+							log.Warn("Failed to cap snapshot tree", "root", s.expectedRoot, "layers", 128, "err", err)
 						}
 					}()
 				}
@@ -1383,7 +1406,6 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 			return nil
 		},
 	}
-
 	defer s.StopPrefetcher()
 	commitRes := make(chan error, len(commitFuncs))
 	for _, f := range commitFuncs {
@@ -1400,7 +1422,7 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 		}
 	}
 
-	root := stateRoot
+	root := s.stateRoot
 	s.snap = nil
 	if root == (common.Hash{}) {
 		root = types.EmptyRootHash

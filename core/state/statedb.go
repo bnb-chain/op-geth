@@ -1689,11 +1689,6 @@ func (s *StateDB) GetSnap() snapshot.Snapshot {
 	return s.snap
 }
 
-// Mark that the block is processed by diff layer
-func (s *StateDB) SetExpectedStateRoot(root common.Hash) {
-	s.expectedRoot = root
-}
-
 // copySet returns a deep-copied set.
 func copySet[k comparable](set map[k][]byte) map[k][]byte {
 	copied := make(map[k][]byte, len(set))

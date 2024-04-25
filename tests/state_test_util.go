@@ -302,8 +302,8 @@ func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapsh
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 
-	root := state.StateDB.IntermediateRoot(config.IsEIP158(block.Number()))
-	state.StateDB.SetExpectedStateRoot(root)
+	root := statedb.IntermediateRoot(config.IsEIP158(block.Number()))
+	statedb.SetExpectedStateRoot(root)
 	// Commit state mutations into database.
 	root, _ = statedb.Commit(block.NumberU64(), config.IsEIP158(block.Number()))
 	return triedb, snaps, statedb, root, err

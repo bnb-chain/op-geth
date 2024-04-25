@@ -1245,9 +1245,14 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 		if metrics.EnabledExpensive {
 			defer func(start time.Time) { s.TrieCommits += time.Since(start) }(time.Now())
 		}
-		if s.stateRoot = s.StateIntermediateRoot(); s.fullProcessed && s.expectedRoot != s.stateRoot {
-			log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
-			return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
+		if s.fullProcessed {
+			if s.stateRoot = s.StateIntermediateRoot(); s.expectedRoot != s.stateRoot {
+				log.Error("Invalid merkle root", "remote", s.expectedRoot, "local", s.stateRoot)
+				return fmt.Errorf("invalid merkle root (remote: %x local: %x)", s.expectedRoot, s.stateRoot)
+			}
+		} else {
+			s.stateRoot = s.IntermediateRoot(deleteEmptyObjects)
+			s.expectedRoot = s.stateRoot
 		}
 
 		var err error

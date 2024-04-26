@@ -153,7 +153,7 @@ type Database struct {
 	capCh          chan common.Hash
 	stopCh         chan struct{}
 	capLock        sync.Mutex
-	capDoingLock   sync.Mutex
+	//capDoingLock   sync.Mutex
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -224,8 +224,8 @@ func (db *Database) loop() {
 			}
 			db.capRoots = append(db.capRoots, newCapRoot)
 			db.capRootsRecord[newCapRoot] = struct{}{}
-			db.capLock.Unlock()
 			db.capDifflayers()
+			db.capLock.Unlock()
 		case <-db.stopCh:
 			return
 		}
@@ -233,13 +233,8 @@ func (db *Database) loop() {
 }
 
 func (db *Database) capDifflayers() {
-	db.capDoingLock.Lock()
-	defer db.capDoingLock.Unlock()
-
 	capRootsShadow := make([]common.Hash, 0)
-	db.capLock.Lock()
 	capRootsShadow = append(capRootsShadow, db.capRoots...)
-	db.capLock.Unlock()
 	if len(capRootsShadow) == 0 {
 		return
 	}
@@ -254,19 +249,10 @@ func (db *Database) capDifflayers() {
 			log.Crit("failed to cap layer tree", "root", capRoot, "error", err)
 		}
 	}
-	db.capLock.Lock()
 	db.capRoots = db.capRoots[len(capRootsShadow):]
 	for _, delRoot := range capRootsShadow {
 		delete(db.capRootsRecord, delRoot)
 	}
-	db.capLock.Unlock()
-}
-
-func (db *Database) cappingRoot(root common.Hash) bool {
-	db.capLock.Lock()
-	_, ok := db.capRootsRecord[root]
-	db.capLock.Unlock()
-	return ok
 }
 
 // Reader retrieves a layer belonging to the given state root.
@@ -311,10 +297,8 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, block uint6
 func (db *Database) Commit(root common.Hash, report bool) error {
 	// Hold the lock to prevent concurrent mutations.
 	db.lock.Lock()
-	db.capDoingLock.Lock()
 	db.capLock.Lock()
 	defer db.lock.Unlock()
-	defer db.capDoingLock.Unlock()
 	defer db.capLock.Unlock()
 
 	// Short circuit if the mutation is not allowed.
@@ -453,9 +437,11 @@ func (db *Database) Recoverable(root common.Hash) bool {
 	if id == nil {
 		return false
 	}
-	if db.cappingRoot(root) {
+	db.capLock.Lock()
+	if _, ok := db.capRootsRecord[root]; ok {
 		db.capDifflayers()
 	}
+	db.capLock.Unlock()
 	// Recoverable state must below the disk layer. The recoverable
 	// state only refers the state that is currently not available,
 	// but can be restored by applying state history.

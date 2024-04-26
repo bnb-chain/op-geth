@@ -360,7 +360,7 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 	}
 	// Short circuit if the target state is not recoverable.
 	root = types.TrieRootHash(root)
-	if !db.Recoverable(root) {
+	if !db.recoverable(root) {
 		return errStateUnrecoverable
 	}
 	// Apply the state histories upon the disk layer in order.
@@ -391,8 +391,14 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 	return nil
 }
 
-// Recoverable returns the indicator if the specified state is recoverable.
 func (db *Database) Recoverable(root common.Hash) bool {
+	db.capLock.Lock()
+	defer db.capLock.Unlock()
+	return db.recoverable(root)
+}
+
+// Recoverable returns the indicator if the specified state is recoverable.
+func (db *Database) recoverable(root common.Hash) bool {
 	// Ensure the requested state is a known state.
 	root = types.TrieRootHash(root)
 	id := rawdb.ReadStateID(db.diskdb, root)

@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -147,6 +148,7 @@ type Database struct {
 	tree       *layerTree               // The group for all known layers
 	freezer    *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
 	lock       sync.RWMutex             // Lock to prevent mutations from happening at the same time
+	capLock    sync.Mutex
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -233,7 +235,20 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, block uint6
 	if err := db.tree.add(root, parentRoot, block, nodes, states); err != nil {
 		return err
 	}
-	return db.tree.cap(root, maxDiffLayers)
+	db.capLock.Lock()
+	gopool.Submit(func() {
+		defer db.capLock.Unlock()
+		// Keep 128 diff layers in the memory, persistent layer is 129th.
+		// - head layer is paired with HEAD state
+		// - head-1 layer is paired with HEAD-1 state
+		// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
+		// - head-128 layer(disk layer) is paired with HEAD-128 state
+		err := db.tree.cap(root, maxDiffLayers)
+		if err != nil {
+			log.Crit("failed to cap layer tree", "error", err)
+		}
+	})
+	return nil
 }
 
 // Commit traverses downwards the layer tree from a specified layer with the
@@ -242,7 +257,9 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, block uint6
 func (db *Database) Commit(root common.Hash, report bool) error {
 	// Hold the lock to prevent concurrent mutations.
 	db.lock.Lock()
+	db.capLock.Lock()
 	defer db.lock.Unlock()
+	defer db.capLock.Unlock()
 
 	// Short circuit if the mutation is not allowed.
 	if err := db.modifyAllowed(); err != nil {
@@ -330,7 +347,9 @@ func (db *Database) Enable(root common.Hash) error {
 // canonical state and the corresponding trie histories are existent.
 func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error {
 	db.lock.Lock()
+	db.capLock.Lock()
 	defer db.lock.Unlock()
+	defer db.capLock.Unlock()
 
 	// Short circuit if rollback operation is not supported.
 	if err := db.modifyAllowed(); err != nil {

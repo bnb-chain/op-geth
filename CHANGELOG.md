@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.3.1
+
+This is a minor release for opBNB Mainnet and Testnet.
+
+In this release, we've introduced significant optimizations and enhancements across various modes and functionalities, including PBSS Mode optimizations, the introduction of Fast Node Mode, EVM execution improvements, and a simplified start command, aimed at enhancing performance and user experience.
+
+Upgrading is optional.
+
+### User Facing Changes
+
+- **PBSS Mode Optimizations**: We have made multiple optimizations for PBSS mode, including the implementation of an async buffer, support for obtaining withdrawal proof on PBSS, and the introduction of an HBSS to PBSS convert tool. For more details, please refer to #69, #74, and #79.
+- **Fast Node Mode**: We have introduced a new mode called "Fast Node" to improve the performance and reduce the resources required by the node. This enhancement is aimed at providing a more efficient and streamlined experience. Please see more details in #75.
+- **EVM Execution Opcode Level Optimization**: Our latest update includes optimizations at the EVM execution opcode level, resulting in improved performance for EVM execution. For a deeper understanding of these changes, please refer to #77 and #81.
+- **Simplified Start Command**: We have simplified the start command by enabling the selection of default network configuration through the use of `--opBNBMainnet` or `--opBNBTestnet` in the command. This enhancement aims to streamline the user experience. More information can be found in #91.
+
+### Partial Changelog
+
+- [#69](https://github.com/bnb-chain/op-geth/pull/69): feat: add async buffer
+- [#71](https://github.com/bnb-chain/op-geth/pull/71): chore: add miner perf metrics
+- [#74](https://github.com/bnb-chain/op-geth/pull/74): feat: support getting withdrawal proof on pbss
+- [#75](https://github.com/bnb-chain/op-geth/pull/75): feat: implement fast node
+- [#76](https://github.com/bnb-chain/op-geth/pull/76): bugfix: fix Resubscribe deadlock when unsubscribing after inner sub ends
+- [#77](https://github.com/bnb-chain/op-geth/pull/77): feat: EVM execution opcode level optimization
+- [#79](https://github.com/bnb-chain/op-geth/pull/79): cmd/geth: add hbss to pbss convert tool
+- [#81](https://github.com/bnb-chain/op-geth/pull/81): feat: introduce hash cache to improve performance
+- [#88](https://github.com/bnb-chain/op-geth/pull/88): fix: fix base buffer concurrent read/write race
+- [#91](https://github.com/bnb-chain/op-geth/pull/91): feat: simplify node start
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.3.1
+
+### Full Changelog
+
+https://github.com/bnb-chain/op-geth/compare/v0.3.0...v0.3.1
+
 ## v0.3.0
 
 This is a recommended release for op-geth. This release brings in upstream updates, see https://github.com/bnb-chain/op-geth/pull/58 for the contents. This is also a ready release for the next planed fork, which will bring in canyon fork from upstream as well.

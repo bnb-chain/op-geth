@@ -120,6 +120,7 @@ func newTester(t *testing.T) *tester {
 		}
 		obj.roots = append(obj.roots, root)
 	}
+	_ = db.Recoverable(types.EmptyRootHash)
 	return obj
 }
 

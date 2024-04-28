@@ -79,8 +79,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		misc.ApplyPreContractHardFork(statedb)
 	}
 
-	// opBNB no need to hard code this contract via hardfork
-	// misc.EnsureCreate2Deployer(p.config, block.Time(), statedb)
+	misc.EnsureCreate2Deployer(p.config, block.Time(), statedb)
 
 	var (
 		context = NewEVMBlockContext(header, p.bc, nil, p.config, statedb)

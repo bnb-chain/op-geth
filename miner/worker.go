@@ -1147,8 +1147,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		misc.ApplyPreContractHardFork(work.state)
 	}
 
-	// opBNB no need to hard code this contract via hardfork
-	// misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
+	misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
 
 	start := time.Now()
 	for _, tx := range genParams.txs {

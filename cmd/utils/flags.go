@@ -44,6 +44,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/fdlimit"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/txpool/legacypool"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -2056,7 +2057,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			if rawdb.ReadCanonicalHash(chaindb, 0) != (common.Hash{}) {
 				cfg.Genesis = nil // fallback to db content
 
-				//validate genesis has PoS enabled in block 0
+				// validate genesis has PoS enabled in block 0
 				genesis, err := core.ReadGenesis(chaindb)
 				if err != nil {
 					Fatalf("Could not read genesis from database: %v", err)
@@ -2274,6 +2275,12 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 	return chainDb
 }
 
+func PathDBConfigAddJournalFilePath(stack *node.Node, config *pathdb.Config) *pathdb.Config {
+	path := fmt.Sprintf("%s/%s", stack.ResolvePath("chaindata"), eth.JournalFileName)
+	config.JournalFilePath = path
+	return config
+}
+
 // tryMakeReadOnlyDatabase try to open the chain database in read-only mode,
 // or fallback to write mode if the database is not initialized.
 func tryMakeReadOnlyDatabase(ctx *cli.Context, stack *node.Node) ethdb.Database {
@@ -2449,7 +2456,7 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 }
 
 // MakeTrieDatabase constructs a trie database based on the configured scheme.
-func MakeTrieDatabase(ctx *cli.Context, disk ethdb.Database, preimage bool, readOnly bool, isVerkle bool) *trie.Database {
+func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, preimage bool, readOnly bool, isVerkle bool) *trie.Database {
 	config := &trie.Config{
 		Preimages: preimage,
 		IsVerkle:  isVerkle,
@@ -2470,5 +2477,6 @@ func MakeTrieDatabase(ctx *cli.Context, disk ethdb.Database, preimage bool, read
 	} else {
 		config.PathDB = pathdb.Defaults
 	}
+	config.PathDB.JournalFilePath = fmt.Sprintf("%s/%s", stack.ResolvePath("chaindata"), eth.JournalFileName)
 	return trie.NewDatabase(disk, config)
 }

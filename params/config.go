@@ -253,6 +253,7 @@ var (
 		ShanghaiTime: newUint64(1714385400), // Apr-29-2024 10:10 AM +UTC
 		CanyonTime:   newUint64(1714385400), // Apr-29-2024 10:10 AM +UTC
 		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
+		CancunTime:  newUint64(1714386600), // Apr-29-2024 10:30 AM +UTC
 		EcotoneTime: newUint64(1714386600), // Apr-29-2024 10:30 AM +UTC
 	}
 

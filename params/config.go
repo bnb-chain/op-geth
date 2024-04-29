@@ -245,10 +245,15 @@ var (
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		Optimism: &OptimismConfig{
-			EIP1559Elasticity:  2,
-			EIP1559Denominator: 8,
+			EIP1559Elasticity:        2,
+			EIP1559Denominator:       8,
+			EIP1559DenominatorCanyon: 8,
 		},
-		Fermat: big.NewInt(0),
+		Fermat:       big.NewInt(0),
+		ShanghaiTime: newUint64(1714385400), // Apr-29-2024 10:10 AM +UTC
+		CanyonTime:   newUint64(1714385400), // Apr-29-2024 10:10 AM +UTC
+		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
+		EcotoneTime: newUint64(1714386600), // Apr-29-2024 10:30 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

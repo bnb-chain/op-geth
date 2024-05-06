@@ -277,7 +277,7 @@ func (inspect *Inspector) DisplayResult() {
 		return sortedTriesByNums[i].totalNum > sortedTriesByNums[j].totalNum
 	})
 	fmt.Println("EOA accounts num: ", inspect.eoaAccountNums)
-	// only display top 5
+	// only display top 6
 	for i, t := range sortedTriesByNums {
 		if i > 5 {
 			break

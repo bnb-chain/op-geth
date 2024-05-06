@@ -32,7 +32,7 @@ var (
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBQANetGenesisHash   = common.HexToHash("0x580889547f6ac1d303d01d028f558d379284173e5ca1ebf38dbbafdef3e5d81c")
+	OPBNBQANetGenesisHash   = common.HexToHash("0xe182e685b1ec05ca55f2374cb3a190d1ae8f3e196acb55a69efd61536fc3983f")
 )
 
 const (
@@ -50,7 +50,7 @@ const (
 const (
 	OPBNBMainnetChainID = 204
 	OPBNBTestNetChainID = 5611
-	OPBNBQANetChainID   = 1484
+	OPBNBQANetChainID   = 2484
 )
 
 // OP Stack chain config
@@ -225,7 +225,7 @@ var (
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(1484),
+		ChainID:                       big.NewInt(2484),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
 		EIP155Block:                   big.NewInt(0),
@@ -250,11 +250,11 @@ var (
 			EIP1559DenominatorCanyon: 8,
 		},
 		Fermat:       big.NewInt(0),
-		ShanghaiTime: newUint64(1714385400), // Apr-29-2024 10:10 AM +UTC
-		CanyonTime:   newUint64(1714385400), // Apr-29-2024 10:10 AM +UTC
+		ShanghaiTime: newUint64(1714993800), // May-06-2024 11:10 AM +UTC
+		CanyonTime:   newUint64(1714993800), // May-06-2024 11:10 AM +UTC
 		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
-		CancunTime:  newUint64(1714386600), // Apr-29-2024 10:30 AM +UTC
-		EcotoneTime: newUint64(1714386600), // Apr-29-2024 10:30 AM +UTC
+		CancunTime:  newUint64(1714995000), // May-06-2024 11:30 AM +UTC
+		EcotoneTime: newUint64(1714995000), // May-06-2024 11:30 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

@@ -1186,7 +1186,7 @@ func mustParseBootnodes(urls []string) []*enode.Node {
 // setBootstrapNodesV5 creates a list of bootstrap nodes from the command line
 // flags, reverting to pre-configured ones if none have been specified.
 func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
-	urls := params.V5Bootnodes
+	urls := params.OpBNBMainnetBootnodes
 	switch {
 	case ctx.IsSet(BootnodesFlag.Name):
 		urls = SplitAndTrim(ctx.String(BootnodesFlag.Name))
@@ -1198,6 +1198,12 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 			urls = append(urls, params.OPMainnetBootnodes...)
 		} else {
 			urls = append(urls, params.OPSepoliaBootnodes...)
+		}
+	case ctx.Bool(OpBNBTestnetFlag.Name):
+		urls = params.OpBNBTestnetBootnodes
+	case ctx.Bool(NetworkIdFlag.Name):
+		if ctx.Uint64(NetworkIdFlag.Name) == params.OpBNBTestnet {
+			urls = params.OpBNBTestnetBootnodes
 		}
 	}
 

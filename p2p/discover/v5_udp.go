@@ -409,7 +409,7 @@ func (t *UDPv5) waitForNodes(c *callV5, distances []uint) ([]*enode.Node, error)
 
 				nodeTest, err := enode.New(t.validSchemes, record)
 				if err == nil {
-					t.log.Debug("ZXL nodes response", "index", i, nodeTest.ID(), "ip", nodeTest.IP().String(), "port", nodeTest.UDP())
+					t.log.Debug("ZXL nodes response", "index", i, "nodeId", nodeTest.ID(), "ip", nodeTest.IP().String(), "port", nodeTest.UDP())
 					continue
 				}
 

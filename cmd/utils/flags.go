@@ -321,7 +321,7 @@ var (
 	}
 	EnableProofKeeperFlag = &cli.BoolFlag{
 		Name:     "pathdb.enableproofkeeper",
-		Usage:    "Enable path db proof keeper for store proposed proof",
+		Usage:    "Enable path db proof keeper to store proposed proof",
 		Value:    false,
 		Category: flags.StateCategory,
 	}

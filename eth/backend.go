@@ -204,6 +204,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			TrieTimeLimit:        config.TrieTimeout,
 			SnapshotLimit:        config.SnapshotCache,
 			Preimages:            config.Preimages,
+			NoTries:              config.NoTries,
 			StateHistory:         config.StateHistory,
 			StateScheme:          scheme,
 			TrieCommitInterval:   config.TrieCommitInterval,

@@ -350,13 +350,11 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			r := w.getSealingBlock(fullParams)
 			dur := time.Since(start)
 			// update handles error case
-			payload.update(r, dur, func() {
-				w.cacheMiningBlock(r.block, r.env)
-			})
+			payload.update(r, dur)
 			if r.err == nil {
 				// after first successful pass, we're updating
 				fullParams.isUpdate = true
-			} else {
+			}else {
 				log.Error("Failed to build full payload", "id", payload.id, "err", r.err)
 			}
 			timer.Reset(w.recommit)

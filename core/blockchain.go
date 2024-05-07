@@ -1046,7 +1046,15 @@ func (bc *BlockChain) Stop() {
 		if !bc.cacheConfig.TrieDirtyDisabled {
 			triedb := bc.triedb
 
-			for _, offset := range []uint64{0, 1, TriesInMemory - 1} {
+			blockOffsets := []uint64{0, 1, TriesInMemory - 1}
+			if bc.cacheConfig.TrieCommitInterval != 0 {
+				current := bc.CurrentBlock().Number.Uint64()
+				blockShouldCommitOffset := current - current/bc.cacheConfig.TrieCommitInterval*bc.cacheConfig.TrieCommitInterval
+				if blockShouldCommitOffset > 1 && blockShouldCommitOffset < TriesInMemory-1 {
+					blockOffsets = append(blockOffsets, blockShouldCommitOffset)
+				}
+			}
+			for _, offset := range blockOffsets {
 				if number := bc.CurrentBlock().Number.Uint64(); number > offset {
 					recent := bc.GetBlockByNumber(number - offset)
 

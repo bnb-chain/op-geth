@@ -217,11 +217,17 @@ var (
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		Optimism: &OptimismConfig{
-			EIP1559Elasticity:  2,
-			EIP1559Denominator: 8,
+			EIP1559Elasticity:        2,
+			EIP1559Denominator:       8,
+			EIP1559DenominatorCanyon: 8,
 		},
 		PreContractForkBlock: big.NewInt(5805494),
-		Fermat:               big.NewInt(12113000), // Nov-03-2023 06 AM +UTC
+		Fermat:               big.NewInt(12113000),  // Nov-03-2023 06 AM +UTC
+		ShanghaiTime:         newUint64(1715753400), // May-15-2024 06:10 AM +UTC
+		CanyonTime:           newUint64(1715753400), // May-15-2024 06:10 AM +UTC
+		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
+		CancunTime:  newUint64(1715754600), // May-15-2024 06:30 AM +UTC
+		EcotoneTime: newUint64(1715754600), // May-15-2024 06:30 AM +UTC
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{

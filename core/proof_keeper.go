@@ -144,6 +144,7 @@ func (keeper *ProofKeeper) Stop() error {
 }
 
 // GetKeepRecordWatchFunc returns a keeper callback func which is used by path db node buffer list.
+// This is a synchronous operation.
 func (keeper *ProofKeeper) GetKeepRecordWatchFunc() pathdb.KeepRecordWatchFunc {
 	return func(keepRecord *pathdb.KeepRecord) {
 		if keeper == nil {
@@ -193,15 +194,19 @@ func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofData
 	if header = keeper.blockChain.GetHeaderByNumber(kRecord.BlockID); header == nil {
 		return nil, fmt.Errorf("block is not found, block_id=%d", kRecord.BlockID)
 	}
-	if stateDB, err = keeper.blockChain.StateAt(header.Root); err != nil {
-		return nil, err
-	}
-	if worldTrie, err = trie2.NewStateTrie(trie2.StateTrieID(header.Root), stateDB.Database().TrieDB()); err != nil {
+	if worldTrie, err = trie2.NewStateTrieByInnerReader(
+		trie2.StateTrieID(header.Root),
+		keeper.blockChain.stateCache.TrieDB(),
+		kRecord.PinedInnerTrieReader); err != nil {
 		return nil, err
 	}
 	if err = worldTrie.Prove(crypto.Keccak256(l2ToL1MessagePasserAddr.Bytes()), &accountProof); err != nil {
 		return nil, err
 	}
+	if stateDB, err = state.NewStateDBByTrie(worldTrie, keeper.blockChain.stateCache, keeper.blockChain.snaps); err != nil {
+		return nil, err
+	}
+
 	pRecord = &proofDataRecord{
 		BlockID:      kRecord.BlockID,
 		StateRoot:    kRecord.StateRoot,

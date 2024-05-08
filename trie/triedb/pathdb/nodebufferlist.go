@@ -30,9 +30,10 @@ const (
 )
 
 type KeepRecord struct {
-	BlockID      uint64
-	StateRoot    common.Hash
-	KeepInterval uint64
+	BlockID              uint64
+	StateRoot            common.Hash
+	KeepInterval         uint64
+	PinedInnerTrieReader layer
 }
 type KeepRecordWatchFunc func(*KeepRecord)
 
@@ -243,7 +244,14 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	if nf.keepFunc != nil {
 		nf.mux.RLock()
 		traverseKeepFunc := func(buffer *multiDifflayer) bool {
-			nf.keepFunc(&KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks})
+			nf.keepFunc(&KeepRecord{
+				BlockID:      buffer.block,
+				StateRoot:    buffer.root,
+				KeepInterval: nf.wpBlocks,
+				PinedInnerTrieReader: &proposedBlockReader{
+					nf:   nf,
+					diff: buffer,
+				}})
 			return true
 		}
 		nf.traverseReverse(traverseKeepFunc)
@@ -478,7 +486,14 @@ func (nf *nodebufferlist) diffToBase() {
 		}
 
 		if nf.keepFunc != nil {
-			nf.keepFunc(&KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks})
+			nf.keepFunc(&KeepRecord{
+				BlockID:      buffer.block,
+				StateRoot:    buffer.root,
+				KeepInterval: nf.wpBlocks,
+				PinedInnerTrieReader: &proposedBlockReader{
+					nf:   nf,
+					diff: buffer,
+				}})
 		}
 
 		nf.baseMux.Lock()
@@ -541,7 +556,14 @@ func (nf *nodebufferlist) loop() {
 			if nf.keepFunc != nil {
 				nf.mux.RLock()
 				traverseKeepFunc := func(buffer *multiDifflayer) bool {
-					nf.keepFunc(&KeepRecord{BlockID: buffer.block, StateRoot: buffer.root, KeepInterval: nf.wpBlocks})
+					nf.keepFunc(&KeepRecord{
+						BlockID:      buffer.block,
+						StateRoot:    buffer.root,
+						KeepInterval: nf.wpBlocks,
+						PinedInnerTrieReader: &proposedBlockReader{
+							nf:   nf,
+							diff: buffer,
+						}})
 					return true
 				}
 				nf.traverseReverse(traverseKeepFunc)

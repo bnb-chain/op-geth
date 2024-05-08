@@ -25,7 +25,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/bloom"
 	"github.com/ethereum/go-ethereum/common"
@@ -130,8 +129,11 @@ type panicLogger struct{}
 func (l panicLogger) Infof(format string, args ...interface{}) {
 }
 
+func (l panicLogger) Errorf(format string, args ...interface{}) {
+}
+
 func (l panicLogger) Fatalf(format string, args ...interface{}) {
-	panic(errors.Errorf("fatal: "+format, args...))
+	panic(fmt.Errorf("fatal: "+format, args...))
 }
 
 // New returns a wrapped pebble DB object. The namespace is the prefix that the
@@ -634,9 +636,12 @@ func (b *batch) Replay(w ethdb.KeyValueWriter) error {
 
 // pebbleIterator is a wrapper of underlying iterator in storage engine.
 // The purpose of this structure is to implement the missing APIs.
+//
+// The pebble iterator is not thread-safe.
 type pebbleIterator struct {
-	iter  *pebble.Iterator
-	moved bool
+	iter     *pebble.Iterator
+	moved    bool
+	released bool
 }
 
 // NewIterator creates a binary-alphabetical iterator over a subset
@@ -648,7 +653,7 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 		UpperBound: upperBound(prefix),
 	})
 	iter.First()
-	return &pebbleIterator{iter: iter, moved: true}
+	return &pebbleIterator{iter: iter, moved: true, released: false}
 }
 
 // Next moves the iterator to the next key/value pair. It returns whether the
@@ -683,4 +688,9 @@ func (iter *pebbleIterator) Value() []byte {
 
 // Release releases associated resources. Release should always succeed and can
 // be called multiple times without causing error.
-func (iter *pebbleIterator) Release() { iter.iter.Close() }
+func (iter *pebbleIterator) Release() {
+	if !iter.released {
+		iter.iter.Close()
+		iter.released = true
+	}
+}

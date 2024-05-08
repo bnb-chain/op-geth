@@ -71,7 +71,7 @@ jobs:
         type: boolean
         default: false
     machine:
-      image: ubuntu-2204:2022.07.1
+      image: default
       resource_class: xlarge
     steps:
       - gcp-cli/install
@@ -112,7 +112,7 @@ jobs:
 
   build-geth:
     docker:
-      - image: cimg/go:1.20
+      - image: cimg/go:1.21
     resource_class: xlarge
     steps:
       - checkout
@@ -121,7 +121,7 @@ jobs:
   unit-test:
     resource_class: xlarge
     docker:
-      - image: cimg/go:1.20
+      - image: cimg/go:1.21
     steps:
       - checkout
       - run:
@@ -129,14 +129,22 @@ jobs:
   lint-geth:
     resource_class: medium
     docker:
-      - image: cimg/go:1.20
+      - image: cimg/go:1.21
     steps:
       - checkout
       - run:
           command: go run build/ci.go lint
+  tidy-geth:
+    resource_class: small
+    docker:
+      - image: cimg/go:1.21
+    steps:
+      - checkout
+      - run:
+          command: go mod tidy && git diff --exit-code
   check-releases:
     docker:
-      - image: cimg/go:1.20
+      - image: cimg/go:1.21
     steps:
       - checkout
       - run:
@@ -157,6 +165,8 @@ workflows:
           name: Run unit tests for geth
       - lint-geth:
           name: Run linter over geth
+      - tidy-geth:
+          name: Check geth go.mod file has been tidied
       - docker-release:
           name: Push to Docker
           docker_tags: <<pipeline.git.revision>>

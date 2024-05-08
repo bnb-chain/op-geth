@@ -585,7 +585,7 @@ func TestClientSubscriptionChannelClose(t *testing.T) {
 	var (
 		srv     = NewServer()
 		httpsrv = httptest.NewServer(srv.WebsocketHandler(nil))
-		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:")
+		wsURL   = "ws:" + strings.TrimPrefix(httpsrv.URL, "http:") //nolint:all
 	)
 	defer srv.Stop()
 	defer httpsrv.Close()
@@ -595,7 +595,7 @@ func TestClientSubscriptionChannelClose(t *testing.T) {
 
 	for i := 0; i < 100; i++ {
 		ch := make(chan int, 100)
-		sub, err := client.Subscribe(context.Background(), "nftest", ch, "someSubscription", maxClientSubscriptionBuffer-1, 1)
+		sub, err := client.Subscribe(context.Background(), "nftest", ch, "someSubscription", 100, 1)
 		if err != nil {
 			t.Fatal(err)
 		}

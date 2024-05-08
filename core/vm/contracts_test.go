@@ -18,6 +18,7 @@ package vm
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -25,9 +26,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/prysmaticlabs/prysm/v4/crypto/bls"
+	blscommon "github.com/prysmaticlabs/prysm/v4/crypto/bls/common"
+	"github.com/stretchr/testify/require"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -410,4 +412,38 @@ func TestCometBFTLightBlockValidate(t *testing.T) {
 	res, err := contract.Run(input)
 	require.NoError(t, err)
 	require.Equal(t, expectOutputStr, hex.EncodeToString(res))
+}
+
+func TestBlsSignatureVerify(t *testing.T) {
+	msg := "test_bls_signature_verify_precompile_contract"
+	msgHash := sha256.Sum256([]byte(msg))
+
+	privateKey1, err := bls.RandKey()
+	require.NoError(t, err)
+	privateKey2, err := bls.RandKey()
+	require.NoError(t, err)
+
+	sig1 := privateKey1.Sign(msgHash[:])
+	sig2 := privateKey2.Sign(msgHash[:])
+	sig := bls.AggregateSignatures([]blscommon.Signature{sig1, sig2})
+
+	input := msgHash[:]
+	input = append(input, sig.Marshal()...)
+	input = append(input, privateKey1.PublicKey().Marshal()...)
+	input = append(input, privateKey2.PublicKey().Marshal()...)
+
+	inputStr := hex.EncodeToString(input)
+	t.Logf("input string: %s", inputStr)
+	input, err = hex.DecodeString(inputStr)
+	require.NoError(t, err)
+
+	contract := &blsSignatureVerify{}
+	res, err := contract.Run(input)
+	require.NoError(t, err)
+	require.Equal(t, big1.Bytes(), res)
+
+	input[0] += 1
+	res, err = contract.Run(input)
+	require.NoError(t, err)
+	require.Equal(t, big0.Bytes(), res)
 }

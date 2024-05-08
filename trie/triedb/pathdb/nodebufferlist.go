@@ -30,12 +30,12 @@ const (
 )
 
 type KeepRecord struct {
-	BlockID              uint64
-	StateRoot            common.Hash
-	KeepInterval         uint64
-	PinedInnerTrieReader layer
+	BlockID               uint64
+	StateRoot             common.Hash
+	KeepInterval          uint64
+	PinnedInnerTrieReader layer
 }
-type KeepRecordWatchFunc func(*KeepRecord)
+type NotifyKeepFunc func(*KeepRecord)
 
 var _ trienodebuffer = &nodebufferlist{}
 
@@ -66,11 +66,11 @@ type nodebufferlist struct {
 	baseMux   sync.RWMutex    // The mutex of base multiDifflayer and persistID.
 	flushMux  sync.RWMutex    // The mutex of flushing base multiDifflayer for reorg corner case.
 
-	isFlushing   atomic.Bool         // Flag indicates writing disk under background.
-	stopFlushing atomic.Bool         // Flag stops writing disk under background.
-	stopCh       chan struct{}       // Trigger stop background event loop.
-	waitStopCh   chan struct{}       // Wait stop background event loop.
-	keepFunc     KeepRecordWatchFunc // Used to keep op-proposal output proof.
+	isFlushing   atomic.Bool    // Flag indicates writing disk under background.
+	stopFlushing atomic.Bool    // Flag stops writing disk under background.
+	stopCh       chan struct{}  // Trigger stop background event loop.
+	waitStopCh   chan struct{}  // Wait stop background event loop.
+	keepFunc     NotifyKeepFunc // Used to keep op-proposer output proof.
 }
 
 // newNodeBufferList initializes the node buffer list with the provided nodes
@@ -80,7 +80,7 @@ func newNodeBufferList(
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers uint64,
 	proposeBlockInterval uint64,
-	keepFunc KeepRecordWatchFunc) *nodebufferlist {
+	keepFunc NotifyKeepFunc) *nodebufferlist {
 	var (
 		rsevMdNum uint64
 		dlInMd    uint64
@@ -248,7 +248,7 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 				BlockID:      buffer.block,
 				StateRoot:    buffer.root,
 				KeepInterval: nf.wpBlocks,
-				PinedInnerTrieReader: &proposedBlockReader{
+				PinnedInnerTrieReader: &proposedBlockReader{
 					nf:   nf,
 					diff: buffer,
 				}})
@@ -490,7 +490,7 @@ func (nf *nodebufferlist) diffToBase() {
 				BlockID:      buffer.block,
 				StateRoot:    buffer.root,
 				KeepInterval: nf.wpBlocks,
-				PinedInnerTrieReader: &proposedBlockReader{
+				PinnedInnerTrieReader: &proposedBlockReader{
 					nf:   nf,
 					diff: buffer,
 				}})
@@ -550,6 +550,7 @@ func (nf *nodebufferlist) backgroundFlush() {
 // loop runs the background task, collects the nodes for writing to disk.
 func (nf *nodebufferlist) loop() {
 	mergeTicker := time.NewTicker(time.Second * mergeMultiDifflayerInterval)
+	defer mergeTicker.Stop()
 	for {
 		select {
 		case <-nf.stopCh:
@@ -560,7 +561,7 @@ func (nf *nodebufferlist) loop() {
 						BlockID:      buffer.block,
 						StateRoot:    buffer.root,
 						KeepInterval: nf.wpBlocks,
-						PinedInnerTrieReader: &proposedBlockReader{
+						PinnedInnerTrieReader: &proposedBlockReader{
 							nf:   nf,
 							diff: buffer,
 						}})
@@ -868,7 +869,7 @@ func (mf *multiDifflayer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Debug("Persisted pathdb nodes", "nodes", len(mf.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted pathdb nodes", "nodes", len(mf.nodes), "bytes", common.StorageSize(size), "state_id", id, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 

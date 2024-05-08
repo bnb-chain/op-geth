@@ -69,7 +69,7 @@ type proofKeeperOptions struct {
 	keepProofBlockSpan uint64
 	gcInterval         uint64
 	watchStartKeepCh   chan *pathdb.KeepRecord
-	notifyFinishKeepCh chan struct{}
+	notifyFinishKeepCh chan error
 }
 
 // ProofKeeper is used to store proposed proof and op-proposer can query.
@@ -143,9 +143,9 @@ func (keeper *ProofKeeper) Stop() error {
 	return err
 }
 
-// GetKeepRecordWatchFunc returns a keeper callback func which is used by path db node buffer list.
+// GetNotifyKeepRecordFunc returns a keeper callback func which is used by path db node buffer list.
 // This is a synchronous operation.
-func (keeper *ProofKeeper) GetKeepRecordWatchFunc() pathdb.KeepRecordWatchFunc {
+func (keeper *ProofKeeper) GetNotifyKeepRecordFunc() pathdb.NotifyKeepFunc {
 	return func(keepRecord *pathdb.KeepRecord) {
 		if keeper == nil {
 			return
@@ -163,14 +163,19 @@ func (keeper *ProofKeeper) GetKeepRecordWatchFunc() pathdb.KeepRecordWatchFunc {
 			return
 		}
 
-		startTimestamp := time.Now()
+		var (
+			startTimestamp time.Time
+			err            error
+		)
+
+		startTimestamp = time.Now()
 		defer func() {
 			addProofTimer.UpdateSince(startTimestamp)
-			log.Info("Succeed to keep proof", "record", keepRecord, "elapsed", common.PrettyDuration(time.Since(startTimestamp)))
+			log.Info("Keep a new proof", "record", keepRecord, "elapsed", common.PrettyDuration(time.Since(startTimestamp)), "error", err)
 		}()
 
 		keeper.opts.watchStartKeepCh <- keepRecord
-		<-keeper.opts.notifyFinishKeepCh
+		err = <-keeper.opts.notifyFinishKeepCh
 	}
 }
 
@@ -197,7 +202,7 @@ func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofData
 	if worldTrie, err = trie2.NewStateTrieByInnerReader(
 		trie2.StateTrieID(header.Root),
 		keeper.blockChain.stateCache.TrieDB(),
-		kRecord.PinedInnerTrieReader); err != nil {
+		kRecord.PinnedInnerTrieReader); err != nil {
 		return nil, err
 	}
 	if err = worldTrie.Prove(crypto.Keccak256(l2ToL1MessagePasserAddr.Bytes()), &accountProof); err != nil {
@@ -274,11 +279,7 @@ func (keeper *ProofKeeper) eventLoop() {
 				err = keeper.putProofDataRecord(proofRecord)
 				keeper.latestBlockID = keepRecord.BlockID
 			}
-			log.Info("Succeed to keep a new proof",
-				"block_id", keepRecord.BlockID,
-				"state_root", keepRecord.StateRoot.String(),
-				"error", err)
-			keeper.opts.notifyFinishKeepCh <- struct{}{}
+			keeper.opts.notifyFinishKeepCh <- err
 
 		case queryBlockID := <-keeper.queryProofCh:
 			var resultProofRecord *proofDataRecord

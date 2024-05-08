@@ -119,7 +119,7 @@ func NewTrieNodeBuffer(
 	limit int,
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers, proposeBlockInterval uint64,
-	keepFunc KeepRecordWatchFunc,
+	keepFunc NotifyKeepFunc,
 ) trienodebuffer {
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {

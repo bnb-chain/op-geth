@@ -175,7 +175,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 	return sdb, nil
 }
 
-// NewStateDBByTrie creates a new state db from a given trie.
+// NewStateDBByTrie creates a new state db by a given trie.
 func NewStateDBByTrie(tr Trie, db Database, snaps *snapshot.Tree) (*StateDB, error) {
 	sdb := &StateDB{
 		db:                   db,

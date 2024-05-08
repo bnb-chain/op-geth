@@ -45,7 +45,7 @@ func TestProofKeeperStartAndStop(t *testing.T) {
 		enable:             true,
 		keepProofBlockSpan: 100,
 		watchStartKeepCh:   make(chan *pathdb.KeepRecord),
-		notifyFinishKeepCh: make(chan struct{}),
+		notifyFinishKeepCh: make(chan error),
 	}
 	keeper := newProofKeeper(keeperOpts)
 	assert.NotNil(t, keeper)
@@ -66,7 +66,7 @@ func TestProofKeeperGC(t *testing.T) {
 		keepProofBlockSpan: 100,
 		gcInterval:         1,
 		watchStartKeepCh:   make(chan *pathdb.KeepRecord),
-		notifyFinishKeepCh: make(chan struct{}),
+		notifyFinishKeepCh: make(chan error),
 	}
 	keeper := newProofKeeper(keeperOpts)
 	assert.NotNil(t, keeper)
@@ -143,7 +143,7 @@ func TestProofKeeperQuery(t *testing.T) {
 	keeperOpts := &proofKeeperOptions{
 		enable:             true,
 		watchStartKeepCh:   make(chan *pathdb.KeepRecord),
-		notifyFinishKeepCh: make(chan struct{}),
+		notifyFinishKeepCh: make(chan error),
 	}
 	keeper := newProofKeeper(keeperOpts)
 	assert.NotNil(t, keeper)

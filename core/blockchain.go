@@ -167,7 +167,7 @@ type CacheConfig struct {
 }
 
 // triedbConfig derives the configures for trie database.
-func (c *CacheConfig) triedbConfig(keepWatchFunc pathdb.KeepRecordWatchFunc) *trie.Config {
+func (c *CacheConfig) triedbConfig(keepFunc pathdb.NotifyKeepFunc) *trie.Config {
 	config := &trie.Config{
 		Preimages: c.Preimages,
 		NoTries:   c.NoTries,
@@ -184,7 +184,7 @@ func (c *CacheConfig) triedbConfig(keepWatchFunc pathdb.KeepRecordWatchFunc) *tr
 			CleanCacheSize:       c.TrieCleanLimit * 1024 * 1024,
 			DirtyCacheSize:       c.TrieDirtyLimit * 1024 * 1024,
 			ProposeBlockInterval: c.ProposeBlockInterval,
-			KeepFunc:             keepWatchFunc,
+			NotifyKeep:           keepFunc,
 		}
 	}
 	return config
@@ -300,11 +300,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		enable:             cacheConfig.EnableProofKeeper,
 		keepProofBlockSpan: cacheConfig.KeepProofBlockSpan,
 		watchStartKeepCh:   make(chan *pathdb.KeepRecord),
-		notifyFinishKeepCh: make(chan struct{}),
+		notifyFinishKeepCh: make(chan error),
 	}
 	proofKeeper := newProofKeeper(opts)
 	// Open trie database with provided config
-	trieConfig := cacheConfig.triedbConfig(proofKeeper.GetKeepRecordWatchFunc())
+	trieConfig := cacheConfig.triedbConfig(proofKeeper.GetNotifyKeepRecordFunc())
 	triedb := trie.NewDatabase(db, trieConfig)
 
 	// Setup the genesis block, commit the provided genesis specification

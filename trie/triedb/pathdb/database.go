@@ -94,13 +94,13 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
-	TrieNodeBufferType   NodeBufferType      // Type of trienodebuffer to cache trie nodes in disklayer
-	StateHistory         uint64              // Number of recent blocks to maintain state history for
-	CleanCacheSize       int                 // Maximum memory allowance (in bytes) for caching clean nodes
-	DirtyCacheSize       int                 // Maximum memory allowance (in bytes) for caching dirty nodes
-	ReadOnly             bool                // Flag whether the database is opened in read only mode.
-	ProposeBlockInterval uint64              // Propose block to L1 block interval.
-	KeepFunc             KeepRecordWatchFunc // KeepFunc is used to keep the proof which maybe queried by op-proposal.
+	TrieNodeBufferType   NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
+	StateHistory         uint64         // Number of recent blocks to maintain state history for
+	CleanCacheSize       int            // Maximum memory allowance (in bytes) for caching clean nodes
+	DirtyCacheSize       int            // Maximum memory allowance (in bytes) for caching dirty nodes
+	ReadOnly             bool           // Flag whether the database is opened in read only mode.
+	ProposeBlockInterval uint64         // Propose block to L1 block interval.
+	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -336,7 +336,7 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval, db.config.KeepFunc)
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval, db.config.NotifyKeep)
 	dl := newDiskLayer(root, 0, db, nil, nb)
 	nb.setClean(dl.cleans)
 	db.tree.reset(dl)

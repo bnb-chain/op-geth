@@ -54,6 +54,9 @@ const (
 
 	// txReannoMaxNum is the maximum number of transactions a reannounce action can include.
 	txReannoMaxNum = 1024
+
+	// minPendingCacheDuration is the minimum duration between two pending cache updates.
+	minPendingCacheDuration = 250 * time.Millisecond
 )
 
 var (
@@ -263,6 +266,8 @@ type LegacyPool struct {
 	changesSinceReorg int // A counter for how many drops we've performed in-between reorg.
 
 	l1CostFn txpool.L1CostFunc // To apply L1 costs as rollup, optional field, may be nil.
+
+	lastPendingCacheTime time.Time // Last time pending cache was updated
 }
 
 type txpoolResetRequest struct {
@@ -1375,6 +1380,11 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			nonces[addr] = highestPending.Nonce() + 1
 		}
 		pool.pendingNonces.setAll(nonces)
+	}
+	// keep updating pending cache in a minimal frequency
+	if reset == nil && time.Since(pool.lastPendingCacheTime) > minPendingCacheDuration {
+		pool.lastPendingCacheTime = time.Now()
+		go pool.pendingCache.dump(pool, pool.gasTip.Load(), pool.priced.urgent.baseFee)
 	}
 	// Ensure pool.queue and pool.pending sizes stay within the configured limits.
 	pool.truncatePending()

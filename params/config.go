@@ -32,7 +32,7 @@ var (
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBQANetGenesisHash   = common.HexToHash("0x1cba296441b55cf9b5b306b6aef43e68e9aeff2450d68c391dec448604cf3baf")
+	OPBNBQANetGenesisHash   = common.HexToHash("0xe182e685b1ec05ca55f2374cb3a190d1ae8f3e196acb55a69efd61536fc3983f")
 )
 
 const (
@@ -50,7 +50,7 @@ const (
 const (
 	OPBNBMainnetChainID = 204
 	OPBNBTestNetChainID = 5611
-	OPBNBQANetChainID   = 1322
+	OPBNBQANetChainID   = 2484
 )
 
 // OP Stack chain config
@@ -217,15 +217,21 @@ var (
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		Optimism: &OptimismConfig{
-			EIP1559Elasticity:  2,
-			EIP1559Denominator: 8,
+			EIP1559Elasticity:        2,
+			EIP1559Denominator:       8,
+			EIP1559DenominatorCanyon: 8,
 		},
 		PreContractForkBlock: big.NewInt(5805494),
-		Fermat:               big.NewInt(12113000), // Nov-03-2023 06 AM +UTC
+		Fermat:               big.NewInt(12113000),  // Nov-03-2023 06 AM +UTC
+		ShanghaiTime:         newUint64(1715753400), // May-15-2024 06:10 AM +UTC
+		CanyonTime:           newUint64(1715753400), // May-15-2024 06:10 AM +UTC
+		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
+		CancunTime:  newUint64(1715754600), // May-15-2024 06:30 AM +UTC
+		EcotoneTime: newUint64(1715754600), // May-15-2024 06:30 AM +UTC
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(1322),
+		ChainID:                       big.NewInt(2484),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
 		EIP155Block:                   big.NewInt(0),
@@ -245,10 +251,16 @@ var (
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
 		Optimism: &OptimismConfig{
-			EIP1559Elasticity:  2,
-			EIP1559Denominator: 8,
+			EIP1559Elasticity:        2,
+			EIP1559Denominator:       8,
+			EIP1559DenominatorCanyon: 8,
 		},
-		// Fermat: big.NewInt(3615117),
+		Fermat:       big.NewInt(0),
+		ShanghaiTime: newUint64(1714993800), // May-06-2024 11:10 AM +UTC
+		CanyonTime:   newUint64(1714993800), // May-06-2024 11:10 AM +UTC
+		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
+		CancunTime:  newUint64(1714995000), // May-06-2024 11:30 AM +UTC
+		EcotoneTime: newUint64(1714995000), // May-06-2024 11:30 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -301,7 +313,6 @@ var (
 		ShanghaiTime:                  newUint64(0),
 		TerminalTotalDifficulty:       big.NewInt(0),
 		TerminalTotalDifficultyPassed: true,
-		IsDevMode:                     true,
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
@@ -459,6 +470,10 @@ type ChainConfig struct {
 	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // Bedrock switch block (nil = no fork, 0 = already on optimism bedrock)
 	RegolithTime *uint64  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
 	CanyonTime   *uint64  `json:"canyonTime,omitempty"`   // Canyon switch time (nil = no fork, 0 = already on optimism canyon)
+	// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
+	EcotoneTime *uint64 `json:"ecotoneTime,omitempty"` // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
+
+	InteropTime *uint64 `json:"interopTime,omitempty"` // Interop switch time (nil = no fork, 0 = already on optimism interop)
 
 	// PreContractForkBlock hard-fork switch block (nil = no fork, 0 = already on preContractForkBlock)
 	PreContractForkBlock *big.Int `json:"preContractForkBlock,omitempty"`
@@ -475,9 +490,8 @@ type ChainConfig struct {
 	TerminalTotalDifficultyPassed bool `json:"terminalTotalDifficultyPassed,omitempty"`
 
 	// Various consensus engines
-	Ethash    *EthashConfig `json:"ethash,omitempty"`
-	Clique    *CliqueConfig `json:"clique,omitempty"`
-	IsDevMode bool          `json:"isDev,omitempty"`
+	Ethash *EthashConfig `json:"ethash,omitempty"`
+	Clique *CliqueConfig `json:"clique,omitempty"`
 
 	// Optimism config, nil if not active
 	Optimism *OptimismConfig `json:"optimism,omitempty"`
@@ -611,6 +625,12 @@ func (c *ChainConfig) Description() string {
 	if c.CanyonTime != nil {
 		banner += fmt.Sprintf(" - Canyon:                      @%-10v\n", *c.CanyonTime)
 	}
+	if c.EcotoneTime != nil {
+		banner += fmt.Sprintf(" - Ecotone:                     @%-10v\n", *c.EcotoneTime)
+	}
+	if c.InteropTime != nil {
+		banner += fmt.Sprintf(" - Interop:                     @%-10v\n", *c.InteropTime)
+	}
 	banner += "OPBNB hard forks (block based):\n"
 	if c.PreContractForkBlock != nil {
 		banner += fmt.Sprintf(" - PreContractForkBlock:        #%-8v\n", c.PreContractForkBlock)
@@ -733,6 +753,14 @@ func (c *ChainConfig) IsCanyon(time uint64) bool {
 	return isTimestampForked(c.CanyonTime, time)
 }
 
+func (c *ChainConfig) IsEcotone(time uint64) bool {
+	return isTimestampForked(c.EcotoneTime, time)
+}
+
+func (c *ChainConfig) IsInterop(time uint64) bool {
+	return isTimestampForked(c.InteropTime, time)
+}
+
 // IsOptimism returns whether the node is an optimism node or not.
 func (c *ChainConfig) IsOptimism() bool {
 	return c.Optimism != nil
@@ -746,8 +774,13 @@ func (c *ChainConfig) IsOptimismBedrock(num *big.Int) bool {
 func (c *ChainConfig) IsOptimismRegolith(time uint64) bool {
 	return c.IsOptimism() && c.IsRegolith(time)
 }
+
 func (c *ChainConfig) IsOptimismCanyon(time uint64) bool {
 	return c.IsOptimism() && c.IsCanyon(time)
+}
+
+func (c *ChainConfig) IsOptimismEcotone(time uint64) bool {
+	return c.IsOptimism() && c.IsEcotone(time)
 }
 
 // IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active

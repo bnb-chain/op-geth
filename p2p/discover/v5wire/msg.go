@@ -203,11 +203,34 @@ func (p *Nodes) RequestID() []byte      { return p.ReqID }
 func (p *Nodes) SetRequestID(id []byte) { p.ReqID = id }
 
 func (p *Nodes) AppendLogInfo(ctx []interface{}) []interface{} {
-	return append(ctx,
+	/*
+			return append(ctx,
+			"req", hexutil.Bytes(p.ReqID),
+			"tot", p.RespCount,
+			"n", len(p.Nodes),
+		)
+
+	*/
+
+	// 基本信息
+	ctx = append(ctx,
 		"req", hexutil.Bytes(p.ReqID),
 		"tot", p.RespCount,
 		"n", len(p.Nodes),
 	)
+
+	// 遍历所有节点
+	for i, node := range p.Nodes {
+		// 获取每个节点的所有pairs
+		pairs := node.GetPairs()
+		// 遍历所有pairs，将它们的key和value添加到日志中
+		for _, pair := range pairs {
+			// 这里我们添加了节点索引和pair的键值对
+			// 注意: pair.v 是RLP编码的值，根据需要可能要进行解码
+			ctx = append(ctx, fmt.Sprintf("node%d_key_%s", i, pair.GetPairKey()), hexutil.Encode(pair.GetPairValue()))
+		}
+	}
+	return ctx
 }
 
 func (*TalkRequest) Name() string             { return "TALKREQ/v5" }

@@ -164,6 +164,7 @@ func (payload *Payload) update(r *newPayloadResult, elapsed time.Duration, postF
 				postFunc()
 			}
 		}
+		buildBlockTimer.Update(elapsed)
 	}
 }
 
@@ -211,7 +212,10 @@ func (payload *Payload) resolve(onlyFull bool) *engine.ExecutionPayloadEnvelope 
 		// Wait the full payload construction. Note it might block
 		// forever if Resolve is called in the meantime which
 		// terminates the background construction process.
+		start := time.Now()
 		payload.cond.Wait()
+		waitPayloadTimer.UpdateSince(start)
+		log.Debug("waitPayloadTimer", "duration", common.PrettyDuration(time.Since(start)), "id", payload.id)
 	}
 
 	// Now we can signal the building routine to stop.
@@ -346,13 +350,11 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			r := w.getSealingBlock(fullParams)
 			dur := time.Since(start)
 			// update handles error case
-			payload.update(r, dur, func() {
-				w.cacheMiningBlock(r.block, r.env)
-			})
+			payload.update(r, dur)
 			if r.err == nil {
 				// after first successful pass, we're updating
 				fullParams.isUpdate = true
-			} else {
+			}else {
 				log.Error("Failed to build full payload", "id", payload.id, "err", r.err)
 			}
 			timer.Reset(w.recommit)

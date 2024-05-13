@@ -154,6 +154,7 @@ type Config struct {
 	Recovery   bool // Indicator that the snapshots is in the recovery mode
 	NoBuild    bool // Indicator that the snapshots generation is disallowed
 	AsyncBuild bool // The snapshot generation is allowed to be constructed asynchronously
+	NoTries    bool // Indicator that the snapshot tries are disabled
 }
 
 // Tree is an Ethereum state snapshot tree. It consists of one persistent base
@@ -201,7 +202,7 @@ func New(config Config, diskdb ethdb.KeyValueStore, triedb *trie.Database, root 
 		layers: make(map[common.Hash]snapshot),
 	}
 	// Attempt to load a previously persisted snapshot and rebuild one if failed
-	head, disabled, err := loadSnapshot(diskdb, triedb, root, config.CacheSize, config.Recovery, config.NoBuild)
+	head, disabled, err := loadSnapshot(diskdb, triedb, root, config.CacheSize, config.Recovery, config.NoBuild, config.NoTries)
 	if disabled {
 		log.Warn("Snapshot maintenance disabled (syncing)")
 		return snap, nil
@@ -654,6 +655,13 @@ func diffToDisk(bottom *diffLayer) *diskLayer {
 		go res.generate(stats)
 	}
 	return res
+}
+
+// Release releases resources
+func (t *Tree) Release() {
+	if dl := t.disklayer(); dl != nil {
+		dl.Release()
+	}
 }
 
 // Journal commits an entire diff hierarchy to disk into a single journal entry.

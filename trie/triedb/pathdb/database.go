@@ -94,11 +94,12 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
-	SyncFlush      bool   // Flag of trienodebuffer sync flush cache to disk
-	StateHistory   uint64 // Number of recent blocks to maintain state history for
-	CleanCacheSize int    // Maximum memory allowance (in bytes) for caching clean nodes
-	DirtyCacheSize int    // Maximum memory allowance (in bytes) for caching dirty nodes
-	ReadOnly       bool   // Flag whether the database is opened in read only mode.
+	TrieNodeBufferType   NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
+	StateHistory         uint64         // Number of recent blocks to maintain state history for
+	CleanCacheSize       int            // Maximum memory allowance (in bytes) for caching clean nodes
+	DirtyCacheSize       int            // Maximum memory allowance (in bytes) for caching dirty nodes
+	ReadOnly             bool           // Flag whether the database is opened in read only mode.
+	ProposeBlockInterval uint64         // Propose block to L1 block interval.
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -106,6 +107,7 @@ type Config struct {
 func (c *Config) sanitize() *Config {
 	conf := *c
 	if conf.DirtyCacheSize > maxBufferSize {
+		conf.CleanCacheSize = conf.DirtyCacheSize - maxBufferSize
 		log.Warn("Sanitizing invalid node buffer size", "provided", common.StorageSize(conf.DirtyCacheSize), "updated", common.StorageSize(maxBufferSize))
 		conf.DirtyCacheSize = maxBufferSize
 	}
@@ -179,14 +181,31 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 		}
 		db.freezer = freezer
 
-		// Truncate the extra state histories above in freezer in case
-		// it's not aligned with the disk layer.
-		pruned, err := truncateFromHead(db.diskdb, freezer, db.tree.bottom().stateID())
-		if err != nil {
-			log.Crit("Failed to truncate extra state histories", "err", err)
-		}
-		if pruned != 0 {
-			log.Warn("Truncated extra state histories", "number", pruned)
+		diskLayerID := db.tree.bottom().stateID()
+		if diskLayerID == 0 {
+			// Reset the entire state histories in case the trie database is
+			// not initialized yet, as these state histories are not expected.
+			frozen, err := db.freezer.Ancients()
+			if err != nil {
+				log.Crit("Failed to retrieve head of state history", "err", err)
+			}
+			if frozen != 0 {
+				err := db.freezer.Reset()
+				if err != nil {
+					log.Crit("Failed to reset state histories", "err", err)
+				}
+				log.Info("Truncated extraneous state history")
+			}
+		} else {
+			// Truncate the extra state histories above in freezer in case
+			// it's not aligned with the disk layer.
+			pruned, err := truncateFromHead(db.diskdb, freezer, diskLayerID)
+			if err != nil {
+				log.Crit("Failed to truncate extra state histories", "err", err)
+			}
+			if pruned != 0 {
+				log.Warn("Truncated extra state histories", "number", pruned)
+			}
 		}
 	}
 	// Disable database in case node is still in the initial state sync stage.
@@ -195,7 +214,7 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 			log.Crit("Failed to disable database", "err", err) // impossible to happen
 		}
 	}
-	log.Warn("Path-based state scheme is an experimental feature", "sync", db.config.SyncFlush)
+	log.Warn("Path-based state scheme is an experimental feature")
 	return db
 }
 
@@ -203,6 +222,10 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 func (db *Database) Reader(root common.Hash) (layer, error) {
 	l := db.tree.get(root)
 	if l == nil {
+		r, err := db.tree.bottom().buffer.proposedBlockReader(root)
+		if err == nil && r != nil {
+			return r, nil
+		}
 		return nil, fmt.Errorf("state %#x is not available", root)
 	}
 	return l, nil
@@ -312,7 +335,10 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	db.tree.reset(newDiskLayer(root, 0, db, nil, NewTrieNodeBuffer(db.config.SyncFlush, db.bufferSize, nil, 0)))
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval)
+	dl := newDiskLayer(root, 0, db, nil, nb)
+	nb.setClean(dl.cleans)
+	db.tree.reset(dl)
 
 	// Re-enable the database as the final step.
 	db.waitSync = false
@@ -440,6 +466,9 @@ func (db *Database) Initialized(genesisRoot common.Hash) bool {
 			inited = true
 		}
 	})
+	if !inited {
+		inited = rawdb.ReadSnapSyncStatusFlag(db.diskdb) != rawdb.StateSyncUnknown
+	}
 	return inited
 }
 

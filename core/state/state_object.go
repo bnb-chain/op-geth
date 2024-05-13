@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"io"
 	"math/big"
 	"time"
@@ -98,7 +99,10 @@ func (s *stateObject) empty() bool {
 
 // newObject creates a state object.
 func newObject(db *StateDB, address common.Address, acct *types.StateAccount) *stateObject {
-	origin := acct
+	var (
+		origin  = acct
+		created = acct == nil // true if the account was not existent
+	)
 	if acct == nil {
 		acct = types.NewEmptyStateAccount()
 	}
@@ -111,6 +115,7 @@ func newObject(db *StateDB, address common.Address, acct *types.StateAccount) *s
 		originStorage:  make(Storage),
 		pendingStorage: make(Storage),
 		dirtyStorage:   make(Storage),
+		created:        created,
 	}
 }
 
@@ -145,7 +150,7 @@ func (s *stateObject) getTrie() (Trie, error) {
 			s.trie = s.db.prefetcher.trie(s.addrHash, s.data.Root)
 		}
 		if s.trie == nil {
-			tr, err := s.db.db.OpenStorageTrie(s.db.originalRoot, s.address, s.data.Root)
+			tr, err := s.db.db.OpenStorageTrie(s.db.originalRoot, s.address, s.data.Root, s.db.trie)
 			if err != nil {
 				return nil, err
 			}
@@ -359,6 +364,13 @@ func (s *stateObject) updateTrie() (Trie, error) {
 // updateRoot flushes all cached storage mutations to trie, recalculating the
 // new storage trie root.
 func (s *stateObject) updateRoot() {
+	// If node runs in no trie mode, set root to empty.
+	defer func() {
+		if s.db.db.NoTries() {
+			s.data.Root = types.EmptyRootHash
+		}
+	}()
+
 	// Flush cached storage mutations into trie, short circuit if any error
 	// is occurred or there is not change in the trie.
 	tr, err := s.updateTrie()
@@ -511,6 +523,7 @@ func (s *stateObject) setCode(codeHash common.Hash, code []byte) {
 	s.code = code
 	s.data.CodeHash = codeHash[:]
 	s.dirtyCode = true
+	compiler.GenOrLoadOptimizedCode(codeHash, s.code)
 }
 
 func (s *stateObject) SetNonce(nonce uint64) {

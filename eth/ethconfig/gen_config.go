@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/ethereum/go-ethereum/miner"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 // MarshalTOML marshals as TOML.
@@ -28,7 +29,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TransactionHistory                      uint64                 `toml:",omitempty"`
 		StateHistory                            uint64                 `toml:",omitempty"`
 		StateScheme                             string                 `toml:",omitempty"`
-		PathSyncFlush           				bool                   `toml:",omitempty"`
+		PathNodeBuffer                          pathdb.NodeBufferType  `toml:",omitempty"`
+		ProposeBlockInterval                    uint64                 `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               int                    `toml:",omitempty"`
 		LightIngress                            int                    `toml:",omitempty"`
@@ -46,6 +48,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		TrieCommitInterval                      uint64
 		SnapshotCache                           int
 		Preimages                               bool
+		NoTries                                 bool
 		FilterLogCacheSize                      int
 		Miner                                   miner.Config
 		TxPool                                  legacypool.Config
@@ -59,6 +62,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		OverrideCancun                          *uint64 `toml:",omitempty"`
 		OverrideVerkle                          *uint64 `toml:",omitempty"`
 		OverrideOptimismCanyon                  *uint64 `toml:",omitempty"`
+		OverrideOptimismEcotone                 *uint64 `toml:",omitempty"`
+		OverrideOptimismInterop                 *uint64 `toml:",omitempty"`
 		ApplySuperchainUpgrades                 bool    `toml:",omitempty"`
 		RollupSequencerHTTP                     string
 		RollupHistoricalRPC                     string
@@ -66,6 +71,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RollupDisableTxPoolGossip               bool
 		RollupDisableTxPoolAdmission            bool
 		RollupHaltOnIncompatibleProtocolVersion string
+		EnableOpcodeOptimizing                  bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -79,7 +85,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.TransactionHistory = c.TransactionHistory
 	enc.StateHistory = c.StateHistory
 	enc.StateScheme = c.StateScheme
-	enc.PathSyncFlush = c.PathSyncFlush
+	enc.PathNodeBuffer = c.PathNodeBuffer
+	enc.ProposeBlockInterval = c.ProposeBlockInterval
 	enc.RequiredBlocks = c.RequiredBlocks
 	enc.LightServ = c.LightServ
 	enc.LightIngress = c.LightIngress
@@ -97,6 +104,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.TrieCommitInterval = c.TrieCommitInterval
 	enc.SnapshotCache = c.SnapshotCache
 	enc.Preimages = c.Preimages
+	enc.NoTries = c.NoTries
 	enc.FilterLogCacheSize = c.FilterLogCacheSize
 	enc.Miner = c.Miner
 	enc.TxPool = c.TxPool
@@ -110,6 +118,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.OverrideCancun = c.OverrideCancun
 	enc.OverrideVerkle = c.OverrideVerkle
 	enc.OverrideOptimismCanyon = c.OverrideOptimismCanyon
+	enc.OverrideOptimismEcotone = c.OverrideOptimismEcotone
+	enc.OverrideOptimismInterop = c.OverrideOptimismInterop
 	enc.ApplySuperchainUpgrades = c.ApplySuperchainUpgrades
 	enc.RollupSequencerHTTP = c.RollupSequencerHTTP
 	enc.RollupHistoricalRPC = c.RollupHistoricalRPC
@@ -117,6 +127,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RollupDisableTxPoolGossip = c.RollupDisableTxPoolGossip
 	enc.RollupDisableTxPoolAdmission = c.RollupDisableTxPoolAdmission
 	enc.RollupHaltOnIncompatibleProtocolVersion = c.RollupHaltOnIncompatibleProtocolVersion
+	enc.EnableOpcodeOptimizing = c.EnableOpcodeOptimizing
 	return &enc, nil
 }
 
@@ -134,7 +145,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TransactionHistory                      *uint64                `toml:",omitempty"`
 		StateHistory                            *uint64                `toml:",omitempty"`
 		StateScheme                             *string                `toml:",omitempty"`
-		PathSyncFlush           				*bool                  `toml:",omitempty"`
+		PathNodeBuffer                          *pathdb.NodeBufferType `toml:",omitempty"`
+		ProposeBlockInterval                    *uint64                `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               *int                   `toml:",omitempty"`
 		LightIngress                            *int                   `toml:",omitempty"`
@@ -152,6 +164,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		TrieCommitInterval                      *uint64
 		SnapshotCache                           *int
 		Preimages                               *bool
+		NoTries                                 *bool
 		FilterLogCacheSize                      *int
 		Miner                                   *miner.Config
 		TxPool                                  *legacypool.Config
@@ -165,6 +178,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		OverrideCancun                          *uint64 `toml:",omitempty"`
 		OverrideVerkle                          *uint64 `toml:",omitempty"`
 		OverrideOptimismCanyon                  *uint64 `toml:",omitempty"`
+		OverrideOptimismEcotone                 *uint64 `toml:",omitempty"`
+		OverrideOptimismInterop                 *uint64 `toml:",omitempty"`
 		ApplySuperchainUpgrades                 *bool   `toml:",omitempty"`
 		RollupSequencerHTTP                     *string
 		RollupHistoricalRPC                     *string
@@ -172,6 +187,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RollupDisableTxPoolGossip               *bool
 		RollupDisableTxPoolAdmission            *bool
 		RollupHaltOnIncompatibleProtocolVersion *string
+		EnableOpcodeOptimizing                  *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -210,8 +226,11 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.StateScheme != nil {
 		c.StateScheme = *dec.StateScheme
 	}
-	if dec.PathSyncFlush != nil {
-		c.PathSyncFlush = *dec.PathSyncFlush
+	if dec.PathNodeBuffer != nil {
+		c.PathNodeBuffer = *dec.PathNodeBuffer
+	}
+	if dec.ProposeBlockInterval != nil {
+		c.ProposeBlockInterval = *dec.ProposeBlockInterval
 	}
 	if dec.RequiredBlocks != nil {
 		c.RequiredBlocks = dec.RequiredBlocks
@@ -264,6 +283,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Preimages != nil {
 		c.Preimages = *dec.Preimages
 	}
+	if dec.NoTries != nil {
+		c.NoTries = *dec.NoTries
+	}
 	if dec.FilterLogCacheSize != nil {
 		c.FilterLogCacheSize = *dec.FilterLogCacheSize
 	}
@@ -303,6 +325,12 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.OverrideOptimismCanyon != nil {
 		c.OverrideOptimismCanyon = dec.OverrideOptimismCanyon
 	}
+	if dec.OverrideOptimismEcotone != nil {
+		c.OverrideOptimismEcotone = dec.OverrideOptimismEcotone
+	}
+	if dec.OverrideOptimismInterop != nil {
+		c.OverrideOptimismInterop = dec.OverrideOptimismInterop
+	}
 	if dec.ApplySuperchainUpgrades != nil {
 		c.ApplySuperchainUpgrades = *dec.ApplySuperchainUpgrades
 	}
@@ -323,6 +351,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.RollupHaltOnIncompatibleProtocolVersion != nil {
 		c.RollupHaltOnIncompatibleProtocolVersion = *dec.RollupHaltOnIncompatibleProtocolVersion
+	}
+	if dec.EnableOpcodeOptimizing != nil {
+		c.EnableOpcodeOptimizing = *dec.EnableOpcodeOptimizing
 	}
 	return nil
 }

@@ -244,6 +244,7 @@ loop:
 			if err := d.checkDial(node); err != nil {
 				d.log.Trace("Discarding dial candidate", "id", node.ID(), "ip", node.IP(), "reason", err)
 			} else {
+				log.Debug("Starting dial from nodesCh", "node", node.IP())
 				d.startDial(newDialTask(node, dynDialedConn))
 			}
 
@@ -401,6 +402,7 @@ func (d *dialScheduler) startStaticDials(n int) (started int) {
 	for started = 0; started < n && len(d.staticPool) > 0; started++ {
 		idx := d.rand.Intn(len(d.staticPool))
 		task := d.staticPool[idx]
+		log.Debug("start static dial")
 		d.startDial(task)
 		d.removeFromStaticPool(idx)
 	}

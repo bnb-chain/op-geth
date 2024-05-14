@@ -350,6 +350,7 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 		return
 	}
 
+	log.Debug("ping from do revalidate")
 	// Ping the selected node and wait for a pong.
 	remoteSeq, err := tab.net.ping(unwrapNode(last))
 
@@ -372,6 +373,8 @@ func (tab *Table) doRevalidate(done chan<- struct{}) {
 		tab.log.Debug("Revalidated node", "b", bi, "id", last.ID(), "checks", last.livenessChecks)
 		tab.bumpInBucket(b, last)
 		return
+	} else {
+		log.Error("tab.net.ping", "err", err)
 	}
 	// No reply received, pick a replacement or delete the node if there aren't
 	// any replacements.
@@ -515,20 +518,24 @@ func (tab *Table) getAllNodes() []enode.Node {
 // appendLiveNodes adds nodes at the given distance to the result slice.
 func (tab *Table) appendLiveNodes(dist uint, result []*enode.Node) []*enode.Node {
 	if dist > 256 {
+		log.Info("return nil", "dist", dist)
 		return result
 	}
 	if dist == 0 {
+		log.Info("dist 0", "dist", dist)
 		return append(result, tab.self())
 	}
 
 	tab.mutex.Lock()
 	defer tab.mutex.Unlock()
-	for _, n := range tab.bucketAtDistance(int(dist)).entries {
+	for i, n := range tab.bucketAtDistance(int(dist)).entries {
+		log.Debug("bucketAtDistance", "index", i, "nodesIp", n.IP().String(), "tcpport", n.TCP(), "udoport", n.UDP(), "checkcount", n.livenessChecks)
 		if n.livenessChecks >= 1 {
 			node := n.Node // avoid handing out pointer to struct field
 			result = append(result, &node)
 		}
 	}
+	log.Debug("appendLiveNodes result", "livenodes num", len(result))
 	return result
 }
 
@@ -579,6 +586,7 @@ func (tab *Table) addSeenNode(n *node) {
 	b := tab.bucket(n.ID())
 	if contains(b.entries, n.ID()) {
 		// Already in bucket, don't add.
+		log.Debug("Already in bucket", "nodeid", n.ID(), "nodeip", n.IP().String())
 		return
 	}
 	if len(b.entries) >= bucketSize {
@@ -595,6 +603,8 @@ func (tab *Table) addSeenNode(n *node) {
 	b.entries = append(b.entries, n)
 	b.replacements = deleteNode(b.replacements, n)
 	n.addedAt = time.Now()
+
+	log.Debug("add node in bucket", "nodeid", n.ID(), "nodeip", n.IP().String())
 
 	if tab.nodeAddedHook != nil {
 		tab.nodeAddedHook(b, n)

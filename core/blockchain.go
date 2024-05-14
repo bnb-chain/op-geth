@@ -391,8 +391,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			if bc.triedb.Scheme() == rawdb.PathScheme {
 				recoverable, _ := bc.triedb.Recoverable(diskRoot)
 				if !bc.HasState(diskRoot) && !recoverable {
+					log.Debug("not found in pbss")
 					diskRoot = bc.triedb.Head()
 				}
+				log.Info("state found in pbss", "diskroot", diskRoot.String())
 			}
 			if diskRoot != (common.Hash{}) {
 				log.Warn("Head state missing, repairing", "number", head.Number, "hash", head.Hash(), "snaproot", diskRoot)

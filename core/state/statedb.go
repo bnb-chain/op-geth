@@ -937,6 +937,7 @@ func (s *StateDB) AccountsIntermediateRoot() {
 		if obj := s.stateObjects[addr]; !obj.deleted {
 			wg.Add(1)
 			tasks <- func() {
+				defer wg.Done()
 				obj.updateRoot()
 
 				// Cache the data until commit. Note, this update mechanism is not symmetric
@@ -946,8 +947,6 @@ func (s *StateDB) AccountsIntermediateRoot() {
 				s.AccountMux.Lock()
 				s.accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
 				s.AccountMux.Unlock()
-
-				wg.Done()
 			}
 		}
 	}

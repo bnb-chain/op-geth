@@ -66,11 +66,13 @@ type nodebufferlist struct {
 	baseMux   sync.RWMutex    // The mutex of base multiDifflayer and persistID.
 	flushMux  sync.RWMutex    // The mutex of flushing base multiDifflayer for reorg corner case.
 
-	isFlushing   atomic.Bool    // Flag indicates writing disk under background.
-	stopFlushing atomic.Bool    // Flag stops writing disk under background.
-	stopCh       chan struct{}  // Trigger stop background event loop.
-	waitStopCh   chan struct{}  // Wait stop background event loop.
-	keepFunc     NotifyKeepFunc // Used to keep op-proposer output proof.
+	isFlushing      atomic.Bool    // Flag indicates writing disk under background.
+	stopFlushing    atomic.Bool    // Flag stops writing disk under background.
+	stopCh          chan struct{}  // Trigger stop background event loop.
+	waitStopCh      chan struct{}  // Wait stop background event loop.
+	forceKeepCh     chan struct{}  // Trigger force keep event loop.
+	waitForceKeepCh chan struct{}  // Wait force keep event loop.
+	keepFunc        NotifyKeepFunc // Used to keep op-proposer output proof.
 }
 
 // newNodeBufferList initializes the node buffer list with the provided nodes
@@ -110,19 +112,21 @@ func newNodeBufferList(
 	base := newMultiDifflayer(limit, size, common.Hash{}, nodes, layers)
 	ele := newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
 	nf := &nodebufferlist{
-		db:         db,
-		wpBlocks:   wpBlocks,
-		rsevMdNum:  rsevMdNum,
-		dlInMd:     dlInMd,
-		limit:      limit,
-		base:       base,
-		head:       ele,
-		tail:       ele,
-		count:      1,
-		persistID:  rawdb.ReadPersistentStateID(db),
-		stopCh:     make(chan struct{}),
-		waitStopCh: make(chan struct{}),
-		keepFunc:   keepFunc,
+		db:              db,
+		wpBlocks:        wpBlocks,
+		rsevMdNum:       rsevMdNum,
+		dlInMd:          dlInMd,
+		limit:           limit,
+		base:            base,
+		head:            ele,
+		tail:            ele,
+		count:           1,
+		persistID:       rawdb.ReadPersistentStateID(db),
+		stopCh:          make(chan struct{}),
+		waitStopCh:      make(chan struct{}),
+		forceKeepCh:     make(chan struct{}),
+		waitForceKeepCh: make(chan struct{}),
+		keepFunc:        keepFunc,
 	}
 	go nf.loop()
 
@@ -241,22 +245,8 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		return nil
 	}
 
-	if nf.keepFunc != nil {
-		nf.mux.RLock()
-		traverseKeepFunc := func(buffer *multiDifflayer) bool {
-			nf.keepFunc(&KeepRecord{
-				BlockID:      buffer.block,
-				StateRoot:    buffer.root,
-				KeepInterval: nf.wpBlocks,
-				PinnedInnerTrieReader: &proposedBlockReader{
-					nf:   nf,
-					diff: buffer,
-				}})
-			return true
-		}
-		nf.traverseReverse(traverseKeepFunc)
-		nf.mux.RUnlock()
-	}
+	nf.forceKeepCh <- struct{}{}
+	<-nf.waitForceKeepCh
 
 	// hang user read/write and background write
 	nf.mux.Lock()
@@ -485,7 +475,7 @@ func (nf *nodebufferlist) diffToBase() {
 			log.Crit("committed block number misaligned", "block", buffer.block)
 		}
 
-		if nf.keepFunc != nil {
+		if nf.keepFunc != nil { // keep in background flush stage
 			nf.keepFunc(&KeepRecord{
 				BlockID:      buffer.block,
 				StateRoot:    buffer.root,
@@ -554,7 +544,7 @@ func (nf *nodebufferlist) loop() {
 	for {
 		select {
 		case <-nf.stopCh:
-			if nf.keepFunc != nil {
+			if nf.keepFunc != nil { // keep in stop stage
 				nf.mux.RLock()
 				traverseKeepFunc := func(buffer *multiDifflayer) bool {
 					nf.keepFunc(&KeepRecord{
@@ -572,6 +562,26 @@ func (nf *nodebufferlist) loop() {
 			}
 			nf.waitStopCh <- struct{}{}
 			return
+
+		case <-nf.forceKeepCh:
+			if nf.keepFunc != nil { // keep in force flush stage
+				nf.mux.RLock()
+				traverseKeepFunc := func(buffer *multiDifflayer) bool {
+					nf.keepFunc(&KeepRecord{
+						BlockID:      buffer.block,
+						StateRoot:    buffer.root,
+						KeepInterval: nf.wpBlocks,
+						PinnedInnerTrieReader: &proposedBlockReader{
+							nf:   nf,
+							diff: buffer,
+						}})
+					return true
+				}
+				nf.traverseReverse(traverseKeepFunc)
+				nf.mux.RUnlock()
+			}
+			nf.waitForceKeepCh <- struct{}{}
+
 		case <-mergeTicker.C:
 			if nf.stopFlushing.Load() {
 				continue

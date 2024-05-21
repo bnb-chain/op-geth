@@ -29,6 +29,14 @@ const (
 	DefaultReserveMultiDifflayerNumber = 3
 )
 
+type KeepRecord struct {
+	BlockID               uint64
+	StateRoot             common.Hash
+	KeepInterval          uint64
+	PinnedInnerTrieReader layer
+}
+type NotifyKeepFunc func(*KeepRecord)
+
 var _ trienodebuffer = &nodebufferlist{}
 
 // nodebufferlist implements the trienodebuffer interface, it is designed to meet
@@ -58,9 +66,13 @@ type nodebufferlist struct {
 	baseMux   sync.RWMutex    // The mutex of base multiDifflayer and persistID.
 	flushMux  sync.RWMutex    // The mutex of flushing base multiDifflayer for reorg corner case.
 
-	isFlushing   atomic.Bool // Flag indicates writing disk under background.
-	stopFlushing atomic.Bool // Flag stops writing disk under background.
-	stopCh       chan struct{}
+	isFlushing      atomic.Bool    // Flag indicates writing disk under background.
+	stopFlushing    atomic.Bool    // Flag stops writing disk under background.
+	stopCh          chan struct{}  // Trigger stop background event loop.
+	waitStopCh      chan struct{}  // Wait stop background event loop.
+	forceKeepCh     chan struct{}  // Trigger force keep event loop.
+	waitForceKeepCh chan struct{}  // Wait force keep event loop.
+	keepFunc        NotifyKeepFunc // Used to keep op-proposer output proof.
 }
 
 // newNodeBufferList initializes the node buffer list with the provided nodes
@@ -69,7 +81,8 @@ func newNodeBufferList(
 	limit uint64,
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers uint64,
-	proposeBlockInterval uint64) *nodebufferlist {
+	proposeBlockInterval uint64,
+	keepFunc NotifyKeepFunc) *nodebufferlist {
 	var (
 		rsevMdNum uint64
 		dlInMd    uint64
@@ -99,17 +112,21 @@ func newNodeBufferList(
 	base := newMultiDifflayer(limit, size, common.Hash{}, nodes, layers)
 	ele := newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
 	nf := &nodebufferlist{
-		db:        db,
-		wpBlocks:  wpBlocks,
-		rsevMdNum: rsevMdNum,
-		dlInMd:    dlInMd,
-		limit:     limit,
-		base:      base,
-		head:      ele,
-		tail:      ele,
-		count:     1,
-		persistID: rawdb.ReadPersistentStateID(db),
-		stopCh:    make(chan struct{}),
+		db:              db,
+		wpBlocks:        wpBlocks,
+		rsevMdNum:       rsevMdNum,
+		dlInMd:          dlInMd,
+		limit:           limit,
+		base:            base,
+		head:            ele,
+		tail:            ele,
+		count:           1,
+		persistID:       rawdb.ReadPersistentStateID(db),
+		stopCh:          make(chan struct{}),
+		waitStopCh:      make(chan struct{}),
+		forceKeepCh:     make(chan struct{}),
+		waitForceKeepCh: make(chan struct{}),
+		keepFunc:        keepFunc,
 	}
 	go nf.loop()
 
@@ -228,6 +245,9 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		return nil
 	}
 
+	nf.forceKeepCh <- struct{}{}
+	<-nf.waitForceKeepCh
+
 	// hang user read/write and background write
 	nf.mux.Lock()
 	nf.baseMux.Lock()
@@ -334,6 +354,7 @@ func (nf *nodebufferlist) getLayers() uint64 {
 // waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
 func (nf *nodebufferlist) waitAndStopFlushing() {
 	close(nf.stopCh)
+	<-nf.waitStopCh
 	nf.stopFlushing.Store(true)
 	for nf.isFlushing.Load() {
 		time.Sleep(time.Second)
@@ -454,6 +475,17 @@ func (nf *nodebufferlist) diffToBase() {
 			log.Crit("committed block number misaligned", "block", buffer.block)
 		}
 
+		if nf.keepFunc != nil { // keep in background flush stage
+			nf.keepFunc(&KeepRecord{
+				BlockID:      buffer.block,
+				StateRoot:    buffer.root,
+				KeepInterval: nf.wpBlocks,
+				PinnedInnerTrieReader: &proposedBlockReader{
+					nf:   nf,
+					diff: buffer,
+				}})
+		}
+
 		nf.baseMux.Lock()
 		err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes)
 		nf.baseMux.Unlock()
@@ -508,10 +540,48 @@ func (nf *nodebufferlist) backgroundFlush() {
 // loop runs the background task, collects the nodes for writing to disk.
 func (nf *nodebufferlist) loop() {
 	mergeTicker := time.NewTicker(time.Second * mergeMultiDifflayerInterval)
+	defer mergeTicker.Stop()
 	for {
 		select {
 		case <-nf.stopCh:
+			if nf.keepFunc != nil { // keep in stop stage
+				nf.mux.RLock()
+				traverseKeepFunc := func(buffer *multiDifflayer) bool {
+					nf.keepFunc(&KeepRecord{
+						BlockID:      buffer.block,
+						StateRoot:    buffer.root,
+						KeepInterval: nf.wpBlocks,
+						PinnedInnerTrieReader: &proposedBlockReader{
+							nf:   nf,
+							diff: buffer,
+						}})
+					return true
+				}
+				nf.traverseReverse(traverseKeepFunc)
+				nf.mux.RUnlock()
+			}
+			nf.waitStopCh <- struct{}{}
 			return
+
+		case <-nf.forceKeepCh:
+			if nf.keepFunc != nil { // keep in force flush stage
+				nf.mux.RLock()
+				traverseKeepFunc := func(buffer *multiDifflayer) bool {
+					nf.keepFunc(&KeepRecord{
+						BlockID:      buffer.block,
+						StateRoot:    buffer.root,
+						KeepInterval: nf.wpBlocks,
+						PinnedInnerTrieReader: &proposedBlockReader{
+							nf:   nf,
+							diff: buffer,
+						}})
+					return true
+				}
+				nf.traverseReverse(traverseKeepFunc)
+				nf.mux.RUnlock()
+			}
+			nf.waitForceKeepCh <- struct{}{}
+
 		case <-mergeTicker.C:
 			if nf.stopFlushing.Load() {
 				continue
@@ -809,7 +879,7 @@ func (mf *multiDifflayer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Debug("Persisted pathdb nodes", "nodes", len(mf.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted pathdb nodes", "nodes", len(mf.nodes), "bytes", common.StorageSize(size), "state_id", id, "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
 }
 

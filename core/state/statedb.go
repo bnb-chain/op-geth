@@ -186,6 +186,35 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 	return sdb, nil
 }
 
+// NewStateDBByTrie creates a new state db by a given trie.
+func NewStateDBByTrie(tr Trie, db Database, snaps *snapshot.Tree) (*StateDB, error) {
+	sdb := &StateDB{
+		db:                   db,
+		trie:                 tr,
+		originalRoot:         tr.Hash(),
+		snaps:                snaps,
+		accounts:             make(map[common.Hash][]byte),
+		storages:             make(map[common.Hash]map[common.Hash][]byte),
+		accountsOrigin:       make(map[common.Address][]byte),
+		storagesOrigin:       make(map[common.Address]map[common.Hash][]byte),
+		stateObjects:         make(map[common.Address]*stateObject),
+		stateObjectsPending:  make(map[common.Address]struct{}),
+		stateObjectsDirty:    make(map[common.Address]struct{}),
+		stateObjectsDestruct: make(map[common.Address]*types.StateAccount),
+		logs:                 make(map[common.Hash][]*types.Log),
+		preimages:            make(map[common.Hash][]byte),
+		journal:              newJournal(),
+		accessList:           newAccessList(),
+		transientStorage:     newTransientStorage(),
+		hasher:               crypto.NewKeccakState(),
+	}
+	if sdb.snaps != nil {
+		sdb.snap = sdb.snaps.Snapshot(tr.Hash())
+	}
+	_, sdb.noTrie = tr.(*trie.EmptyTrie)
+	return sdb, nil
+}
+
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the
 // state trie concurrently while the state is mutated so that when we reach the
 // commit phase, most of the needed data is already hot.

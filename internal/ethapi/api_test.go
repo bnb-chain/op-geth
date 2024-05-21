@@ -593,6 +593,10 @@ func newTestBackend(t *testing.T, n int, gspec *core.Genesis, engine consensus.E
 	return backend
 }
 
+func (b testBackend) ProofKeeper() *core.ProofKeeper {
+	return nil
+}
+
 func (b *testBackend) setPendingBlock(block *types.Block) {
 	b.pending = block
 }

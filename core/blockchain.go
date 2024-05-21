@@ -158,6 +158,8 @@ type CacheConfig struct {
 	StateScheme          string                // Scheme used to store ethereum states and merkle tree nodes on top
 	PathNodeBuffer       pathdb.NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
 	ProposeBlockInterval uint64                // Propose block to L1 block interval.
+	EnableProofKeeper    bool                  // Whether to enable proof keeper
+	KeepProofBlockSpan   uint64                // Block span of keep proof
 	SnapshotNoBuild      bool                  // Whether the background generation is allowed
 	SnapshotWait         bool                  // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
 
@@ -165,7 +167,7 @@ type CacheConfig struct {
 }
 
 // triedbConfig derives the configures for trie database.
-func (c *CacheConfig) triedbConfig() *trie.Config {
+func (c *CacheConfig) triedbConfig(keepFunc pathdb.NotifyKeepFunc) *trie.Config {
 	config := &trie.Config{
 		Preimages: c.Preimages,
 		NoTries:   c.NoTries,
@@ -182,6 +184,7 @@ func (c *CacheConfig) triedbConfig() *trie.Config {
 			CleanCacheSize:       c.TrieCleanLimit * 1024 * 1024,
 			DirtyCacheSize:       c.TrieDirtyLimit * 1024 * 1024,
 			ProposeBlockInterval: c.ProposeBlockInterval,
+			NotifyKeep:           keepFunc,
 		}
 	}
 	return config
@@ -232,6 +235,7 @@ type BlockChain struct {
 	flushInterval atomic.Int64                     // Time interval (processing time) after which to flush a state
 	triedb        *trie.Database                   // The database handler for maintaining trie nodes.
 	stateCache    state.Database                   // State database to reuse between imports (contains state cache)
+	proofKeeper   *ProofKeeper                     // Store/Query op-proposal proof to ensure consistent.
 
 	// txLookupLimit is the maximum number of blocks from head whose tx indices
 	// are reserved:
@@ -292,8 +296,16 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if cacheConfig == nil {
 		cacheConfig = defaultCacheConfig
 	}
+	opts := &proofKeeperOptions{
+		enable:             cacheConfig.EnableProofKeeper,
+		keepProofBlockSpan: cacheConfig.KeepProofBlockSpan,
+		watchStartKeepCh:   make(chan *pathdb.KeepRecord),
+		notifyFinishKeepCh: make(chan error),
+	}
+	proofKeeper := newProofKeeper(opts)
 	// Open trie database with provided config
-	triedb := trie.NewDatabase(db, cacheConfig.triedbConfig())
+	trieConfig := cacheConfig.triedbConfig(proofKeeper.GetNotifyKeepRecordFunc())
+	triedb := trie.NewDatabase(db, trieConfig)
 
 	// Setup the genesis block, commit the provided genesis specification
 	// to database if the genesis block is not present yet, or load the
@@ -341,7 +353,12 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
-	var err error
+	err := proofKeeper.Start(bc, db)
+	if err != nil {
+		return nil, err
+	}
+	bc.proofKeeper = proofKeeper
+
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
 		return nil, err
@@ -1037,6 +1054,9 @@ func (bc *BlockChain) Stop() {
 		if err := bc.triedb.Journal(bc.CurrentBlock().Root); err != nil {
 			log.Info("Failed to journal in-memory trie nodes", "err", err)
 		}
+		if err := bc.proofKeeper.Stop(); err != nil {
+			log.Info("Failed to stop proof keeper", "err", err)
+		}
 	} else {
 		// Ensure the state of a recent block is also stored to disk before exiting.
 		// We're writing three different states to catch different restart scenarios:
@@ -1057,7 +1077,6 @@ func (bc *BlockChain) Stop() {
 			for _, offset := range blockOffsets {
 				if number := bc.CurrentBlock().Number.Uint64(); number > offset {
 					recent := bc.GetBlockByNumber(number - offset)
-
 					log.Info("Writing cached state to disk", "block", recent.Number(), "hash", recent.Hash(), "root", recent.Root())
 					if err := triedb.Commit(recent.Root(), true); err != nil {
 						log.Error("Failed to commit recent state trie", "err", err)

@@ -34,11 +34,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
 	"github.com/urfave/cli/v2"
-
-	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/keystore"
@@ -327,6 +326,18 @@ var (
 		Name:     "pathdb.proposeblock",
 		Usage:    "keep the same with op-proposer propose block interval",
 		Value:    pathdb.DefaultProposeBlockInterval,
+		Category: flags.StateCategory,
+	}
+	EnableProofKeeperFlag = &cli.BoolFlag{
+		Name:     "pathdb.enableproofkeeper",
+		Usage:    "Enable path db proof keeper to store proposed proof",
+		Value:    false,
+		Category: flags.StateCategory,
+	}
+	KeepProofBlockSpanFlag = &cli.Uint64Flag{
+		Name:     "pathdb.keepproofblockspan",
+		Usage:    "Block span of keep proof (default = 90,000 blocks)",
+		Value:    params.FullImmutabilityThreshold,
 		Category: flags.StateCategory,
 	}
 	StateHistoryFlag = &cli.Uint64Flag{
@@ -1860,6 +1871,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(ProposeBlockIntervalFlag.Name) {
 		cfg.ProposeBlockInterval = ctx.Uint64(ProposeBlockIntervalFlag.Name)
+	}
+	if ctx.IsSet(EnableProofKeeperFlag.Name) {
+		cfg.EnableProofKeeper = ctx.Bool(EnableProofKeeperFlag.Name)
+	}
+	if ctx.IsSet(KeepProofBlockSpanFlag.Name) {
+		cfg.KeepProofBlockSpan = ctx.Uint64(KeepProofBlockSpanFlag.Name)
 	}
 	if ctx.String(GCModeFlag.Name) == "archive" && cfg.TransactionHistory != 0 {
 		cfg.TransactionHistory = 0

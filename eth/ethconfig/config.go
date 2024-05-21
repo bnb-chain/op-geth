@@ -132,6 +132,8 @@ type Config struct {
 	StateScheme          string                `toml:",omitempty"`
 	PathNodeBuffer       pathdb.NodeBufferType `toml:",omitempty"` // Type of trienodebuffer to cache trie nodes in disklayer
 	ProposeBlockInterval uint64                `toml:",omitempty"` // Keep the same with op-proposer propose block interval
+	EnableProofKeeper    bool                  `toml:",omitempty"` // Whether to enable proof keeper
+	KeepProofBlockSpan   uint64                `toml:",omitempty"` // Span block of keep proof
 
 	// RequiredBlocks is a set of block number -> hash mappings which must be in the
 	// canonical chain of all remote peers. Setting the option makes geth verify the

@@ -113,11 +113,18 @@ func GetNodeBufferType(name string) NodeBufferType {
 	return nodeBufferStringToType[name]
 }
 
-func NewTrieNodeBuffer(db ethdb.Database, trieNodeBufferType NodeBufferType, limit int, nodes map[common.Hash]map[string]*trienode.Node, layers, proposeBlockInterval uint64) trienodebuffer {
+func NewTrieNodeBuffer(
+	db ethdb.Database,
+	trieNodeBufferType NodeBufferType,
+	limit int,
+	nodes map[common.Hash]map[string]*trienode.Node,
+	layers, proposeBlockInterval uint64,
+	keepFunc NotifyKeepFunc,
+) trienodebuffer {
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {
 	case NodeBufferList:
-		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc)
 	case AsyncNodeBuffer:
 		return newAsyncNodeBuffer(limit, nodes, layers)
 	case SyncNodeBuffer:

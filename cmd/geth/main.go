@@ -98,6 +98,8 @@ var (
 		utils.StateHistoryFlag,
 		utils.ProposeBlockIntervalFlag,
 		utils.PathDBNodeBufferTypeFlag,
+		utils.EnableProofKeeperFlag,
+		utils.KeepProofBlockSpanFlag,
 		utils.LightServeFlag,    // deprecated
 		utils.LightIngressFlag,  // deprecated
 		utils.LightEgressFlag,   // deprecated

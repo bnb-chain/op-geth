@@ -294,6 +294,10 @@ func newBackendMock() *backendMock {
 	}
 }
 
+func (b *backendMock) ProofKeeper() *core.ProofKeeper {
+	return nil
+}
+
 func (b *backendMock) setFork(fork string) error {
 	if fork == "legacy" {
 		b.current.Number = big.NewInt(900)

@@ -54,6 +54,10 @@ type EthAPIBackend struct {
 	gpo                 *gasprice.Oracle
 }
 
+func (b *EthAPIBackend) ProofKeeper() *core.ProofKeeper {
+	return b.eth.blockchain.ProofKeeper()
+}
+
 // ChainConfig returns the active chain configuration.
 func (b *EthAPIBackend) ChainConfig() *params.ChainConfig {
 	return b.eth.blockchain.Config()
@@ -210,7 +214,7 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, number rpc.B
 	}
 	stateDb, err := b.eth.BlockChain().StateAt(header.Root)
 	if err != nil {
-		return nil, nil, err
+		return nil, header, err
 	}
 	return stateDb, header, nil
 }
@@ -232,7 +236,7 @@ func (b *EthAPIBackend) StateAndHeaderByNumberOrHash(ctx context.Context, blockN
 		}
 		stateDb, err := b.eth.BlockChain().StateAt(header.Root)
 		if err != nil {
-			return nil, nil, err
+			return nil, header, err
 		}
 		return stateDb, header, nil
 	}

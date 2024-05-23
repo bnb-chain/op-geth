@@ -191,7 +191,10 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 
 	// Put the 10th block's tx in the pool and produce a new block
 	txs := blocks[9].Transactions()
-	ethservice.TxPool().Add(txs, true, false)
+	errs := ethservice.TxPool().Add(txs, true, false)
+	pending, queue, pendingcache := ethservice.TxPool().StatsDetail()
+	t.Logf("[txpool ci] errors adding transactions to pool: %v", errs)
+	t.Logf("[txpool ci]: pending:%d, queue:%d, pendingcache <t1>:%d", pending, queue, pendingcache)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[8].Time() + 5,
 	}
@@ -200,7 +203,11 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 		SafeBlockHash:      common.Hash{},
 		FinalizedBlockHash: common.Hash{},
 	}
+	pending, queue, pendingcache = ethservice.TxPool().StatsDetail()
+	t.Logf("[txpool ci]: pending:%d, queue:%d, pendingcache <t2>:%d", pending, queue, pendingcache)
 	resp, err := api.ForkchoiceUpdatedV1(fcState, &blockParams)
+	pending, queue, pendingcache = ethservice.TxPool().StatsDetail()
+	t.Logf("[txpool ci]: pending:%d, queue:%d, pendingcache <t3>:%d", pending, queue, pendingcache)
 	if err != nil {
 		t.Fatalf("error preparing payload, err=%v", err)
 	}
@@ -213,10 +220,14 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 	}).Id()
 	require.Equal(t, payloadID, *resp.PayloadID)
 	require.NoError(t, waitForApiPayloadToBuild(api, *resp.PayloadID))
+	pending, queue, pendingcache = ethservice.TxPool().StatsDetail()
+	t.Logf("[txpool ci]: pending:%d, queue:%d, pendingcache <t4>:%d", pending, queue, pendingcache)
 	execData, err := api.GetPayloadV1(payloadID)
 	if err != nil {
 		t.Fatalf("error getting payload, err=%v", err)
 	}
+	pending, queue, pendingcache = ethservice.TxPool().StatsDetail()
+	t.Logf("[txpool ci]: pending:%d, queue:%d, pendingcache <t5>:%d", pending, queue, pendingcache)
 	if len(execData.Transactions) != blocks[9].Transactions().Len() {
 		t.Fatalf("invalid number of transactions %d != 1", len(execData.Transactions))
 	}

@@ -31,6 +31,16 @@ func newCacheForMiner() *cacheForMiner {
 	}
 }
 
+func (pc *cacheForMiner) txsNum() int {
+	pc.txLock.Lock()
+	defer pc.txLock.Unlock()
+	num := 0
+	for _, txs := range pc.pending {
+		num += len(txs)
+	}
+	return num
+}
+
 func (pc *cacheForMiner) add(txs types.Transactions, signer types.Signer) {
 	if len(txs) == 0 {
 		return

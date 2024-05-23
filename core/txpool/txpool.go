@@ -369,6 +369,19 @@ func (p *TxPool) Stats() (int, int) {
 	return runnable, blocked
 }
 
+func (p *TxPool) StatsDetail() (int, int, int) {
+	var runnable, blocked, queued int
+	for _, subpool := range p.subpools {
+		run, block, queue := subpool.StatsDetail()
+
+		runnable += run
+		blocked += block
+		queued += queue
+	}
+	return runnable, blocked, queued
+
+}
+
 // Content retrieves the data content of the transaction pool, returning all the
 // pending as well as queued transactions, grouped by account and sorted by nonce.
 func (p *TxPool) Content() (map[common.Address][]*types.Transaction, map[common.Address][]*types.Transaction) {

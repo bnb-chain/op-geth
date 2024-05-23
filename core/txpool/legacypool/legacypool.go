@@ -54,9 +54,6 @@ const (
 
 	// txReannoMaxNum is the maximum number of transactions a reannounce action can include.
 	txReannoMaxNum = 1024
-
-	// minPendingCacheDuration is the minimum duration between two pending cache updates.
-	minPendingCacheDuration = 250 * time.Millisecond
 )
 
 var (
@@ -253,7 +250,8 @@ type LegacyPool struct {
 	all     *lookup                      // All transactions to allow lookups
 	priced  *pricedList                  // All transactions sorted by price
 
-	pendingCache *cacheForMiner //pending list cache for miner
+	pendingCacheDumper func() (map[common.Address][]*txpool.LazyTransaction, map[common.Address][]*txpool.LazyTransaction)
+	pendingCache       *cacheForMiner //pending list cache for miner
 
 	reqResetCh      chan *txpoolResetRequest
 	reqPromoteCh    chan *accountSet
@@ -266,8 +264,6 @@ type LegacyPool struct {
 	changesSinceReorg int // A counter for how many drops we've performed in-between reorg.
 
 	l1CostFn txpool.L1CostFunc // To apply L1 costs as rollup, optional field, may be nil.
-
-	lastPendingCacheTime time.Time // Last time pending cache was updated
 }
 
 type txpoolResetRequest struct {
@@ -333,6 +329,11 @@ func (pool *LegacyPool) Init(gasTip *big.Int, head *types.Header, reserve txpool
 
 	// Set the basic pool parameters
 	pool.gasTip.Store(gasTip)
+
+	// set dumper
+	pool.pendingCacheDumper = func() (map[common.Address][]*txpool.LazyTransaction, map[common.Address][]*txpool.LazyTransaction) {
+		return pool.pendingCache.dump(pool, gasTip, pool.gasTip.Load())
+	}
 
 	// Initialize the state with head block, or fallback to empty one in
 	// case the head state is not available(might occur when node is not
@@ -605,7 +606,12 @@ func (pool *LegacyPool) Pending(enforceTips bool) map[common.Address][]*txpool.L
 	defer func(t0 time.Time) {
 		getPendingDurationTimer.Update(time.Since(t0))
 	}(time.Now())
-	return pool.pendingCache.pendingTxs(enforceTips)
+	txsWithTips, txsWithoutTips := pool.pendingCacheDumper()
+	if enforceTips {
+		return txsWithTips
+	} else {
+		return txsWithoutTips
+	}
 }
 
 // Locals retrieves the accounts currently considered local by the pool.
@@ -1372,7 +1378,10 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 				pool.priced.Reheap()
 			}
 		}
-		go pool.pendingCache.dump(pool, pool.gasTip.Load(), pendingBaseFee)
+		gasTip, baseFee := pool.gasTip.Load(), pendingBaseFee
+		pool.pendingCacheDumper = func() (map[common.Address][]*txpool.LazyTransaction, map[common.Address][]*txpool.LazyTransaction) {
+			return pool.pendingCache.dump(pool, gasTip, baseFee)
+		}
 		// Update all accounts to the latest known pending nonce
 		nonces := make(map[common.Address]uint64, len(pool.pending))
 		for addr, list := range pool.pending {
@@ -1380,11 +1389,6 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			nonces[addr] = highestPending.Nonce() + 1
 		}
 		pool.pendingNonces.setAll(nonces)
-	}
-	// keep updating pending cache in a minimal frequency
-	if reset == nil && time.Since(pool.lastPendingCacheTime) > minPendingCacheDuration {
-		pool.lastPendingCacheTime = time.Now()
-		go pool.pendingCache.dump(pool, pool.gasTip.Load(), pool.priced.urgent.baseFee)
 	}
 	// Ensure pool.queue and pool.pending sizes stay within the configured limits.
 	pool.truncatePending()

@@ -4,7 +4,6 @@ import (
 	"math/big"
 	"sort"
 	"sync"
-	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -19,23 +18,17 @@ var (
 
 // copy of pending transactions
 type cacheForMiner struct {
-	txLock             sync.Mutex
-	pending            map[common.Address]map[*types.Transaction]struct{}
-	locals             map[common.Address]bool
-	pendingWithoutTips atomic.Value
-	pendingWithTips    atomic.Value
-	addrLock           sync.Mutex
+	txLock   sync.Mutex
+	pending  map[common.Address]map[*types.Transaction]struct{}
+	locals   map[common.Address]bool
+	addrLock sync.Mutex
 }
 
 func newCacheForMiner() *cacheForMiner {
-	cm := &cacheForMiner{
+	return &cacheForMiner{
 		pending: make(map[common.Address]map[*types.Transaction]struct{}),
 		locals:  make(map[common.Address]bool),
 	}
-	lazyPendingWithTips, lazyPendingWithoutTips := make(map[common.Address][]*txpool.LazyTransaction), make(map[common.Address][]*txpool.LazyTransaction)
-	cm.pendingWithTips.Store(lazyPendingWithTips)
-	cm.pendingWithoutTips.Store(lazyPendingWithoutTips)
-	return cm
 }
 
 func (pc *cacheForMiner) add(txs types.Transactions, signer types.Signer) {
@@ -76,7 +69,7 @@ func (pc *cacheForMiner) del(txs types.Transactions, signer types.Signer) {
 	}
 }
 
-func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.Int) {
+func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.Int) (map[common.Address][]*txpool.LazyTransaction, map[common.Address][]*txpool.LazyTransaction) {
 	pending := make(map[common.Address]types.Transactions)
 	pc.txLock.Lock()
 	for addr, txlist := range pc.pending {
@@ -107,6 +100,7 @@ func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.I
 	}
 
 	// convert into LazyTransaction
+	//lazyPendingWithTips, lazyPendingWithoutTips := make(map[common.Address][]*txpool.LazyTransaction), make(map[common.Address][]*txpool.LazyTransaction)
 	lazyPendingWithTips, lazyPendingWithoutTips := make(map[common.Address][]*txpool.LazyTransaction), make(map[common.Address][]*txpool.LazyTransaction)
 	for addr, txs := range pending {
 		for i, tx := range txs {
@@ -126,18 +120,7 @@ func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.I
 			}
 		}
 	}
-
-	// store pending
-	pc.pendingWithTips.Store(lazyPendingWithTips)
-	pc.pendingWithoutTips.Store(lazyPendingWithoutTips)
-}
-
-func (pc *cacheForMiner) pendingTxs(enforceTips bool) map[common.Address][]*txpool.LazyTransaction {
-	if enforceTips {
-		return pc.pendingWithTips.Load().(map[common.Address][]*txpool.LazyTransaction)
-	} else {
-		return pc.pendingWithoutTips.Load().(map[common.Address][]*txpool.LazyTransaction)
-	}
+	return lazyPendingWithTips, lazyPendingWithoutTips
 }
 
 func (pc *cacheForMiner) markLocal(addr common.Address) {

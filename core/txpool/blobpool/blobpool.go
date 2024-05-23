@@ -1531,6 +1531,11 @@ func (p *BlobPool) Stats() (int, int) {
 	return pending, 0 // No non-executable txs in the blob pool
 }
 
+func (pool *BlobPool) StatsDetail() (int, int, int) {
+	pending, queued := pool.Stats()
+	return pending, queued, 0
+}
+
 // Content retrieves the data content of the transaction pool, returning all the
 // pending as well as queued transactions, grouped by account and sorted by nonce.
 //

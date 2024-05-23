@@ -250,7 +250,7 @@ type LegacyPool struct {
 	all     *lookup                      // All transactions to allow lookups
 	priced  *pricedList                  // All transactions sorted by price
 
-	pendingCacheDumper func() (map[common.Address][]*txpool.LazyTransaction, map[common.Address][]*txpool.LazyTransaction)
+	pendingCacheDumper func(enforceTip bool) map[common.Address][]*txpool.LazyTransaction
 	pendingCache       *cacheForMiner //pending list cache for miner
 
 	reqResetCh      chan *txpoolResetRequest
@@ -331,8 +331,8 @@ func (pool *LegacyPool) Init(gasTip *big.Int, head *types.Header, reserve txpool
 	pool.gasTip.Store(gasTip)
 
 	// set dumper
-	pool.pendingCacheDumper = func() (map[common.Address][]*txpool.LazyTransaction, map[common.Address][]*txpool.LazyTransaction) {
-		return pool.pendingCache.dump(pool, gasTip, pool.gasTip.Load())
+	pool.pendingCacheDumper = func(enforceTip bool) map[common.Address][]*txpool.LazyTransaction {
+		return pool.pendingCache.dump(pool, gasTip, pool.gasTip.Load(), enforceTip)
 	}
 
 	// Initialize the state with head block, or fallback to empty one in
@@ -606,12 +606,7 @@ func (pool *LegacyPool) Pending(enforceTips bool) map[common.Address][]*txpool.L
 	defer func(t0 time.Time) {
 		getPendingDurationTimer.Update(time.Since(t0))
 	}(time.Now())
-	txsWithTips, txsWithoutTips := pool.pendingCacheDumper()
-	if enforceTips {
-		return txsWithTips
-	} else {
-		return txsWithoutTips
-	}
+	return pool.pendingCacheDumper(enforceTips)
 }
 
 // Locals retrieves the accounts currently considered local by the pool.
@@ -1379,8 +1374,8 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			}
 		}
 		gasTip, baseFee := pool.gasTip.Load(), pendingBaseFee
-		pool.pendingCacheDumper = func() (map[common.Address][]*txpool.LazyTransaction, map[common.Address][]*txpool.LazyTransaction) {
-			return pool.pendingCache.dump(pool, gasTip, baseFee)
+		pool.pendingCacheDumper = func(enforceTip bool) map[common.Address][]*txpool.LazyTransaction {
+			return pool.pendingCache.dump(pool, gasTip, baseFee, enforceTip)
 		}
 		// Update all accounts to the latest known pending nonce
 		nonces := make(map[common.Address]uint64, len(pool.pending))

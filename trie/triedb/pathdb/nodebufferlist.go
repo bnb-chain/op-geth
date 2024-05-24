@@ -128,11 +128,12 @@ func newNodeBufferList(
 		waitForceKeepCh: make(chan struct{}),
 		keepFunc:        keepFunc,
 	}
+
 	go nf.loop()
 
 	log.Info("new node buffer list", "proposed block interval", nf.wpBlocks,
 		"reserve multi difflayers", nf.rsevMdNum, "difflayers in multidifflayer", nf.dlInMd,
-		"limit", common.StorageSize(limit), "layers", layers, "persist id", nf.persistID)
+		"limit", common.StorageSize(limit), "layers", layers, "persist id", nf.persistID, "base_size", size)
 	return nf
 }
 
@@ -590,7 +591,7 @@ func (nf *nodebufferlist) loop() {
 				continue
 			}
 			nf.diffToBase()
-			if nf.base.size > nf.base.limit {
+			if nf.base.size >= nf.base.limit {
 				nf.backgroundFlush()
 			}
 			nf.isFlushing.Swap(false)

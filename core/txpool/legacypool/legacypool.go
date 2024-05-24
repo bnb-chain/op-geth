@@ -1524,6 +1524,7 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) (demoteAddrs []com
 				}
 				reinject = lost
 
+				collectAddr(append(discarded, included...))
 			}
 		}
 	} else if newHead != nil && oldHead.Hash() == newHead.ParentHash {

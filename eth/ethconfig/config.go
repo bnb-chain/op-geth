@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -47,20 +48,10 @@ var FullNodeGPO = gasprice.Config{
 	MinSuggestedPriorityFee: gasprice.DefaultMinSuggestedPriorityFee,
 }
 
-// LightClientGPO contains default gasprice oracle settings for light client.
-var LightClientGPO = gasprice.Config{
-	Blocks:           2,
-	Percentile:       60,
-	MaxHeaderHistory: 300,
-	MaxBlockHistory:  5,
-	MaxPrice:         gasprice.DefaultMaxPrice,
-	IgnorePrice:      gasprice.DefaultIgnorePrice,
-}
-
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
 	SyncMode:           downloader.SnapSync,
-	NetworkId:          1,
+	NetworkId:          0,
 	TxLookupLimit:      2350000,
 	TransactionHistory: 2350000,
 	StateHistory:       params.FullImmutabilityThreshold,
@@ -79,6 +70,34 @@ var Defaults = Config{
 	RPCEVMTimeout:      5 * time.Second,
 	GPO:                FullNodeGPO,
 	RPCTxFeeCap:        1, // 1 ether
+	EnableOpcodeOptimizing: false,
+}
+
+// OpBNBDefaults contains default settings for use on the opBNB main net.
+var OpBNBDefaults = Config{
+	SyncMode:               downloader.FullSync,
+	NetworkId:              204,
+	TxLookupLimit:          2350000,
+	TransactionHistory:     2350000,
+	StateHistory:           params.FullImmutabilityThreshold,
+	LightPeers:             100,
+	DatabaseCache:          512,
+	TrieCleanCache:         154,
+	TrieDirtyCache:         256,
+	TrieTimeout:            60 * time.Minute,
+	TrieCommitInterval:     3600,
+	NoTries:                false,
+	SnapshotCache:          102,
+	FilterLogCacheSize:     32,
+	Miner:                  miner.DefaultConfig,
+	TxPool:                 legacypool.DefaultConfig,
+	BlobPool:               blobpool.DefaultConfig,
+	RPCGasCap:              50000000,
+	RPCEVMTimeout:          5 * time.Second,
+	GPO:                    FullNodeGPO,
+	RPCTxFeeCap:            1, // 1 ether
+	Preimages:              true,
+	EnableOpcodeOptimizing: false,
 }
 
 //go:generate go run github.com/fjl/gencodec -type Config -formats toml -out gen_config.go
@@ -89,8 +108,9 @@ type Config struct {
 	// If nil, the Ethereum main net block is used.
 	Genesis *core.Genesis `toml:",omitempty"`
 
-	// Protocol options
-	NetworkId uint64 // Network ID to use for selecting peers to connect to
+	// Network ID separates blockchains on the peer-to-peer networking level. When left
+	// zero, the chain ID is used as network ID.
+	NetworkId uint64
 	SyncMode  downloader.SyncMode
 
 	// This can be set to list of enrtree:// URLs which will be queried for
@@ -109,7 +129,11 @@ type Config struct {
 	// State scheme represents the scheme used to store ethereum states and trie
 	// nodes on top. It can be 'hash', 'path', or none which means use the scheme
 	// consistent with persistent state.
-	StateScheme string `toml:",omitempty"`
+	StateScheme          string                `toml:",omitempty"`
+	PathNodeBuffer       pathdb.NodeBufferType `toml:",omitempty"` // Type of trienodebuffer to cache trie nodes in disklayer
+	ProposeBlockInterval uint64                `toml:",omitempty"` // Keep the same with op-proposer propose block interval
+	EnableProofKeeper    bool                  `toml:",omitempty"` // Whether to enable proof keeper
+	KeepProofBlockSpan   uint64                `toml:",omitempty"` // Span block of keep proof
 
 	// RequiredBlocks is a set of block number -> hash mappings which must be in the
 	// canonical chain of all remote peers. Setting the option makes geth verify the
@@ -136,6 +160,7 @@ type Config struct {
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 	SnapshotCache      int
 	Preimages          bool
+	NoTries            bool
 
 	// This is the number of blocks for which logs will be cached in the filter system.
 	FilterLogCacheSize int
@@ -174,6 +199,10 @@ type Config struct {
 
 	OverrideOptimismCanyon *uint64 `toml:",omitempty"`
 
+	OverrideOptimismEcotone *uint64 `toml:",omitempty"`
+
+	OverrideOptimismInterop *uint64 `toml:",omitempty"`
+
 	// ApplySuperchainUpgrades requests the node to load chain-configuration from the superchain-registry.
 	ApplySuperchainUpgrades bool `toml:",omitempty"`
 
@@ -183,12 +212,17 @@ type Config struct {
 	RollupDisableTxPoolGossip               bool
 	RollupDisableTxPoolAdmission            bool
 	RollupHaltOnIncompatibleProtocolVersion string
+
+	EnableOpcodeOptimizing bool
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.
 // Clique is allowed for now to live standalone, but ethash is forbidden and can
 // only exist on already merged networks.
 func CreateConsensusEngine(config *params.ChainConfig, db ethdb.Database) (consensus.Engine, error) {
+	if config.Optimism != nil {
+		return beacon.New(&beacon.OpLegacy{}), nil
+	}
 	// If proof-of-authority is requested, set it up
 	if config.Clique != nil {
 		return beacon.New(clique.New(config.Clique, db)), nil

@@ -35,7 +35,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/eth/catalyst"
-	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/internal/flags"
@@ -124,6 +123,17 @@ func defaultNodeConfig() node.Config {
 	return cfg
 }
 
+func defaultOpBNBNodeConfig() node.Config {
+	git, _ := version.VCS()
+	cfg := node.DefaultOpBNBConfig
+	cfg.Name = clientIdentifier
+	cfg.Version = params.VersionWithCommit(git.Commit, git.Date)
+	cfg.HTTPModules = append(cfg.HTTPModules, "eth")
+	cfg.WSModules = append(cfg.WSModules, "eth")
+	cfg.IPCPath = "geth.ipc"
+	return cfg
+}
+
 // loadBaseConfig loads the gethConfig based on the given command line
 // parameters and config file.
 func loadBaseConfig(ctx *cli.Context) gethConfig {
@@ -132,6 +142,15 @@ func loadBaseConfig(ctx *cli.Context) gethConfig {
 		Eth:     ethconfig.Defaults,
 		Node:    defaultNodeConfig(),
 		Metrics: metrics.DefaultConfig,
+	}
+
+	if ctx.Bool(utils.OpBNBMainnetFlag.Name) || ctx.Bool(utils.OpBNBTestnetFlag.Name) {
+		cfg.Eth = ethconfig.OpBNBDefaults
+		cfg.Node = defaultOpBNBNodeConfig()
+		if ctx.Bool(utils.OpBNBTestnetFlag.Name) {
+			cfg.Eth.NetworkId = 5611
+			cfg.Eth.TrieCommitInterval = 240
+		}
 	}
 
 	// Load config file.
@@ -178,6 +197,16 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 	if ctx.IsSet(utils.OverrideOptimismCanyon.Name) {
 		v := ctx.Uint64(utils.OverrideOptimismCanyon.Name)
 		cfg.Eth.OverrideOptimismCanyon = &v
+	}
+
+	if ctx.IsSet(utils.OverrideOptimismEcotone.Name) {
+		v := ctx.Uint64(utils.OverrideOptimismEcotone.Name)
+		cfg.Eth.OverrideOptimismEcotone = &v
+	}
+
+	if ctx.IsSet(utils.OverrideOptimismInterop.Name) {
+		v := ctx.Uint64(utils.OverrideOptimismInterop.Name)
+		cfg.Eth.OverrideOptimismInterop = &v
 	}
 
 	if ctx.IsSet(utils.OverrideVerkle.Name) {
@@ -229,7 +258,7 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 		}
 		catalyst.RegisterSimulatedBeaconAPIs(stack, simBeacon)
 		stack.RegisterLifecycle(simBeacon)
-	} else if cfg.Eth.SyncMode != downloader.LightSync {
+	} else {
 		err := catalyst.Register(stack, eth)
 		if err != nil {
 			utils.Fatalf("failed to register catalyst service: %v", err)

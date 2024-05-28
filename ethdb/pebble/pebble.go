@@ -25,7 +25,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/cockroachdb/pebble"
 	"github.com/cockroachdb/pebble/bloom"
 	"github.com/ethereum/go-ethereum/common"
@@ -130,8 +129,11 @@ type panicLogger struct{}
 func (l panicLogger) Infof(format string, args ...interface{}) {
 }
 
+func (l panicLogger) Errorf(format string, args ...interface{}) {
+}
+
 func (l panicLogger) Fatalf(format string, args ...interface{}) {
-	panic(errors.Errorf("fatal: "+format, args...))
+	panic(fmt.Errorf("fatal: "+format, args...))
 }
 
 // New returns a wrapped pebble DB object. The namespace is the prefix that the
@@ -299,6 +301,10 @@ func (d *Database) Has(key []byte) (bool, error) {
 
 // Get retrieves the given key if it's present in the key-value store.
 func (d *Database) Get(key []byte) ([]byte, error) {
+	if metrics.EnabledExpensive {
+		start := time.Now()
+		defer func() { ethdb.EthdbGetTimer.UpdateSince(start) }()
+	}
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -316,6 +322,10 @@ func (d *Database) Get(key []byte) ([]byte, error) {
 
 // Put inserts the given value into the key-value store.
 func (d *Database) Put(key []byte, value []byte) error {
+	if metrics.EnabledExpensive {
+		start := time.Now()
+		defer func() { ethdb.EthdbPutTimer.UpdateSince(start) }()
+	}
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -326,6 +336,10 @@ func (d *Database) Put(key []byte, value []byte) error {
 
 // Delete removes the key from the key-value store.
 func (d *Database) Delete(key []byte) error {
+	if metrics.EnabledExpensive {
+		start := time.Now()
+		defer func() { ethdb.EthdbDeleteTimer.UpdateSince(start) }()
+	}
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -482,6 +496,7 @@ func (d *Database) meter(refresh time.Duration, namespace string) {
 			nonLevel0CompCount = int64(d.nonLevel0Comp.Load())
 			level0CompCount    = int64(d.level0Comp.Load())
 		)
+		d.log.Info("loop print db stats", "comp_time", compTime, "write_delay_count", writeDelayCount, "write_delay_time", writeDelayTime, "non_level0_comp_count", nonLevel0CompCount, "level0_comp_count", level0CompCount)
 		writeDelayTimes[i%2] = writeDelayTime
 		writeDelayCounts[i%2] = writeDelayCount
 		compTimes[i%2] = compTime
@@ -580,6 +595,10 @@ func (b *batch) ValueSize() int {
 
 // Write flushes any accumulated data to disk.
 func (b *batch) Write() error {
+	if metrics.EnabledExpensive {
+		start := time.Now()
+		defer func() { ethdb.EthdbBatchWriteTimer.UpdateSince(start) }()
+	}
 	b.db.quitLock.RLock()
 	defer b.db.quitLock.RUnlock()
 	if b.db.closed {
@@ -617,9 +636,12 @@ func (b *batch) Replay(w ethdb.KeyValueWriter) error {
 
 // pebbleIterator is a wrapper of underlying iterator in storage engine.
 // The purpose of this structure is to implement the missing APIs.
+//
+// The pebble iterator is not thread-safe.
 type pebbleIterator struct {
-	iter  *pebble.Iterator
-	moved bool
+	iter     *pebble.Iterator
+	moved    bool
+	released bool
 }
 
 // NewIterator creates a binary-alphabetical iterator over a subset
@@ -631,7 +653,7 @@ func (d *Database) NewIterator(prefix []byte, start []byte) ethdb.Iterator {
 		UpperBound: upperBound(prefix),
 	})
 	iter.First()
-	return &pebbleIterator{iter: iter, moved: true}
+	return &pebbleIterator{iter: iter, moved: true, released: false}
 }
 
 // Next moves the iterator to the next key/value pair. It returns whether the
@@ -666,4 +688,9 @@ func (iter *pebbleIterator) Value() []byte {
 
 // Release releases associated resources. Release should always succeed and can
 // be called multiple times without causing error.
-func (iter *pebbleIterator) Release() { iter.iter.Close() }
+func (iter *pebbleIterator) Release() {
+	if !iter.released {
+		iter.iter.Close()
+		iter.released = true
+	}
+}

@@ -72,6 +72,28 @@ func NewStateTrie(id *ID, db *Database) (*StateTrie, error) {
 	return &StateTrie{trie: *trie, preimages: db.preimages}, nil
 }
 
+// NewStateTrieByInnerReader creates a trie with an existing root node from a backing database and a inner reader.
+// Which is used by proof keeper to avoid deadlock in pathdb read/write.
+func NewStateTrieByInnerReader(id *ID, db *Database, innerReader Reader) (*StateTrie, error) {
+	if db == nil || innerReader == nil {
+		panic("trie.NewStateTrieByInnerReader called without a database or a inner reader")
+	}
+	reader := &trieReader{owner: id.Owner, reader: innerReader}
+	trie := &Trie{
+		owner:  id.Owner,
+		reader: reader,
+		tracer: newTracer(),
+	}
+	if id.Root != (common.Hash{}) && id.Root != types.EmptyRootHash {
+		rootnode, err := trie.resolveAndTrack(id.Root[:], nil)
+		if err != nil {
+			return nil, err
+		}
+		trie.root = rootnode
+	}
+	return &StateTrie{trie: *trie, preimages: db.preimages}, nil
+}
+
 // MustGet returns the value for key stored in the trie.
 // The value bytes must not be modified by the caller.
 //

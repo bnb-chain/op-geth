@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -80,14 +81,14 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 	var infos []freezerInfo
 	for _, freezer := range freezers {
 		switch freezer {
-		case chainFreezerName:
-			info, err := inspect(chainFreezerName, chainFreezerNoSnappy, db)
+		case ChainFreezerName:
+			info, err := inspect(ChainFreezerName, chainFreezerNoSnappy, db)
 			if err != nil {
 				return nil, err
 			}
 			infos = append(infos, info)
 
-		case stateFreezerName:
+		case StateFreezerName:
 			if ReadStateScheme(db) != PathScheme {
 				continue
 			}
@@ -101,7 +102,27 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 			}
 			defer f.Close()
 
-			info, err := inspect(stateFreezerName, stateFreezerNoSnappy, f)
+			info, err := inspect(StateFreezerName, stateFreezerNoSnappy, f)
+			if err != nil {
+				return nil, err
+			}
+			infos = append(infos, info)
+
+		case ProofFreezerName:
+			if ReadStateScheme(db) != PathScheme {
+				continue
+			}
+			datadir, err := db.AncientDatadir()
+			if err != nil {
+				return nil, err
+			}
+			f, err := NewProofFreezer(datadir, true)
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
+
+			info, err := inspect(ProofFreezerName, proofFreezerNoSnappy, f)
 			if err != nil {
 				return nil, err
 			}
@@ -124,8 +145,10 @@ func InspectFreezerTable(ancient string, freezerName string, tableName string, s
 		tables map[string]bool
 	)
 	switch freezerName {
-	case chainFreezerName:
+	case ChainFreezerName:
 		path, tables = resolveChainFreezerDir(ancient), chainFreezerNoSnappy
+	case StateFreezerName:
+		path, tables = filepath.Join(ancient, freezerName), stateFreezerNoSnappy
 	default:
 		return fmt.Errorf("unknown freezer, supported ones: %v", freezers)
 	}

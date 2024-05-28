@@ -25,11 +25,114 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
 	"golang.org/x/crypto/sha3"
 )
+
+// trienodebuffer is a collection of modified trie nodes to aggregate the disk
+// write. The content of the trienodebuffer must be checked before diving into
+// disk (since it basically is not-yet-written data).
+type trienodebuffer interface {
+	// node retrieves the trie node with given node info.
+	node(owner common.Hash, path []byte, hash common.Hash) (*trienode.Node, error)
+
+	// commit merges the dirty nodes into the trienodebuffer. This operation won't take
+	// the ownership of the nodes map which belongs to the bottom-most diff layer.
+	// It will just hold the node references from the given map which are safe to
+	// copy.
+	commit(root common.Hash, id uint64, block uint64, nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer
+
+	// revert is the reverse operation of commit. It also merges the provided nodes
+	// into the trienodebuffer, the difference is that the provided node set should
+	// revert the changes made by the last state transition.
+	revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error
+
+	// flush persists the in-memory dirty trie node into the disk if the configured
+	// memory threshold is reached. Note, all data must be written atomically.
+	flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64, force bool) error
+
+	// setSize sets the buffer size to the provided number, and invokes a flush
+	// operation if the current memory usage exceeds the new limit.
+	setSize(size int, db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error
+
+	// reset cleans up the disk cache.
+	reset()
+
+	// empty returns an indicator if trienodebuffer contains any state transition inside.
+	empty() bool
+
+	// getSize return the trienodebuffer used size.
+	getSize() (uint64, uint64)
+
+	// getAllNodes return all the trie nodes are cached in trienodebuffer.
+	getAllNodes() map[common.Hash]map[string]*trienode.Node
+
+	// getLayers return the size of cached difflayers.
+	getLayers() uint64
+
+	// waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
+	waitAndStopFlushing()
+
+	// setClean set fastcache to trienodebuffer for cache the trie nodes, used for nodebufferlist.
+	setClean(clean *fastcache.Cache)
+
+	// proposedBlockReader return the world state Reader of block that is proposed to L1.
+	proposedBlockReader(blockRoot common.Hash) (layer, error)
+}
+
+type NodeBufferType int32
+
+const (
+	AsyncNodeBuffer NodeBufferType = 0
+	SyncNodeBuffer  NodeBufferType = 1
+	NodeBufferList  NodeBufferType = 2
+)
+
+var (
+	nodeBufferStringToType = map[string]NodeBufferType{
+		"async": AsyncNodeBuffer,
+		"sync":  SyncNodeBuffer,
+		"list":  NodeBufferList,
+	}
+
+	nodeBufferTypeToString = map[NodeBufferType]string{
+		AsyncNodeBuffer: "async",
+		SyncNodeBuffer:  "sync",
+		NodeBufferList:  "list",
+	}
+)
+
+func GetNodeBufferType(name string) NodeBufferType {
+	if _, ok := nodeBufferStringToType[name]; !ok {
+		log.Warn("node buffer type mismatch", "provide", name, "adjust to default", nodeBufferTypeToString[NodeBufferList])
+		return NodeBufferList
+	}
+	return nodeBufferStringToType[name]
+}
+
+func NewTrieNodeBuffer(
+	db ethdb.Database,
+	trieNodeBufferType NodeBufferType,
+	limit int,
+	nodes map[common.Hash]map[string]*trienode.Node,
+	layers, proposeBlockInterval uint64,
+	keepFunc NotifyKeepFunc,
+) trienodebuffer {
+	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
+	switch trieNodeBufferType {
+	case NodeBufferList:
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc)
+	case AsyncNodeBuffer:
+		return newAsyncNodeBuffer(limit, nodes, layers)
+	case SyncNodeBuffer:
+		return newNodeBuffer(limit, nodes, layers)
+	default:
+		return newAsyncNodeBuffer(limit, nodes, layers)
+	}
+}
 
 // diskLayer is a low level persistent layer built on top of a key-value store.
 type diskLayer struct {
@@ -37,13 +140,13 @@ type diskLayer struct {
 	id     uint64           // Immutable, corresponding state id
 	db     *Database        // Path-based trie database
 	cleans *fastcache.Cache // GC friendly memory cache of clean node RLPs
-	buffer *nodebuffer      // Node buffer to aggregate writes
+	buffer trienodebuffer   // Node buffer to aggregate writes
 	stale  bool             // Signals that the layer became stale (state progressed)
 	lock   sync.RWMutex     // Lock used to protect stale flag
 }
 
 // newDiskLayer creates a new disk layer based on the passing arguments.
-func newDiskLayer(root common.Hash, id uint64, db *Database, cleans *fastcache.Cache, buffer *nodebuffer) *diskLayer {
+func newDiskLayer(root common.Hash, id uint64, db *Database, cleans *fastcache.Cache, buffer trienodebuffer) *diskLayer {
 	// Initialize a clean cache if the memory allowance is not zero
 	// or reuse the provided cache if it is not nil (inherited from
 	// the original disk layer).
@@ -172,36 +275,64 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 
-	// Construct and store the state history first. If crash happens
-	// after storing the state history but without flushing the
-	// corresponding states(journal), the stored state history will
-	// be truncated in the next restart.
+	// Construct and store the state history first. If crash happens after storing
+	// the state history but without flushing the corresponding states(journal),
+	// the stored state history will be truncated from head in the next restart.
+	var (
+		overflow bool
+		oldest   uint64
+	)
 	if dl.db.freezer != nil {
-		err := writeHistory(dl.db.diskdb, dl.db.freezer, bottom, dl.db.config.StateHistory)
+		err := writeHistory(dl.db.freezer, bottom)
 		if err != nil {
 			return nil, err
+		}
+		// Determine if the persisted history object has exceeded the configured
+		// limitation, set the overflow as true if so.
+		tail, err := dl.db.freezer.Tail()
+		if err != nil {
+			return nil, err
+		}
+		limit := dl.db.config.StateHistory
+		if limit != 0 && bottom.stateID()-tail > limit {
+			overflow = true
+			oldest = bottom.stateID() - limit + 1 // track the id of history **after truncation**
 		}
 	}
 	// Mark the diskLayer as stale before applying any mutations on top.
 	dl.stale = true
 
-	// Store the root->id lookup afterwards. All stored lookups are
-	// identified by the **unique** state root. It's impossible that
-	// in the same chain blocks are not adjacent but have the same
-	// root.
+	// Store the root->id lookup afterwards. All stored lookups are identified
+	// by the **unique** state root. It's impossible that in the same chain
+	// blocks are not adjacent but have the same root.
 	if dl.id == 0 {
 		rawdb.WriteStateID(dl.db.diskdb, dl.root, 0)
 	}
 	rawdb.WriteStateID(dl.db.diskdb, bottom.rootHash(), bottom.stateID())
 
-	// Construct a new disk layer by merging the nodes from the provided
-	// diff layer, and flush the content in disk layer if there are too
-	// many nodes cached. The clean cache is inherited from the original
-	// disk layer for reusing.
-	ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer.commit(bottom.nodes))
-	err := ndl.buffer.flush(ndl.db.diskdb, ndl.cleans, ndl.id, force)
-	if err != nil {
+	// Construct a new disk layer by merging the nodes from the provided diff
+	// layer, and flush the content in disk layer if there are too many nodes
+	// cached. The clean cache is inherited from the original disk layer.
+	ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer.commit(bottom.root, bottom.id, bottom.block, bottom.nodes))
+
+	// In a unique scenario where the ID of the oldest history object (after tail
+	// truncation) surpasses the persisted state ID, we take the necessary action
+	// of forcibly committing the cached dirty nodes to ensure that the persisted
+	// state ID remains higher.
+	if !force && rawdb.ReadPersistentStateID(dl.db.diskdb) < oldest {
+		force = true
+	}
+	if err := ndl.buffer.flush(ndl.db.diskdb, ndl.cleans, ndl.id, force); err != nil {
 		return nil, err
+	}
+	// To remove outdated history objects from the end, we set the 'tail' parameter
+	// to 'oldest-1' due to the offset between the freezer index and the history ID.
+	if overflow {
+		pruned, err := truncateFromTail(ndl.db.diskdb, ndl.db.freezer, oldest-1)
+		if err != nil {
+			return nil, err
+		}
+		log.Debug("Pruned state history", "items", pruned, "tailid", oldest)
 	}
 	return ndl, nil
 }
@@ -266,14 +397,15 @@ func (dl *diskLayer) setBufferSize(size int) error {
 }
 
 // size returns the approximate size of cached nodes in the disk layer.
-func (dl *diskLayer) size() common.StorageSize {
+func (dl *diskLayer) size() (common.StorageSize, common.StorageSize) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
 	if dl.stale {
-		return 0
+		return 0, 0
 	}
-	return common.StorageSize(dl.buffer.size)
+	dirtyNodes, dirtyimmutableNodes := dl.buffer.getSize()
+	return common.StorageSize(dirtyNodes), common.StorageSize(dirtyimmutableNodes)
 }
 
 // resetCache releases the memory held by clean cache to prevent memory leak.

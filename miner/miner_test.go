@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/core"
@@ -42,12 +43,14 @@ import (
 type mockBackend struct {
 	bc     *core.BlockChain
 	txPool *txpool.TxPool
+	accman *accounts.Manager
 }
 
-func NewMockBackend(bc *core.BlockChain, txPool *txpool.TxPool) *mockBackend {
+func NewMockBackend(bc *core.BlockChain, txPool *txpool.TxPool, accman *accounts.Manager) *mockBackend {
 	return &mockBackend{
 		bc:     bc,
 		txPool: txPool,
+		accman: accman,
 	}
 }
 
@@ -57,6 +60,10 @@ func (m *mockBackend) BlockChain() *core.BlockChain {
 
 func (m *mockBackend) TxPool() *txpool.TxPool {
 	return m.txPool
+}
+
+func (m *mockBackend) AccountManager() *accounts.Manager {
+	return m.accman
 }
 
 func (m *mockBackend) StateAtBlock(block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, err error) {
@@ -318,8 +325,9 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux, func(skipMiner bool)) {
 
 	pool := legacypool.New(testTxPoolConfig, blockchain)
 	txpool, _ := txpool.New(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), blockchain, []txpool.SubPool{pool})
+	accman := accounts.NewManager(&accounts.Config{InsecureUnlockAllowed: true})
 
-	backend := NewMockBackend(bc, txpool)
+	backend := NewMockBackend(bc, txpool, accman)
 	// Create event Mux
 	mux := new(event.TypeMux)
 	// Create Miner

@@ -50,6 +50,16 @@ func DialContext(ctx context.Context, rawurl string) (*Client, error) {
 	return NewClient(c), nil
 }
 
+// DialOptions creates a new RPC client for the given URL. You can supply any of the
+// pre-defined client options to configure the underlying transport.
+func DialOptions(ctx context.Context, rawurl string, opts ...rpc.ClientOption) (*Client, error) {
+	c, err := rpc.DialOptions(ctx, rawurl, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return NewClient(c), nil
+}
+
 // NewClient creates a client that uses the given RPC client.
 func NewClient(c *rpc.Client) *Client {
 	return &Client{c}
@@ -624,6 +634,60 @@ func (ec *Client) SendTransaction(ctx context.Context, tx *types.Transaction) er
 		return err
 	}
 	return ec.c.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data))
+}
+
+// MevRunning returns whether MEV is running
+func (ec *Client) MevRunning(ctx context.Context) (bool, error) {
+	var result bool
+	err := ec.c.CallContext(ctx, &result, "mev_running")
+	return result, err
+}
+
+// SendBid sends a bid
+func (ec *Client) SendBid(ctx context.Context, args types.BidArgs) (common.Hash, error) {
+	var hash common.Hash
+	err := ec.c.CallContext(ctx, &hash, "mev_sendBid", args)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return hash, nil
+}
+
+// BestBidGasFee returns the gas fee of the best bid for the given parent hash.
+func (ec *Client) BestBidGasFee(ctx context.Context, parentHash common.Hash) (*big.Int, error) {
+	var fee *big.Int
+	err := ec.c.CallContext(ctx, &fee, "mev_bestBidGasFee", parentHash)
+	if err != nil {
+		return nil, err
+	}
+	return fee, nil
+}
+
+// SendBundle sends a bundle
+func (ec *Client) SendBundle(ctx context.Context, args types.SendBundleArgs) (common.Hash, error) {
+	var hash common.Hash
+	err := ec.c.CallContext(ctx, &hash, "eth_sendBundle", args)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return hash, nil
+}
+
+// BundlePrice returns the price of a bundle
+func (ec *Client) BundlePrice(ctx context.Context) *big.Int {
+	var price *big.Int
+	_ = ec.c.CallContext(ctx, &price, "eth_bundlePrice")
+	return price
+}
+
+// MevParams returns the static params of mev
+func (ec *Client) MevParams(ctx context.Context) (*types.MevParams, error) {
+	var params types.MevParams
+	err := ec.c.CallContext(ctx, &params, "mev_params")
+	if err != nil {
+		return nil, err
+	}
+	return &params, err
 }
 
 func toBlockNumArg(number *big.Int) string {

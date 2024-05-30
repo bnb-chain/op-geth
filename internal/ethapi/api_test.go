@@ -722,6 +722,12 @@ func (b testBackend) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) even
 func (b testBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
 	panic("implement me")
 }
+func (b testBackend) SendBundle(ctx context.Context, bundle *types.Bundle) error {
+	panic("implement me")
+}
+func (b testBackend) BundlePrice() *big.Int {
+	panic("implement me")
+}
 func (b testBackend) GetTransaction(ctx context.Context, txHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error) {
 	tx, blockHash, blockNumber, index := rawdb.ReadTransaction(b.db, txHash)
 	return tx, blockHash, blockNumber, index, nil
@@ -763,6 +769,22 @@ func (b testBackend) HistoricalRPCService() *rpc.Client {
 	panic("implement me")
 }
 func (b testBackend) Genesis() *types.Block {
+	panic("implement me")
+}
+func (b testBackend) MevRunning() bool { return false }
+func (b testBackend) MevParams() *types.MevParams {
+	return &types.MevParams{}
+}
+func (b testBackend) StartMev()                                                  {}
+func (b testBackend) StopMev()                                                   {}
+func (b testBackend) AddBuilder(builder common.Address, builderUrl string) error { return nil }
+func (b testBackend) RemoveBuilder(builder common.Address) error                 { return nil }
+func (b testBackend) SendBid(ctx context.Context, bid *types.BidArgs) (common.Hash, error) {
+	panic("implement me")
+}
+func (b testBackend) MinerInTurn() bool { return false }
+func (b testBackend) BestBidGasFee(parentHash common.Hash) *big.Int {
+	//TODO implement me
 	panic("implement me")
 }
 

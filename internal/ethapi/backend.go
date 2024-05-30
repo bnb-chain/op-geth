@@ -77,6 +77,8 @@ type Backend interface {
 
 	// Transaction pool API
 	SendTx(ctx context.Context, signedTx *types.Transaction) error
+	SendBundle(ctx context.Context, bundle *types.Bundle) error
+	BundlePrice() *big.Int
 	GetTransaction(ctx context.Context, txHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error)
 	GetPoolTransactions() (types.Transactions, error)
 	GetPoolTransaction(txHash common.Hash) *types.Transaction
@@ -101,6 +103,26 @@ type Backend interface {
 	SubscribePendingLogsEvent(ch chan<- []*types.Log) event.Subscription
 	BloomStatus() (uint64, uint64)
 	ServiceFilter(ctx context.Context, session *bloombits.MatcherSession)
+
+	// MevRunning return true if mev is running
+	MevRunning() bool
+	// MevParams returns the static params of mev
+	MevParams() *types.MevParams
+	// StartMev starts mev
+	StartMev()
+	// StopMev stops mev
+	StopMev()
+	// AddBuilder adds a builder to the bid simulator.
+	AddBuilder(builder common.Address, builderUrl string) error
+	// RemoveBuilder removes a builder from the bid simulator.
+	RemoveBuilder(builder common.Address) error
+	// SendBid receives bid from the builders.
+	SendBid(ctx context.Context, bid *types.BidArgs) (common.Hash, error)
+	// BestBidGasFee returns the gas fee of the best bid for the given parent hash.
+	BestBidGasFee(parentHash common.Hash) *big.Int
+	// TODO remove
+	// MinerInTurn returns true if the validator is in turn to propose the block.
+	// MinerInTurn() bool
 }
 
 func GetAPIs(apiBackend Backend) []rpc.API {
@@ -127,6 +149,12 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 		}, {
 			Namespace: "personal",
 			Service:   NewPersonalAccountAPI(apiBackend, nonceLock),
+		}, {
+			Namespace: "mev",
+			Service:   NewMevAPI(apiBackend),
+		}, {
+			Namespace: "eth",
+			Service:   NewPrivateTxBundleAPI(apiBackend),
 		},
 	}
 }

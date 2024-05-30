@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -323,6 +324,31 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 	return b.eth.txPool.Add([]*types.Transaction{signedTx}, true, false)[0]
 }
 
+func (b *EthAPIBackend) SendBundle(ctx context.Context, bundle *types.Bundle) error {
+	return b.eth.txPool.AddBundle(bundle)
+}
+
+func (b *EthAPIBackend) BundlePrice() *big.Int {
+	bundles := b.eth.txPool.AllBundles()
+	gasFloor := big.NewInt(b.eth.config.Miner.MevGasPriceFloor)
+
+	if len(bundles) == 0 {
+		return gasFloor
+	}
+
+	sort.SliceStable(bundles, func(i, j int) bool {
+		return bundles[j].Price.Cmp(bundles[i].Price) < 0
+	})
+
+	idx := len(bundles) / 2
+
+	if bundles[idx] == nil || bundles[idx].Price.Cmp(gasFloor) < 0 {
+		return gasFloor
+	}
+
+	return bundles[idx].Price
+}
+
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {
 	pending := b.eth.txPool.Pending(false)
 	var txs types.Transactions
@@ -455,3 +481,40 @@ func (b *EthAPIBackend) HistoricalRPCService() *rpc.Client {
 func (b *EthAPIBackend) Genesis() *types.Block {
 	return b.eth.blockchain.Genesis()
 }
+
+func (b *EthAPIBackend) MevRunning() bool {
+	return b.Miner().MevRunning()
+}
+
+func (b *EthAPIBackend) MevParams() *types.MevParams {
+	return b.Miner().MevParams()
+}
+
+func (b *EthAPIBackend) StartMev() {
+	b.Miner().StartMev()
+}
+
+func (b *EthAPIBackend) StopMev() {
+	b.Miner().StopMev()
+}
+
+func (b *EthAPIBackend) AddBuilder(builder common.Address, url string) error {
+	return b.Miner().AddBuilder(builder, url)
+}
+
+func (b *EthAPIBackend) RemoveBuilder(builder common.Address) error {
+	return b.Miner().RemoveBuilder(builder)
+}
+
+func (b *EthAPIBackend) SendBid(ctx context.Context, bid *types.BidArgs) (common.Hash, error) {
+	return b.Miner().SendBid(ctx, bid)
+}
+
+func (b *EthAPIBackend) BestBidGasFee(parentHash common.Hash) *big.Int {
+	return b.Miner().BestPackedBlockReward(parentHash)
+}
+
+// TODO remove
+//func (b *EthAPIBackend) MinerInTurn() bool {
+//	return b.Miner().InTurn()
+//}

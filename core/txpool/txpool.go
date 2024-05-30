@@ -307,6 +307,29 @@ func (p *TxPool) Add(txs []*types.Transaction, local bool, sync bool) []error {
 	return errs
 }
 
+// AddBundle enqueues a bundle into the pool if it is valid.
+func (p *TxPool) AddBundle(bundle *types.Bundle) error {
+	// Try to find a sub pool that accepts the bundle
+	for _, subpool := range p.subpools {
+		if bundleSubpool, ok := subpool.(BundleSubpool); ok {
+			if bundleSubpool.FilterBundle(bundle) {
+				return bundleSubpool.AddBundle(bundle)
+			}
+		}
+	}
+	return errors.New("no subpool accepts the bundle")
+}
+
+// PruneBundle removes a bundle from the pool.
+func (p *TxPool) PruneBundle(hash common.Hash) {
+	for _, subpool := range p.subpools {
+		if bundleSubpool, ok := subpool.(BundleSubpool); ok {
+			bundleSubpool.PruneBundle(hash)
+			return // Only one subpool can have the bundle
+		}
+	}
+}
+
 // Pending retrieves all currently processable transactions, grouped by origin
 // account and sorted by nonce.
 func (p *TxPool) Pending(enforceTips bool) map[common.Address][]*LazyTransaction {
@@ -319,12 +342,35 @@ func (p *TxPool) Pending(enforceTips bool) map[common.Address][]*LazyTransaction
 	return txs
 }
 
+// PendingBundles retrieves all currently processable bundles.
+func (p *TxPool) PendingBundles(blockNumber uint64, blockTimestamp uint64) []*types.Bundle {
+	for _, subpool := range p.subpools {
+		if bundleSubpool, ok := subpool.(BundleSubpool); ok {
+			return bundleSubpool.PendingBundles(blockNumber, blockTimestamp)
+		}
+	}
+	return nil
+}
+
+// AllBundles returns all the bundles currently in the pool
+func (p *TxPool) AllBundles() []*types.Bundle {
+	for _, subpool := range p.subpools {
+		if bundleSubpool, ok := subpool.(BundleSubpool); ok {
+			return bundleSubpool.AllBundles()
+		}
+	}
+	return nil
+}
+
 // SubscribeTransactions registers a subscription for new transaction events,
 // supporting feeding only newly seen or also resurrected transactions.
 func (p *TxPool) SubscribeTransactions(ch chan<- core.NewTxsEvent, reorgs bool) event.Subscription {
-	subs := make([]event.Subscription, len(p.subpools))
-	for i, subpool := range p.subpools {
-		subs[i] = subpool.SubscribeTransactions(ch, reorgs)
+	subs := make([]event.Subscription, 0, len(p.subpools))
+	for _, subpool := range p.subpools {
+		sub := subpool.SubscribeTransactions(ch, reorgs)
+		if sub != nil { // sub will be nil when subpool have been shut down
+			subs = append(subs, sub)
+		}
 	}
 	return p.subs.Track(event.JoinSubscriptions(subs...))
 }

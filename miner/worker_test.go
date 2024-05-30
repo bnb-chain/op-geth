@@ -111,6 +111,7 @@ type testWorkerBackend struct {
 	txPool  *txpool.TxPool
 	chain   *core.BlockChain
 	genesis *core.Genesis
+	accman  *accounts.Manager
 }
 
 func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, n int) *testWorkerBackend {
@@ -141,11 +142,13 @@ func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine 
 		chain:   chain,
 		txPool:  txpool,
 		genesis: gspec,
+		accman:  accounts.NewManager(&accounts.Config{InsecureUnlockAllowed: true}),
 	}
 }
 
-func (b *testWorkerBackend) BlockChain() *core.BlockChain { return b.chain }
-func (b *testWorkerBackend) TxPool() *txpool.TxPool       { return b.txPool }
+func (b *testWorkerBackend) BlockChain() *core.BlockChain      { return b.chain }
+func (b *testWorkerBackend) TxPool() *txpool.TxPool            { return b.txPool }
+func (b *testWorkerBackend) AccountManager() *accounts.Manager { return b.accman }
 
 func (b *testWorkerBackend) newRandomTx(creation bool) *types.Transaction {
 	var tx *types.Transaction

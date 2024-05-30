@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	mapset "github.com/deckarep/golang-set/v2"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -97,6 +98,9 @@ type environment struct {
 	receipts []*types.Receipt
 	sidecars []*types.BlobTxSidecar
 	blobs    int
+
+	profit       *big.Int // block gas fee + BNBSentToSystem
+	UnRevertible []common.Hash
 }
 
 // copy creates a deep copy of environment.
@@ -146,6 +150,10 @@ const (
 	commitInterruptResubmit
 	commitInterruptTimeout
 	commitInterruptResolve
+	commitInterruptBetterBid
+	commitInterruptBundleTxNil
+	commitInterruptBundleTxProtected
+	commitInterruptBundleCommit
 )
 
 // newWorkReq represents a request for new sealing work submitting with relative interrupt notifier.
@@ -169,6 +177,10 @@ type getWorkReq struct {
 	result chan *newPayloadResult // non-blocking channel
 }
 
+type bidFetcher interface {
+	GetBestBid(parentHash common.Hash) *BidRuntime
+}
+
 // intervalAdjust represents a resubmitting interval adjustment.
 type intervalAdjust struct {
 	ratio float64
@@ -178,6 +190,7 @@ type intervalAdjust struct {
 // worker is the main object which takes care of submitting new work to consensus engine
 // and gathering the sealing result.
 type worker struct {
+	bidFetcher  bidFetcher
 	config      *Config
 	chainConfig *params.ChainConfig
 	engine      consensus.Engine
@@ -244,6 +257,10 @@ type worker struct {
 	skipSealHook func(*task) bool                   // Method to decide whether skipping the sealing.
 	fullTaskHook func()                             // Method to call before pushing the full sealing task.
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
+
+	// MEV
+	bidder      *Bidder
+	bundleCache *BundleCache
 }
 
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(header *types.Header) bool, init bool) *worker {
@@ -268,6 +285,8 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		exitCh:             make(chan struct{}),
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
+		bidder:             NewBidder(&config.Mev, config.DelayLeftOver, engine, eth),
+		bundleCache:        NewBundleCache(),
 	}
 	// Subscribe for transaction insertion events (whether from network or resurrects)
 	worker.txsSub = eth.TxPool().SubscribeTransactions(worker.txsCh, true)
@@ -293,18 +312,26 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	}
 	worker.newpayloadTimeout = newpayloadTimeout
 
-	worker.wg.Add(5)
+	worker.wg.Add(3)
 	go worker.mainLoop()
 	go worker.opLoop()
 	go worker.newWorkLoop(recommit)
-	go worker.resultLoop()
-	go worker.taskLoop()
+	// if not builder
+	if !worker.bidder.enabled() {
+		worker.wg.Add(2)
+		go worker.resultLoop()
+		go worker.taskLoop()
+	}
 
 	// Submit first work to initialize pending state.
 	if init {
 		worker.startCh <- struct{}{}
 	}
 	return worker
+}
+
+func (w *worker) setBestBidFetcher(fetcher bidFetcher) {
+	w.bidFetcher = fetcher
 }
 
 // setEtherbase sets the etherbase used to initialize the block coinbase field.
@@ -605,6 +632,7 @@ func (w *worker) mainLoop() {
 
 		// System stopped
 		case <-w.exitCh:
+			w.bidder.exit()
 			return
 		case <-w.txsSub.Err():
 			return
@@ -775,6 +803,7 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 		state:    state,
 		coinbase: coinbase,
 		header:   header,
+		profit:   big.NewInt(0),
 	}
 	// Keep track of transactions which return errors so they can be removed
 	env.tcount = 0
@@ -807,6 +836,10 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	}
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
+
+	gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+	env.profit.Add(env.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
+
 	return receipt.Logs, nil
 }
 
@@ -826,11 +859,15 @@ func (w *worker) commitBlobTransaction(env *environment, tx *types.Transaction) 
 	if err != nil {
 		return nil, err
 	}
-	env.txs = append(env.txs, tx.WithoutBlobTxSidecar())
+	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 	env.sidecars = append(env.sidecars, sc)
 	env.blobs += len(sc.Blobs)
 	*env.header.BlobGasUsed += receipt.BlobGasUsed
+
+	gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+	env.profit.Add(env.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
+
 	return receipt.Logs, nil
 }
 
@@ -1083,7 +1120,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // fillTransactions retrieves the pending transactions from the txpool and fills them
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
-func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) error {
+func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment, bidTxs mapset.Set[common.Hash]) error {
 	// TODO will remove after fix txpool perf issue
 	if interrupt != nil {
 		if signal := interrupt.Load(); signal != commitInterruptNone {
@@ -1095,6 +1132,25 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	pending := w.eth.TxPool().Pending(true)
 	packFromTxpoolTimer.UpdateSince(start)
 	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
+
+	if bidTxs != nil {
+		filterBidTxs := func(commonTxs map[common.Address][]*txpool.LazyTransaction) {
+			for acc, txs := range commonTxs {
+				for i := len(txs) - 1; i >= 0; i-- {
+					if bidTxs.Contains(txs[i].Hash) {
+						if i == len(txs)-1 {
+							delete(commonTxs, acc)
+						} else {
+							commonTxs[acc] = txs[i+1:]
+						}
+						break
+					}
+				}
+			}
+		}
+
+		filterBidTxs(pending)
+	}
 
 	// Split the pending transactions into locals and remotes.
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
@@ -1173,7 +1229,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			interrupt.Store(commitInterruptTimeout)
 		})
 
-		err := w.fillTransactions(interrupt, work)
+		err := w.fillTransactions(interrupt, work, nil)
 		timer.Stop() // don't need timeout interruption any more
 		if errors.Is(err, errBlockInterruptedByTimeout) {
 			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
@@ -1246,7 +1302,7 @@ func (w *worker) commitWork(interrupt *atomic.Int32, timestamp int64) {
 		return
 	}
 	// Fill pending transactions from the txpool into the block.
-	err = w.fillTransactions(interrupt, work)
+	err = w.fillTransactionsAndBundles(interrupt, work)
 	switch {
 	case err == nil:
 		// The entire block is filled, decrease resubmit interval in case
@@ -1274,6 +1330,7 @@ func (w *worker) commitWork(interrupt *atomic.Int32, timestamp int64) {
 		work.discard()
 		return
 	}
+	w.bidder.newWork(work)
 	// Submit the generated block for consensus sealing.
 	w.commit(work.copy(), w.fullTaskHook, true, start)
 
@@ -1290,7 +1347,7 @@ func (w *worker) commitWork(interrupt *atomic.Int32, timestamp int64) {
 // Note the assumption is held that the mutation is allowed to the passed env, do
 // the deep copy first.
 func (w *worker) commit(env *environment, interval func(), update bool, start time.Time) error {
-	if w.isRunning() {
+	if w.isRunning() && !w.bidder.enabled() {
 		if interval != nil {
 			interval()
 		}

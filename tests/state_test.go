@@ -21,9 +21,11 @@ import (
 	"bytes"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -76,6 +78,10 @@ func TestState(t *testing.T) {
 		benchmarksDir,
 	} {
 		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
+			if runtime.GOARCH == "386" && runtime.GOOS == "windows" && rand.Int63()%2 == 0 {
+				t.Skip("test (randomly) skipped on 32-bit windows")
+				return
+			}
 			for _, subtest := range test.Subtests() {
 				subtest := subtest
 				key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
@@ -224,7 +230,10 @@ func runBenchmark(b *testing.B, t *StateTest) {
 			vmconfig.ExtraEips = eips
 			block := t.genesis(config).ToBlock()
 			triedb, _, statedb := MakePreState(rawdb.NewMemoryDatabase(), t.json.Pre, false, rawdb.HashScheme)
-			defer triedb.Close()
+			defer func() {
+				triedb.Journal(triedb.Head())
+				triedb.Close()
+			}()
 
 			var baseFee *big.Int
 			if rules.IsLondon {

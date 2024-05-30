@@ -28,7 +28,9 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -79,6 +81,104 @@ type Pruner struct {
 	snaptree    *snapshot.Tree
 }
 
+func NewAllPruner(db ethdb.Database) (*Pruner, error) {
+	headBlock := rawdb.ReadHeadBlock(db)
+	if headBlock == nil {
+		return nil, errors.New("Failed to load head block")
+	}
+	return &Pruner{
+		db: db,
+	}, nil
+}
+
+func (p *Pruner) PruneAll(genesis *core.Genesis) error {
+	return pruneAll(p.db, genesis)
+}
+
+func pruneAll(pruneDB ethdb.Database, g *core.Genesis) error {
+	var (
+		count  int
+		size   common.StorageSize
+		pstart = time.Now()
+		logged = time.Now()
+		batch  = pruneDB.NewBatch()
+		iter   = pruneDB.NewIterator(nil, nil)
+	)
+	start := time.Now()
+	for iter.Next() {
+		key := iter.Key()
+		if len(key) == common.HashLength {
+			count += 1
+			size += common.StorageSize(len(key) + len(iter.Value()))
+			batch.Delete(key)
+
+			var eta time.Duration // Realistically will never remain uninited
+			if done := binary.BigEndian.Uint64(key[:8]); done > 0 {
+				var (
+					left  = math.MaxUint64 - binary.BigEndian.Uint64(key[:8])
+					speed = done/uint64(time.Since(pstart)/time.Millisecond+1) + 1 // +1s to avoid division by zero
+				)
+				eta = time.Duration(left/speed) * time.Millisecond
+			}
+			if time.Since(logged) > 8*time.Second {
+				log.Info("Pruning state data", "nodes", count, "size", size,
+					"elapsed", common.PrettyDuration(time.Since(pstart)), "eta", common.PrettyDuration(eta))
+				logged = time.Now()
+			}
+			// Recreate the iterator after every batch commit in order
+			// to allow the underlying compactor to delete the entries.
+			if batch.ValueSize() >= ethdb.IdealBatchSize {
+				batch.Write()
+				batch.Reset()
+
+				iter.Release()
+				iter = pruneDB.NewIterator(nil, key)
+			}
+		}
+	}
+	if batch.ValueSize() > 0 {
+		batch.Write()
+		batch.Reset()
+	}
+	iter.Release()
+	log.Info("Pruned state data", "nodes", count, "size", size, "elapsed", common.PrettyDuration(time.Since(pstart)))
+
+	// Start compactions, will remove the deleted data from the disk immediately.
+	// Note for small pruning, the compaction is skipped.
+	if count >= rangeCompactionThreshold {
+		cstart := time.Now()
+		for b := 0x00; b <= 0xf0; b += 0x10 {
+			var (
+				start = []byte{byte(b)}
+				end   = []byte{byte(b + 0x10)}
+			)
+			if b == 0xf0 {
+				end = nil
+			}
+			log.Info("Compacting database", "range", fmt.Sprintf("%#x-%#x", start, end), "elapsed", common.PrettyDuration(time.Since(cstart)))
+			if err := pruneDB.Compact(start, end); err != nil {
+				log.Error("Database compaction failed", "error", err)
+				return err
+			}
+		}
+		log.Info("Database compaction finished", "elapsed", common.PrettyDuration(time.Since(cstart)))
+	}
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(pruneDB), nil)
+	for addr, account := range g.Alloc {
+		statedb.AddBalance(addr, account.Balance)
+		statedb.SetCode(addr, account.Code)
+		statedb.SetNonce(addr, account.Nonce)
+		for key, value := range account.Storage {
+			statedb.SetState(addr, key, value)
+		}
+	}
+	root := statedb.IntermediateRoot(false)
+	statedb.Commit(0, false)
+	statedb.Database().TrieDB().Commit(root, true)
+	log.Info("State pruning successful", "pruned", size, "elapsed", common.PrettyDuration(time.Since(start)))
+	return nil
+}
+
 // NewPruner creates the pruner instance.
 func NewPruner(db ethdb.Database, config Config) (*Pruner, error) {
 	headBlock := rawdb.ReadHeadBlock(db)
@@ -125,12 +225,12 @@ func prune(snaptree *snapshot.Tree, root common.Hash, maindb ethdb.Database, sta
 	// dangling node is the state root is super low. So the dangling nodes in
 	// theory will never ever be visited again.
 	var (
-		count  int
-		size   common.StorageSize
-		pstart = time.Now()
-		logged = time.Now()
-		batch  = maindb.NewBatch()
-		iter   = maindb.NewIterator(nil, nil)
+		skipped, count int
+		size           common.StorageSize
+		pstart         = time.Now()
+		logged         = time.Now()
+		batch          = maindb.NewBatch()
+		iter           = maindb.NewIterator(nil, nil)
 	)
 	for iter.Next() {
 		key := iter.Key()
@@ -149,6 +249,7 @@ func prune(snaptree *snapshot.Tree, root common.Hash, maindb ethdb.Database, sta
 				log.Debug("Forcibly delete the middle state roots", "hash", common.BytesToHash(checkKey))
 			} else {
 				if stateBloom.Contain(checkKey) {
+					skipped += 1
 					continue
 				}
 			}
@@ -165,7 +266,7 @@ func prune(snaptree *snapshot.Tree, root common.Hash, maindb ethdb.Database, sta
 				eta = time.Duration(left/speed) * time.Millisecond
 			}
 			if time.Since(logged) > 8*time.Second {
-				log.Info("Pruning state data", "nodes", count, "size", size,
+				log.Info("Pruning state data", "nodes", count, "skipped", skipped, "size", size,
 					"elapsed", common.PrettyDuration(time.Since(pstart)), "eta", common.PrettyDuration(eta))
 				logged = time.Now()
 			}

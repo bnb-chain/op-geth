@@ -19,11 +19,13 @@ package rawdb
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -68,6 +70,10 @@ func (h *hasher) release() {
 // ReadAccountTrieNode retrieves the account trie node and the associated node
 // hash with the specified node path.
 func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.Hash) {
+	if metrics.EnabledExpensive {
+		start := time.Now()
+		defer func() { rawdbGetAccountTrieNodeTimer.UpdateSince(start) }()
+	}
 	data, err := db.Get(accountTrieNodeKey(path))
 	if err != nil {
 		return nil, common.Hash{}
@@ -116,6 +122,10 @@ func DeleteAccountTrieNode(db ethdb.KeyValueWriter, path []byte) {
 // ReadStorageTrieNode retrieves the storage trie node and the associated node
 // hash with the specified node path.
 func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) ([]byte, common.Hash) {
+	if metrics.EnabledExpensive {
+		start := time.Now()
+		defer func() { rawdbGetStorageTrieNodeTimer.UpdateSince(start) }()
+	}
 	data, err := db.Get(storageTrieNodeKey(accountHash, path))
 	if err != nil {
 		return nil, common.Hash{}
@@ -290,6 +300,11 @@ func ReadStateScheme(db ethdb.Reader) string {
 	// Check if state in path-based scheme is present
 	blob, _ := ReadAccountTrieNode(db, nil)
 	if len(blob) != 0 {
+		return PathScheme
+	}
+	// The root node might be deleted during the initial snap sync, check
+	// the persistent state id then.
+	if id := ReadPersistentStateID(db); id != 0 {
 		return PathScheme
 	}
 	// In a hash-based scheme, the genesis state is consistently stored

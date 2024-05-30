@@ -178,7 +178,7 @@ func resolveChainFreezerDir(ancient string) string {
 	// sub folder, if not then two possibilities:
 	// - chain freezer is not initialized
 	// - chain freezer exists in legacy location (root ancient folder)
-	freezer := path.Join(ancient, chainFreezerName)
+	freezer := path.Join(ancient, ChainFreezerName)
 	if !common.FileExist(freezer) {
 		if !common.FileExist(ancient) {
 			// The entire ancient store is not initialized, still use the sub
@@ -447,6 +447,28 @@ func (s *stat) Size() string {
 
 func (s *stat) Count() string {
 	return s.count.String()
+}
+
+func PruneHashTrieNodeInDatabase(db ethdb.Database) error {
+	it := db.NewIterator([]byte{}, []byte{})
+	defer it.Release()
+
+	total_num := 0
+	for it.Next() {
+		var key = it.Key()
+		switch {
+		case IsLegacyTrieNode(key, it.Value()):
+			db.Delete(key)
+			total_num++
+			if total_num%100000 == 0 {
+				log.Info("Pruning hash-base trie nodes", "complete progress", total_num)
+			}
+		default:
+			continue
+		}
+	}
+	log.Info("Pruning hash-base trie nodes", "complete progress", total_num)
+	return nil
 }
 
 // InspectDatabase traverses the entire database and checks the size

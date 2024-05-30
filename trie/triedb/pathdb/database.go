@@ -52,6 +52,14 @@ const (
 	// Do not increase the buffer size arbitrarily, otherwise the system
 	// pause time will increase when the database writes happen.
 	DefaultBufferSize = 64 * 1024 * 1024
+
+	// DefaultBackgroundFlushInterval defines the default the wait interval
+	// that background node cache flush disk.
+	DefaultBackgroundFlushInterval = 3
+
+	// DefaultBatchRedundancyRate defines the batch size, compatible write
+	// size calculation is inaccurate
+	DefaultBatchRedundancyRate = 1.1
 )
 
 // layer is the interface implemented by all state layers which includes some
@@ -86,10 +94,13 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
-	StateHistory   uint64 // Number of recent blocks to maintain state history for
-	CleanCacheSize int    // Maximum memory allowance (in bytes) for caching clean nodes
-	DirtyCacheSize int    // Maximum memory allowance (in bytes) for caching dirty nodes
-	ReadOnly       bool   // Flag whether the database is opened in read only mode.
+	TrieNodeBufferType   NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
+	StateHistory         uint64         // Number of recent blocks to maintain state history for
+	CleanCacheSize       int            // Maximum memory allowance (in bytes) for caching clean nodes
+	DirtyCacheSize       int            // Maximum memory allowance (in bytes) for caching dirty nodes
+	ReadOnly             bool           // Flag whether the database is opened in read only mode.
+	ProposeBlockInterval uint64         // Propose block to L1 block interval.
+	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -97,6 +108,7 @@ type Config struct {
 func (c *Config) sanitize() *Config {
 	conf := *c
 	if conf.DirtyCacheSize > maxBufferSize {
+		conf.CleanCacheSize = conf.DirtyCacheSize - maxBufferSize
 		log.Warn("Sanitizing invalid node buffer size", "provided", common.StorageSize(conf.DirtyCacheSize), "updated", common.StorageSize(maxBufferSize))
 		conf.DirtyCacheSize = maxBufferSize
 	}
@@ -170,14 +182,31 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 		}
 		db.freezer = freezer
 
-		// Truncate the extra state histories above in freezer in case
-		// it's not aligned with the disk layer.
-		pruned, err := truncateFromHead(db.diskdb, freezer, db.tree.bottom().stateID())
-		if err != nil {
-			log.Crit("Failed to truncate extra state histories", "err", err)
-		}
-		if pruned != 0 {
-			log.Warn("Truncated extra state histories", "number", pruned)
+		diskLayerID := db.tree.bottom().stateID()
+		if diskLayerID == 0 {
+			// Reset the entire state histories in case the trie database is
+			// not initialized yet, as these state histories are not expected.
+			frozen, err := db.freezer.Ancients()
+			if err != nil {
+				log.Crit("Failed to retrieve head of state history", "err", err)
+			}
+			if frozen != 0 {
+				err := db.freezer.Reset()
+				if err != nil {
+					log.Crit("Failed to reset state histories", "err", err)
+				}
+				log.Info("Truncated extraneous state history")
+			}
+		} else {
+			// Truncate the extra state histories above in freezer in case
+			// it's not aligned with the disk layer.
+			pruned, err := truncateFromHead(db.diskdb, freezer, diskLayerID)
+			if err != nil {
+				log.Crit("Failed to truncate extra state histories", "err", err)
+			}
+			if pruned != 0 {
+				log.Warn("Truncated extra state histories", "number", pruned)
+			}
 		}
 	}
 	// Disable database in case node is still in the initial state sync stage.
@@ -194,6 +223,10 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 func (db *Database) Reader(root common.Hash) (layer, error) {
 	l := db.tree.get(root)
 	if l == nil {
+		r, err := db.tree.bottom().buffer.proposedBlockReader(root)
+		if err == nil && r != nil {
+			return r, nil
+		}
 		return nil, fmt.Errorf("state %#x is not available", root)
 	}
 	return l, nil
@@ -303,7 +336,10 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	db.tree.reset(newDiskLayer(root, 0, db, nil, newNodeBuffer(db.bufferSize, nil, 0)))
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval, db.config.NotifyKeep)
+	dl := newDiskLayer(root, 0, db, nil, nb)
+	nb.setClean(dl.cleans)
+	db.tree.reset(dl)
 
 	// Re-enable the database as the final step.
 	db.waitSync = false
@@ -410,16 +446,16 @@ func (db *Database) Close() error {
 
 // Size returns the current storage size of the memory cache in front of the
 // persistent database layer.
-func (db *Database) Size() (diffs common.StorageSize, nodes common.StorageSize) {
+func (db *Database) Size() (diffs common.StorageSize, nodes common.StorageSize, immutableNodes common.StorageSize) {
 	db.tree.forEach(func(layer layer) {
 		if diff, ok := layer.(*diffLayer); ok {
 			diffs += common.StorageSize(diff.memory)
 		}
 		if disk, ok := layer.(*diskLayer); ok {
-			nodes += disk.size()
+			nodes, immutableNodes = disk.size()
 		}
 	})
-	return diffs, nodes
+	return diffs, nodes, immutableNodes
 }
 
 // Initialized returns an indicator if the state data is already
@@ -431,6 +467,9 @@ func (db *Database) Initialized(genesisRoot common.Hash) bool {
 			inited = true
 		}
 	})
+	if !inited {
+		inited = rawdb.ReadSnapSyncStatusFlag(db.diskdb) != rawdb.StateSyncUnknown
+	}
 	return inited
 }
 
@@ -450,6 +489,13 @@ func (db *Database) SetBufferSize(size int) error {
 // Scheme returns the node scheme used in the database.
 func (db *Database) Scheme() string {
 	return rawdb.PathScheme
+}
+
+// Head return the top non-fork difflayer/disklayer root hash for rewinding.
+func (db *Database) Head() common.Hash {
+	db.lock.Lock()
+	defer db.lock.Unlock()
+	return db.tree.front()
 }
 
 // modifyAllowed returns the indicator if mutation is allowed. This function

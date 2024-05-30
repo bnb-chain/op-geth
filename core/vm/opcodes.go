@@ -25,7 +25,7 @@ type OpCode byte
 
 // IsPush specifies if an opcode is a PUSH opcode.
 func (op OpCode) IsPush() bool {
-	return PUSH1 <= op && op <= PUSH32
+	return PUSH0 <= op && op <= PUSH32
 }
 
 // 0x0 range - arithmetic ops.
@@ -209,6 +209,28 @@ const (
 	LOG4
 )
 
+// 0xd0 range - customized instructions.
+const (
+	Nop OpCode = 0xd0 + iota
+	AndSwap1PopSwap2Swap1
+	Swap2Swap1PopJump
+	Swap1PopSwap2Swap1
+	PopSwap2Swap1Pop
+	Push2Jump
+	Push2JumpI
+	Push1Push1
+	Push1Add
+	Push1Shl
+	Push1Dup1
+	Swap1Pop
+	PopJump
+	Pop2
+	Swap2Swap1
+	Swap2Pop
+	Dup2LT
+	JumpIfZero // 0xe2
+)
+
 // 0xf0 range - closures.
 const (
 	CREATE       OpCode = 0xf0
@@ -224,8 +246,7 @@ const (
 	SELFDESTRUCT OpCode = 0xff
 )
 
-// Since the opcodes aren't all in order we can't use a regular slice.
-var opCodeToString = map[OpCode]string{
+var opCodeToString = [256]string{
 	// 0x0 range - arithmetic ops.
 	STOP:       "STOP",
 	ADD:        "ADD",
@@ -385,6 +406,26 @@ var opCodeToString = map[OpCode]string{
 	LOG3: "LOG3",
 	LOG4: "LOG4",
 
+	// 0xd0 range.
+	Nop:                   "NOP",
+	AndSwap1PopSwap2Swap1: "ANDSWAP1POPSWAP2SWAP1",
+	Swap2Swap1PopJump:     "SWAP2SWAP1POPJUMP",
+	Swap1PopSwap2Swap1:    "SWAP1POPSWAP2SWAP1",
+	PopSwap2Swap1Pop:      "POPSWAP2SWAP1POP",
+	Push2Jump:             "PUSH2JUMP",
+	Push2JumpI:            "PUSH2JUMPI",
+	Push1Push1:            "PUSH1PUSH1",
+	Push1Add:              "PUSH1ADD",
+	Push1Shl:              "PUSH1SHL",
+	Push1Dup1:             "PUSH1DUP1",
+	Swap1Pop:              "SWAP1POP",
+	PopJump:               "POPJUMP",
+	Pop2:                  "POP2",
+	Swap2Swap1:            "SWAP2SWAP1",
+	Swap2Pop:              "SWAP2POP",
+	Dup2LT:                "DUP2LT",
+	JumpIfZero:            "JUMPIFZERO",
+
 	// 0xf0 range - closures.
 	CREATE:       "CREATE",
 	CALL:         "CALL",
@@ -399,12 +440,10 @@ var opCodeToString = map[OpCode]string{
 }
 
 func (op OpCode) String() string {
-	str := opCodeToString[op]
-	if len(str) == 0 {
-		return fmt.Sprintf("opcode %#x not defined", int(op))
+	if s := opCodeToString[op]; s != "" {
+		return s
 	}
-
-	return str
+	return fmt.Sprintf("opcode %#x not defined", int(op))
 }
 
 var stringToOp = map[string]OpCode{
@@ -549,14 +588,33 @@ var stringToOp = map[string]OpCode{
 	"LOG2":           LOG2,
 	"LOG3":           LOG3,
 	"LOG4":           LOG4,
-	"CREATE":         CREATE,
-	"CREATE2":        CREATE2,
-	"CALL":           CALL,
-	"RETURN":         RETURN,
-	"CALLCODE":       CALLCODE,
-	"REVERT":         REVERT,
-	"INVALID":        INVALID,
-	"SELFDESTRUCT":   SELFDESTRUCT,
+
+	"NOP":                   Nop,
+	"ANDSWAP1POPSWAP2SWAP1": AndSwap1PopSwap2Swap1,
+	"SWAP2SWAP1POPJUMP":     Swap2Swap1PopJump,
+	"SWAP1POPSWAP2SWAP1":    Swap1PopSwap2Swap1,
+	"POPSWAP2SWAP1POP":      PopSwap2Swap1Pop,
+	"PUSH2JUMP":             Push2Jump,
+	"PUSH2JUMPI":            Push2JumpI,
+	"PUSH1PUSH1":            Push1Push1,
+	"PUSH1ADD":              Push1Add,
+	"PUSH1SHL":              Push1Shl,
+	"PUSH1DUP1":             Push1Dup1,
+	"SWAP1POP":              Swap1Pop,
+	"POPJUMP":               PopJump,
+	"POP2":                  Pop2,
+	"SWAP2SWAP1":            Swap2Swap1,
+	"SWAP2POP":              Swap2Pop,
+	"DUP2LT":                Dup2LT,
+	"JUMPIFZERO":            JumpIfZero,
+	"CREATE":                CREATE,
+	"CREATE2":               CREATE2,
+	"CALL":                  CALL,
+	"RETURN":                RETURN,
+	"CALLCODE":              CALLCODE,
+	"REVERT":                REVERT,
+	"INVALID":               INVALID,
+	"SELFDESTRUCT":          SELFDESTRUCT,
 }
 
 // StringToOp finds the opcode whose name is stored in `str`.

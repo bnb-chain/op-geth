@@ -41,6 +41,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 )
 
 //go:generate go run github.com/fjl/gencodec -type Genesis -field-override genesisSpecMarshaling -out gen_genesis.go
@@ -137,10 +138,20 @@ func (ga *GenesisAlloc) UnmarshalJSON(data []byte) error {
 }
 
 // hash computes the state root according to the genesis specification.
-func (ga *GenesisAlloc) hash() (common.Hash, error) {
+func (ga *GenesisAlloc) hash(isVerkle bool) (common.Hash, error) {
+	// If a genesis-time verkle trie is requested, create a trie config
+	// with the verkle trie enabled so that the tree can be initialized
+	// as such.
+	var config *trie.Config
+	if isVerkle {
+		config = &trie.Config{
+			PathDB:   pathdb.Defaults,
+			IsVerkle: true,
+		}
+	}
 	// Create an ephemeral in-memory database for computing hash,
 	// all the derived states will be discarded to not pollute disk.
-	db := state.NewDatabase(rawdb.NewMemoryDatabase())
+	db := state.NewDatabaseWithConfig(rawdb.NewMemoryDatabase(), config)
 	statedb, err := state.New(types.EmptyRootHash, db, nil)
 	if err != nil {
 		return common.Hash{}, err
@@ -162,6 +173,11 @@ func (ga *GenesisAlloc) hash() (common.Hash, error) {
 // states will be persisted into the given database. Also, the genesis state
 // specification will be flushed as well.
 func (ga *GenesisAlloc) flush(db ethdb.Database, triedb *trie.Database, blockhash common.Hash) error {
+	triedbConfig := triedb.Config()
+	if triedbConfig != nil {
+		triedbConfig.NoTries = false
+	}
+
 	statedb, err := state.New(types.EmptyRootHash, state.NewDatabaseWithNodeDB(db, triedb), nil)
 	if err != nil {
 		return err
@@ -263,7 +279,9 @@ type ChainOverrides struct {
 	OverrideVerkle *uint64
 	// optimism
 	OverrideOptimismCanyon  *uint64
+	OverrideOptimismEcotone *uint64
 	ApplySuperchainUpgrades bool
+	OverrideOptimismInterop *uint64
 }
 
 // SetupGenesisBlock writes or updates the genesis block in db.
@@ -323,6 +341,13 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 					config.Optimism.EIP1559DenominatorCanyon = 250
 				}
 			}
+			if overrides != nil && overrides.OverrideOptimismEcotone != nil {
+				config.EcotoneTime = overrides.OverrideOptimismEcotone
+				config.CancunTime = overrides.OverrideOptimismEcotone
+			}
+			if overrides != nil && overrides.OverrideOptimismInterop != nil {
+				config.InteropTime = overrides.OverrideOptimismInterop
+			}
 		}
 	}
 	// Just commit the new block if there is no stored genesis block.
@@ -334,22 +359,28 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 		} else {
 			log.Info("Writing custom genesis block")
 		}
+		applyOverrides(genesis.Config)
 		block, err := genesis.Commit(db, triedb)
 		if err != nil {
 			return genesis.Config, common.Hash{}, err
 		}
-		applyOverrides(genesis.Config)
 		return genesis.Config, block.Hash(), nil
 	}
 	// The genesis block is present(perhaps in ancient database) while the
 	// state database is not initialized yet. It can happen that the node
 	// is initialized with an external ancient store. Commit genesis state
 	// in this case.
+	// If the bedrock block is not 0, that implies that the network was migrated at the bedrock block.
+	// In this case the genesis state may not be in the state database (e.g. op-geth is performing a snap
+	// sync without an existing datadir) & even if it were, would not be useful as op-geth is not able to
+	// execute the pre-bedrock STF.
 	header := rawdb.ReadHeader(db, stored, 0)
-	if header.Root != types.EmptyRootHash && !triedb.Initialized(header.Root) {
+	transitionedNetwork := genesis != nil && genesis.Config != nil && genesis.Config.BedrockBlock != nil && genesis.Config.BedrockBlock.Uint64() != 0
+	if header.Root != types.EmptyRootHash && !triedb.Initialized(header.Root) && !transitionedNetwork && !triedb.Config().NoTries {
 		if genesis == nil {
 			genesis = DefaultGenesisBlock()
 		}
+		applyOverrides(genesis.Config)
 		// Ensure the stored genesis matches with the given one.
 		hash := genesis.ToBlock().Hash()
 		if hash != stored {
@@ -359,11 +390,11 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *trie.Database, gen
 		if err != nil {
 			return genesis.Config, hash, err
 		}
-		applyOverrides(genesis.Config)
 		return genesis.Config, block.Hash(), nil
 	}
 	// Check whether the genesis block is already written.
 	if genesis != nil {
+		applyOverrides(genesis.Config)
 		hash := genesis.ToBlock().Hash()
 		if hash != stored {
 			return genesis.Config, hash, &GenesisMismatchError{stored, hash}
@@ -463,6 +494,12 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 	}
 }
 
+// IsVerkle indicates whether the state is already stored in a verkle
+// tree at genesis time.
+func (g *Genesis) IsVerkle() bool {
+	return g.Config.IsVerkle(new(big.Int).SetUint64(g.Number), g.Timestamp)
+}
+
 // ToBlock returns the genesis block according to genesis specification.
 func (g *Genesis) ToBlock() *types.Block {
 	var root common.Hash
@@ -473,7 +510,7 @@ func (g *Genesis) ToBlock() *types.Block {
 				"and non-empty state-allocation", *g.StateHash))
 		}
 		root = *g.StateHash
-	} else if root, err = g.Alloc.hash(); err != nil {
+	} else if root, err = g.Alloc.hash(g.IsVerkle()); err != nil {
 		panic(err)
 	}
 	head := &types.Header{
@@ -623,16 +660,16 @@ func DefaultHoleskyGenesisBlock() *Genesis {
 }
 
 // DeveloperGenesisBlock returns the 'geth --dev' genesis block.
-func DeveloperGenesisBlock(gasLimit uint64, faucet common.Address) *Genesis {
+func DeveloperGenesisBlock(gasLimit uint64, faucet *common.Address) *Genesis {
 	// Override the default period to the user requested one
 	config := *params.AllDevChainProtocolChanges
 
 	// Assemble and return the genesis with the precompiles and faucet pre-funded
-	return &Genesis{
+	genesis := &Genesis{
 		Config:     &config,
 		GasLimit:   gasLimit,
 		BaseFee:    big.NewInt(params.InitialBaseFee),
-		Difficulty: big.NewInt(0),
+		Difficulty: big.NewInt(1),
 		Alloc: map[common.Address]GenesisAccount{
 			common.BytesToAddress([]byte{1}): {Balance: big.NewInt(1)}, // ECRecover
 			common.BytesToAddress([]byte{2}): {Balance: big.NewInt(1)}, // SHA256
@@ -643,9 +680,12 @@ func DeveloperGenesisBlock(gasLimit uint64, faucet common.Address) *Genesis {
 			common.BytesToAddress([]byte{7}): {Balance: big.NewInt(1)}, // ECScalarMul
 			common.BytesToAddress([]byte{8}): {Balance: big.NewInt(1)}, // ECPairing
 			common.BytesToAddress([]byte{9}): {Balance: big.NewInt(1)}, // BLAKE2b
-			faucet:                           {Balance: new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(9))},
 		},
 	}
+	if faucet != nil {
+		genesis.Alloc[*faucet] = GenesisAccount{Balance: new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(9))}
+	}
+	return genesis
 }
 
 func decodePrealloc(data string) GenesisAlloc {

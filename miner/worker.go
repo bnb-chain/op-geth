@@ -744,6 +744,7 @@ func (w *worker) resultLoop() {
 				logs = append(logs, receipt.Logs...)
 			}
 			// Commit block and state to database.
+			task.state.SetExpectedStateRoot(block.Root())
 			_, err := w.chain.WriteBlockAndSetHead(block, receipts, logs, task.state, true)
 			if err != nil {
 				log.Error("Failed writing block to chain", "err", err)
@@ -1110,7 +1111,10 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 		}
 	}
 
+	start := time.Now()
 	pending := w.eth.TxPool().Pending(true)
+	packFromTxpoolTimer.UpdateSince(start)
+	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
 
 	// Split the pending transactions into locals and remotes.
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
@@ -1124,6 +1128,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	// }
 
 	// Fill the block with all available pending transactions.
+	start = time.Now()
 	if len(localTxs) > 0 {
 		txs := newTransactionsByPriceAndNonce(env.signer, localTxs, env.header.BaseFee)
 		if err := w.commitTransactions(env, txs, interrupt); err != nil {
@@ -1136,11 +1141,19 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 			return err
 		}
 	}
+	commitTxpoolTxsTimer.UpdateSince(start)
+	log.Debug("commitTxpoolTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
 	return nil
 }
 
 // generateWork generates a sealing block based on the given parameters.
 func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
+	// TODO delete after debug performance metrics
+	core.DebugInnerExecutionDuration = 0
+	defer func() {
+		core.DebugInnerExecutionDuration = 0
+	}()
+
 	work, err := w.prepareWork(genParams)
 	if err != nil {
 		return &newPayloadResult{err: err}
@@ -1154,9 +1167,9 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		misc.ApplyPreContractHardFork(work.state)
 	}
 
-	// opBNB no need to hard code this contract via hardfork
-	// misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
+	misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
 
+	start := time.Now()
 	for _, tx := range genParams.txs {
 		from, _ := types.Sender(work.signer, tx)
 		work.state.SetTxContext(tx.Hash(), work.tcount)
@@ -1166,6 +1179,8 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		}
 		work.tcount++
 	}
+	commitDepositTxsTimer.UpdateSince(start)
+	log.Debug("commitDepositTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	// forced transactions done, fill rest of block with transactions
 	if !genParams.noTxs {
@@ -1181,19 +1196,42 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		err := w.fillTransactions(interrupt, work)
 		timer.Stop() // don't need timeout interruption any more
 		if errors.Is(err, errBlockInterruptedByTimeout) {
-			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout))
+			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
+			isBuildBlockInterruptCounter.Inc(1)
 		} else if errors.Is(err, errBlockInterruptedByResolve) {
-			log.Info("Block building got interrupted by payload resolution")
+			log.Info("Block building got interrupted by payload resolution", "parentHash", genParams.parentHash)
+			isBuildBlockInterruptCounter.Inc(1)
 		}
 	}
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
 		return &newPayloadResult{err: errInterruptedUpdate}
 	}
 
+	start = time.Now()
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
+	if block.Root() == (common.Hash{}) {
+		return &newPayloadResult{err: fmt.Errorf("empty block root")}
+	}
+
+	assembleBlockTimer.UpdateSince(start)
+	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
+
+	accountReadTimer.Update(work.state.AccountReads)                 // Account reads are complete(in commit txs)
+	storageReadTimer.Update(work.state.StorageReads)                 // Storage reads are complete(in commit txs)
+	snapshotAccountReadTimer.Update(work.state.SnapshotAccountReads) // Account reads are complete(in commit txs)
+	snapshotStorageReadTimer.Update(work.state.SnapshotStorageReads) // Storage reads are complete(in commit txs)
+	accountUpdateTimer.Update(work.state.AccountUpdates)             // Account updates are complete(in FinalizeAndAssemble)
+	storageUpdateTimer.Update(work.state.StorageUpdates)             // Storage updates are complete(in FinalizeAndAssemble)
+	accountHashTimer.Update(work.state.AccountHashes)                // Account hashes are complete(in FinalizeAndAssemble)
+	storageHashTimer.Update(work.state.StorageHashes)                // Storage hashes are complete(in FinalizeAndAssemble)
+
+	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
+
+	log.Debug("build payload statedb metrics", "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
+
 	return &newPayloadResult{
 		block:    block,
 		fees:     totalFees(block, work.receipts),
@@ -1233,7 +1271,7 @@ func (w *worker) commitWork(interrupt *atomic.Int32, timestamp int64) {
 	case err == nil:
 		// The entire block is filled, decrease resubmit interval in case
 		// of current interval is larger than the user-specified one.
-		w.resubmitAdjustCh <- &intervalAdjust{inc: false}
+		w.adjustResubmitInterval(&intervalAdjust{inc: false})
 
 	case errors.Is(err, errBlockInterruptedByRecommit):
 		// Notify resubmit loop to increase resubmitting interval if the
@@ -1243,10 +1281,10 @@ func (w *worker) commitWork(interrupt *atomic.Int32, timestamp int64) {
 		if ratio < 0.1 {
 			ratio = 0.1
 		}
-		w.resubmitAdjustCh <- &intervalAdjust{
+		w.adjustResubmitInterval(&intervalAdjust{
 			ratio: ratio,
 			inc:   true,
-		}
+		})
 
 	case errors.Is(err, errBlockInterruptedByNewHead):
 		// If the block building is interrupted by newhead event, discard it
@@ -1326,6 +1364,15 @@ func (w *worker) getSealingBlock(params *generateParams) *newPayloadResult {
 func (w *worker) isTTDReached(header *types.Header) bool {
 	td, ttd := w.chain.GetTd(header.ParentHash, header.Number.Uint64()-1), w.chain.Config().TerminalTotalDifficulty
 	return td != nil && ttd != nil && td.Cmp(ttd) >= 0
+}
+
+// adjustResubmitInterval adjusts the resubmit interval.
+func (w *worker) adjustResubmitInterval(message *intervalAdjust) {
+	select {
+	case w.resubmitAdjustCh <- message:
+	default:
+		log.Warn("the resubmitAdjustCh is full, discard the message")
+	}
 }
 
 // copyReceipts makes a deep copy of the given receipts.

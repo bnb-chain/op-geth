@@ -25,6 +25,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -41,7 +43,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
-	"golang.org/x/crypto/sha3"
 )
 
 // StateTest checks transaction processing without block context.
@@ -198,7 +199,11 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config, snapshotter bo
 		postCheck(result, snaps, statedb)
 
 		if triedb != nil {
+			triedb.Journal(triedb.Head())
 			triedb.Close()
+		}
+		if snaps != nil {
+			snaps.Release()
 		}
 	}()
 	checkedErr := t.checkError(subtest, err)
@@ -247,6 +252,7 @@ func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapsh
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post, baseFee)
 	if err != nil {
+		triedb.Journal(triedb.Head())
 		triedb.Close()
 		return nil, nil, nil, common.Hash{}, err
 	}
@@ -256,11 +262,13 @@ func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapsh
 		var ttx types.Transaction
 		err := ttx.UnmarshalBinary(post.TxBytes)
 		if err != nil {
+			triedb.Journal(triedb.Head())
 			triedb.Close()
 			return nil, nil, nil, common.Hash{}, err
 		}
 
 		if _, err := types.Sender(types.LatestSigner(config), &ttx); err != nil {
+			triedb.Journal(triedb.Head())
 			triedb.Close()
 			return nil, nil, nil, common.Hash{}, err
 		}

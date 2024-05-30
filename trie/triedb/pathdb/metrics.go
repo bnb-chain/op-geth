@@ -47,4 +47,18 @@ var (
 	historyBuildTimeMeter  = metrics.NewRegisteredTimer("pathdb/history/time", nil)
 	historyDataBytesMeter  = metrics.NewRegisteredMeter("pathdb/history/bytes/data", nil)
 	historyIndexBytesMeter = metrics.NewRegisteredMeter("pathdb/history/bytes/index", nil)
+
+	// only for node buffer list
+	nodeBufferListSizeGauge        = metrics.NewRegisteredGauge("pathdb/nodebufferlist/size", nil)
+	nodeBufferListCountGauge       = metrics.NewRegisteredGauge("pathdb/nodebufferlist/count", nil)
+	nodeBufferListLayerGauge       = metrics.NewRegisteredGauge("pathdb/nodebufferlist/layer", nil)
+	nodeBufferListPersistIDGauge   = metrics.NewRegisteredGauge("pathdb/nodebufferlist/persistid", nil)
+	nodeBufferListLastBlockGauge   = metrics.NewRegisteredGauge("pathdb/nodebufferlist/lastblock", nil)
+	nodeBufferListLastStateIdGauge = metrics.NewRegisteredGauge("pathdb/nodebufferlist/laststateid", nil)
+	nodeBufferListDifflayerAvgSize = metrics.NewRegisteredGauge("pathdb/nodebufferlist/difflayeravgsize", nil)
+	baseNodeBufferSizeGauge        = metrics.NewRegisteredGauge("pathdb/basenodebuffer/size", nil)
+	baseNodeBufferLayerGauge       = metrics.NewRegisteredGauge("pathdb/basenodebuffer/layer", nil)
+	baseNodeBufferDifflayerAvgSize = metrics.NewRegisteredGauge("pathdb/basenodebuffer/difflayeravgsize", nil)
+	proposedBlockReaderSuccess     = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/success", nil)
+	proposedBlockReaderMismatch    = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/mismatch", nil)
 )

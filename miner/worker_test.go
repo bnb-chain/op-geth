@@ -161,6 +161,7 @@ func (b *testWorkerBackend) newRandomTx(creation bool) *types.Transaction {
 func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) (*worker, *testWorkerBackend) {
 	backend := newTestWorkerBackend(t, chainConfig, engine, db, blocks)
 	backend.txPool.Add(pendingTxs, true, false)
+	time.Sleep(500 * time.Millisecond) // Wait for txs to be promoted
 	w := newWorker(testConfig, chainConfig, engine, backend, new(event.TypeMux), nil, false)
 	w.setEtherbase(testBankAddress)
 	return w, backend
@@ -197,6 +198,7 @@ func TestGenerateAndImportBlock(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		b.txPool.Add([]*types.Transaction{b.newRandomTx(true)}, true, false)
 		b.txPool.Add([]*types.Transaction{b.newRandomTx(false)}, true, false)
+		time.Sleep(1 * time.Second) // Wait for txs to be promoted
 
 		select {
 		case ev := <-sub.Chan():

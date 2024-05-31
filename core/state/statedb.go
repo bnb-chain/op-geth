@@ -1018,8 +1018,10 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; obj.deleted {
 			s.deleteStateObject(obj)
+			s.AccountDeleted += 1
 		} else {
 			s.updateStateObject(obj)
+			s.AccountUpdated += 1
 		}
 		usedAddrs = append(usedAddrs, common.CopyBytes(addr[:])) // Copy needed for closure
 	}
@@ -1287,6 +1289,13 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 	}
 
 	var (
+		accountTrieNodesUpdated int
+		accountTrieNodesDeleted int
+		// Storage Tree is updated concurrently, and statistics require mutex,
+		// which will affect performance, so it is discarded
+		//storageTrieNodesUpdated int
+		//storageTrieNodesDeleted int
+		
 		nodes      = trienode.NewMergedNodeSet()
 		incomplete map[common.Address]struct{}
 	)
@@ -1294,6 +1303,23 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 	if !s.fullProcessed {
 		s.stateRoot = s.IntermediateRoot(deleteEmptyObjects)
 	}
+
+	if metrics.EnabledExpensive {
+		defer func(start time.Time) {
+			s.AccountCommits += time.Since(start)
+			accountUpdatedMeter.Mark(int64(s.AccountUpdated))
+			storageUpdatedMeter.Mark(int64(s.StorageUpdated))
+			accountDeletedMeter.Mark(int64(s.AccountDeleted))
+			storageDeletedMeter.Mark(int64(s.StorageDeleted))
+			accountTrieUpdatedMeter.Mark(int64(accountTrieNodesUpdated))
+			accountTrieDeletedMeter.Mark(int64(accountTrieNodesDeleted))
+			//storageTriesUpdatedMeter.Mark(int64(storageTrieNodesUpdated))
+			//storageTriesDeletedMeter.Mark(int64(storageTrieNodesDeleted))
+			s.AccountUpdated, s.AccountDeleted = 0, 0
+			s.StorageUpdated, s.StorageDeleted = 0, 0
+		}(time.Now())
+	}
+
 	commitFuncs := []func() error{
 		func() error {
 			if metrics.EnabledExpensive {
@@ -1384,6 +1410,7 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 				if err := nodes.Merge(set); err != nil {
 					return err
 				}
+				accountTrieNodesUpdated, accountTrieNodesDeleted = set.Size()
 			}
 			if metrics.EnabledExpensive {
 				s.AccountCommits += time.Since(start)

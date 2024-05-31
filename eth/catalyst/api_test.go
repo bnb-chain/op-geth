@@ -152,6 +152,8 @@ func TestEth2AssembleBlockWithAnotherBlocksTxs(t *testing.T) {
 	// Put the 10th block's tx in the pool and produce a new block
 	txs := blocks[9].Transactions()
 	api.eth.TxPool().Add(txs, false, true)
+	// we wait for the tx to be promoted into pending list in the txpool
+	time.Sleep(1 * time.Second)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[8].Time() + 5,
 	}
@@ -192,6 +194,8 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 	// Put the 10th block's tx in the pool and produce a new block
 	txs := blocks[9].Transactions()
 	ethservice.TxPool().Add(txs, true, false)
+	// we wait for the txs to be promoted into pending list in the txpool
+	time.Sleep(1 * time.Second)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[8].Time() + 5,
 	}
@@ -315,6 +319,9 @@ func TestEth2NewBlock(t *testing.T) {
 		nonce := statedb.GetNonce(testAddr)
 		tx, _ := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 1000000, big.NewInt(2*params.InitialBaseFee), logCode), types.LatestSigner(ethservice.BlockChain().Config()), testKey)
 		ethservice.TxPool().Add([]*types.Transaction{tx}, true, false)
+
+		//we wait for the tx to be promoted into pending list in the txpool
+		time.Sleep(1 * time.Second)
 
 		execData, err := assembleWithTransactions(api, parent.Hash(), &engine.PayloadAttributes{
 			Timestamp: parent.Time() + 5,

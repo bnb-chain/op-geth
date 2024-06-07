@@ -53,6 +53,8 @@ func testBuildPayload(t *testing.T, noTxPool, interrupt bool) {
 		// definitely be visible.
 		txs := genTxs(1, numInterruptTxs)
 		b.txPool.Add(txs, true, false)
+		// we wait for the txs to be promoted
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	timestamp := uint64(time.Now().Unix())

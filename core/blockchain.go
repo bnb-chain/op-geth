@@ -76,6 +76,9 @@ var (
 	snapshotAccountReadTimer = metrics.NewRegisteredTimer("chain/snapshot/account/reads", nil)
 	snapshotStorageReadTimer = metrics.NewRegisteredTimer("chain/snapshot/storage/reads", nil)
 	snapshotCommitTimer      = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
+	trieCommitTimer          = metrics.NewRegisteredTimer("chain/trie/commits", nil)
+	codeCommitTimer          = metrics.NewRegisteredTimer("chain/code/commits", nil)
+	blockCommitTimer         = metrics.NewRegisteredTimer("chain/block/commits", nil)
 
 	triedbCommitTimer = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
 
@@ -1486,20 +1489,29 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	//
 	// Note all the components of block(td, hash->number map, header, body, receipts)
 	// should be written atomically. BlockBatch is used for containing all components.
-	start := time.Now()
-	blockBatch := bc.db.NewBatch()
-	rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
-	rawdb.WriteBlock(blockBatch, block)
-	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
-	rawdb.WritePreimages(blockBatch, state.Preimages())
-	if err := blockBatch.Write(); err != nil {
-		log.Crit("Failed to write block into disk", "err", err)
-	}
-	blockWriteExternalTimer.UpdateSince(start)
-	log.Debug("blockWriteExternalTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", block.Hash())
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	defer wg.Wait()
+	go func() {
+		if metrics.EnabledExpensive {
+			defer func(start time.Time) { blockCommitTimer.Update(time.Since(start)) }(time.Now())
+		}
+		defer wg.Done()
+		start := time.Now()
+		blockBatch := bc.db.NewBatch()
+		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
+		rawdb.WriteBlock(blockBatch, block)
+		rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
+		rawdb.WritePreimages(blockBatch, state.Preimages())
+		if err := blockBatch.Write(); err != nil {
+			log.Crit("Failed to write block into disk", "err", err)
+		}
+		blockWriteExternalTimer.UpdateSince(start)
+		log.Debug("blockWriteExternalTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", block.Hash())
+	}()
 
 	// Commit all cached state changes into underlying memory database.
-	start = time.Now()
+	start := time.Now()
 	state.SetExpectedStateRoot(block.Root())
 	root, err := state.Commit(block.NumberU64(), bc.chainConfig.IsEIP158(block.Number()))
 	if err != nil {
@@ -1909,7 +1921,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
-			var followupInterrupt atomic.Bool
 			if !bc.cacheConfig.TrieCleanNoPrefetch {
 				if followup, err := it.peek(); followup != nil && err == nil {
 					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
@@ -1983,6 +1994,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
 		snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
 		triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
+		trieCommitTimer.Update(statedb.TrieCommits)
+		codeCommitTimer.Update(statedb.CodeCommits)
 
 		blockWriteTimer.UpdateSince(wstart)
 		blockInsertTimer.UpdateSince(start)

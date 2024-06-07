@@ -124,6 +124,7 @@ func newTester(t *testing.T, historyLimit uint64) *tester {
 		}
 		obj.roots = append(obj.roots, root)
 	}
+	_ = db.Recoverable(types.EmptyRootHash)
 	return obj
 }
 

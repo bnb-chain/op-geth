@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -65,57 +66,97 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
 		return fmt.Errorf("uncle root hash mismatch (header value %x, calculated %x)", header.UncleHash, hash)
 	}
-	if hash := types.DeriveSha(block.Transactions(), trie.NewStackTrie(nil)); hash != header.TxHash {
-		return fmt.Errorf("transaction root hash mismatch (header value %x, calculated %x)", header.TxHash, hash)
+
+	validateFuns := []func() error{
+		func() error {
+			if hash := types.DeriveSha(block.Transactions(), trie.NewStackTrie(nil)); hash != header.TxHash {
+				return fmt.Errorf("transaction root hash mismatch (header value %x, calculated %x)", header.TxHash, hash)
+			}
+			return nil
+		},
+		func() error {
+			// Withdrawals are present after the Shanghai fork.
+			if header.WithdrawalsHash != nil {
+				// Withdrawals list must be present in body after Shanghai.
+				if block.Withdrawals() == nil {
+					return errors.New("missing withdrawals in block body")
+				}
+				if hash := types.DeriveSha(block.Withdrawals(), trie.NewStackTrie(nil)); hash != *header.WithdrawalsHash {
+					return fmt.Errorf("withdrawals root hash mismatch (header value %x, calculated %x)", *header.WithdrawalsHash, hash)
+				}
+			} else if block.Withdrawals() != nil {
+				// Withdrawals are not allowed prior to Shanghai fork
+				return errors.New("withdrawals present in block body")
+			}
+			return nil
+		},
+		func() error {
+			// Blob transactions may be present after the Cancun fork.
+			var blobs int
+			for i, tx := range block.Transactions() {
+				// Count the number of blobs to validate against the header's blobGasUsed
+				blobs += len(tx.BlobHashes())
+
+				// If the tx is a blob tx, it must NOT have a sidecar attached to be valid in a block.
+				if tx.BlobTxSidecar() != nil {
+					return fmt.Errorf("unexpected blob sidecar in transaction at index %d", i)
+				}
+
+				// The individual checks for blob validity (version-check + not empty)
+				// happens in StateTransition.
+			}
+
+			// Check blob gas usage.
+			if header.BlobGasUsed != nil {
+				if want := *header.BlobGasUsed / params.BlobTxBlobGasPerBlob; uint64(blobs) != want { // div because the header is surely good vs the body might be bloated
+					return fmt.Errorf("blob gas used mismatch (header %v, calculated %v)", *header.BlobGasUsed, blobs*params.BlobTxBlobGasPerBlob)
+				}
+			} else {
+				if blobs > 0 {
+					return errors.New("data blobs present in block body")
+				}
+			}
+			return nil
+		},
+		func() error {
+			// Ancestor block must be known.
+			if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
+				if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
+					return consensus.ErrUnknownAncestor
+				}
+				return consensus.ErrPrunedAncestor
+			}
+			return nil
+		},
+	}
+	validateRes := make(chan error, len(validateFuns))
+	for _, f := range validateFuns {
+		tmpFunc := f
+		gopool.Submit(func() {
+			validateRes <- tmpFunc()
+		})
+	}
+	errs := make([]error, 0, len(validateFuns))
+	for i := 0; i < len(validateFuns); i++ {
+		err := <-validateRes
+		errs = append(errs, err)
+	}
+	var ancestorErr error
+	for _, err := range errs {
+		if err != nil {
+			if !errors.Is(err, consensus.ErrUnknownAncestor) && !errors.Is(err, consensus.ErrPrunedAncestor) {
+				// Other errors are returned first.
+				return err
+			} else {
+				ancestorErr = err
+			}
+		}
+	}
+	// If there are no other errors, but an ancestorErr, return it.
+	if ancestorErr != nil {
+		return ancestorErr
 	}
 
-	// Withdrawals are present after the Shanghai fork.
-	if header.WithdrawalsHash != nil {
-		// Withdrawals list must be present in body after Shanghai.
-		if block.Withdrawals() == nil {
-			return errors.New("missing withdrawals in block body")
-		}
-		if hash := types.DeriveSha(block.Withdrawals(), trie.NewStackTrie(nil)); hash != *header.WithdrawalsHash {
-			return fmt.Errorf("withdrawals root hash mismatch (header value %x, calculated %x)", *header.WithdrawalsHash, hash)
-		}
-	} else if block.Withdrawals() != nil {
-		// Withdrawals are not allowed prior to Shanghai fork
-		return errors.New("withdrawals present in block body")
-	}
-
-	// Blob transactions may be present after the Cancun fork.
-	var blobs int
-	for i, tx := range block.Transactions() {
-		// Count the number of blobs to validate against the header's blobGasUsed
-		blobs += len(tx.BlobHashes())
-
-		// If the tx is a blob tx, it must NOT have a sidecar attached to be valid in a block.
-		if tx.BlobTxSidecar() != nil {
-			return fmt.Errorf("unexpected blob sidecar in transaction at index %d", i)
-		}
-
-		// The individual checks for blob validity (version-check + not empty)
-		// happens in StateTransition.
-	}
-
-	// Check blob gas usage.
-	if header.BlobGasUsed != nil {
-		if want := *header.BlobGasUsed / params.BlobTxBlobGasPerBlob; uint64(blobs) != want { // div because the header is surely good vs the body might be bloated
-			return fmt.Errorf("blob gas used mismatch (header %v, calculated %v)", *header.BlobGasUsed, blobs*params.BlobTxBlobGasPerBlob)
-		}
-	} else {
-		if blobs > 0 {
-			return errors.New("data blobs present in block body")
-		}
-	}
-
-	// Ancestor block must be known.
-	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
-		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
-			return consensus.ErrUnknownAncestor
-		}
-		return consensus.ErrPrunedAncestor
-	}
 	return nil
 }
 
@@ -126,23 +167,50 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 	if block.GasUsed() != usedGas {
 		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
 	}
-	// Validate the received block's bloom with the one derived from the generated receipts.
-	// For valid blocks this should always validate to true.
-	rbloom := types.CreateBloom(receipts)
-	if rbloom != header.Bloom {
-		return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
+
+	validateFuns := []func() error{
+		func() error {
+			// Validate the received block's bloom with the one derived from the generated receipts.
+			// For valid blocks this should always validate to true.
+			rbloom := types.CreateBloom(receipts)
+			if rbloom != header.Bloom {
+				return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
+			}
+			return nil
+		},
+		func() error {
+			// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))
+			receiptSha := types.DeriveSha(receipts, trie.NewStackTrie(nil))
+			if receiptSha != header.ReceiptHash {
+				return fmt.Errorf("invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
+			}
+			return nil
+		},
+		func() error {
+			// Validate the state root against the received state root and throw
+			// an error if they don't match.
+			if root := statedb.IntermediateRoot(v.config.IsEIP158(header.Number)); header.Root != root {
+				return fmt.Errorf("invalid merkle root (remote: %x local: %x) dberr: %w", header.Root, root, statedb.Error())
+			}
+			return nil
+		},
 	}
-	// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))
-	receiptSha := types.DeriveSha(receipts, trie.NewStackTrie(nil))
-	if receiptSha != header.ReceiptHash {
-		return fmt.Errorf("invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
+	validateRes := make(chan error, len(validateFuns))
+	for _, f := range validateFuns {
+		tmpFunc := f
+		gopool.Submit(func() {
+			validateRes <- tmpFunc()
+		})
 	}
-	// Validate the state root against the received state root and throw
-	// an error if they don't match.
-	if root := statedb.IntermediateRoot(v.config.IsEIP158(header.Number)); header.Root != root {
-		return fmt.Errorf("invalid merkle root (remote: %x local: %x) dberr: %w", header.Root, root, statedb.Error())
+
+	var err error
+	for i := 0; i < len(validateFuns); i++ {
+		r := <-validateRes
+		if r != nil && err == nil {
+			err = r
+		}
 	}
-	return nil
+	return err
 }
 
 // CalcGasLimit computes the gas limit of the next block after parent. It aims

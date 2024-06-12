@@ -398,7 +398,7 @@ func inspectTrie(ctx *cli.Context) error {
 		var config *trie.Config
 		if dbScheme == rawdb.PathScheme {
 			config = &trie.Config{
-				PathDB: pathdb.ReadOnly,
+				PathDB: utils.PathDBConfigAddJournalFilePath(stack, pathdb.ReadOnly),
 			}
 		} else if dbScheme == rawdb.HashScheme {
 			config = trie.HashDefaults
@@ -774,8 +774,7 @@ func dbDumpTrie(ctx *cli.Context) error {
 
 	db := utils.MakeChainDatabase(ctx, stack, true)
 	defer db.Close()
-
-	triedb := utils.MakeTrieDatabase(ctx, db, false, true, false)
+	triedb := utils.MakeTrieDatabase(ctx, stack, db, false, true, false)
 	defer triedb.Close()
 
 	var (

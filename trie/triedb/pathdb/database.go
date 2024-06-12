@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
@@ -63,6 +64,13 @@ const (
 	DefaultBatchRedundancyRate = 1.1
 )
 
+type JournalType int
+
+const (
+	JournalKVType JournalType = iota
+	JournalFileType
+)
+
 // layer is the interface implemented by all state layers which includes some
 // public methods and some additional methods for internal usage.
 type layer interface {
@@ -90,7 +98,7 @@ type layer interface {
 	// journal commits an entire diff hierarchy to disk into a single journal entry.
 	// This is meant to be used during shutdown to persist the layer without
 	// flattening everything down (bad for reorgs).
-	journal(w io.Writer) error
+	journal(w io.Writer, journalType JournalType) error
 }
 
 // Config contains the settings for database.
@@ -102,6 +110,8 @@ type Config struct {
 	ReadOnly             bool           // Flag whether the database is opened in read only mode.
 	ProposeBlockInterval uint64         // Propose block to L1 block interval.
 	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
+	JournalFilePath      string         // The journal file path
+	JournalFile          bool           // Whether to use journal file mode
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -332,7 +342,7 @@ func (db *Database) Enable(root common.Hash) error {
 	// Drop the stale state journal in persistent database and
 	// reset the persistent state id back to zero.
 	batch := db.diskdb.NewBatch()
-	rawdb.DeleteTrieJournal(batch)
+	db.DeleteTrieJournal(batch)
 	rawdb.WritePersistentStateID(batch, 0)
 	if err := batch.Write(); err != nil {
 		return err
@@ -400,7 +410,7 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		// disk layer won't be accessible from outside.
 		db.tree.reset(dl)
 	}
-	rawdb.DeleteTrieJournal(db.diskdb)
+	db.DeleteTrieJournal(db.diskdb)
 	_, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
 	if err != nil {
 		return err
@@ -526,6 +536,48 @@ func (db *Database) modifyAllowed() error {
 	}
 	if db.waitSync {
 		return errDatabaseWaitSync
+	}
+	return nil
+}
+
+// DetermineJournalTypeForWriter is used when persisting the journal.
+// It determines JournalType based on the config passed in by the Config.
+func (db *Database) DetermineJournalTypeForWriter() JournalType {
+	if db.config.JournalFile {
+		return JournalFileType
+	} else {
+		return JournalKVType
+	}
+}
+
+// DetermineJournalTypeForReader is used when loading the journal.
+// It loads based on whether JournalKV or JournalFile currently exists.
+func (db *Database) DetermineJournalTypeForReader() JournalType {
+	if journal := rawdb.ReadTrieJournal(db.diskdb); len(journal) != 0 {
+		return JournalKVType
+	}
+
+	if fileInfo, stateErr := os.Stat(db.config.JournalFilePath); stateErr == nil && !fileInfo.IsDir() {
+		return JournalFileType
+	}
+
+	return JournalKVType
+}
+
+// DeleteTrieJournal deletes trie journal data.
+func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {
+	// To prevent any remnants of old journals after converting from JournalKV to JournalFile
+	// or vice versa, all deletions must be completed.
+	rawdb.DeleteTrieJournal(writer)
+
+	// delete from journal file, may not exist
+	filePath := db.config.JournalFilePath
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil
+	}
+	errRemove := os.Remove(filePath)
+	if errRemove != nil {
+		log.Crit("Failed to remove tries journal", "journal path", filePath, "err", errRemove)
 	}
 	return nil
 }

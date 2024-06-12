@@ -281,8 +281,8 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	}
 	nf.traverseReverse(commitFunc)
 	// delete after testing
-	//prePersistID := nf.persistID
-	//preBaseLayes := nf.base.layers
+	prePersistID := nf.persistID
+	preBaseLayers := nf.base.layers
 	persistID := nf.persistID + nf.base.layers
 	err := nf.base.flush(nf.db, nf.clean, persistID)
 	if err != nil {
@@ -291,6 +291,13 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	nf.isFlushing.Store(false)
 	nf.base.reset()
 	nf.persistID = persistID
+
+	nblCountGauge.Update(int64(nf.count))
+	nblLayersGauge.Update(int64(nf.layers))
+	nblPersistIDGauge.Update(int64(nf.persistID))
+	nblPrePersistIDGauge.Update(int64(prePersistID))
+	nblBaseLayersGauge.Update(int64(nf.base.layers))
+	nblPreBaseLayersGauge.Update(int64(preBaseLayers))
 	// add metrics, delete after testing
 	// 1. nf.count  nf.layers => Guard type
 	// 2. nf.persistID prePersistID => Guard type

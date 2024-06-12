@@ -61,4 +61,12 @@ var (
 	baseNodeBufferDifflayerAvgSize = metrics.NewRegisteredGauge("pathdb/basenodebuffer/difflayeravgsize", nil)
 	proposedBlockReaderSuccess     = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/success", nil)
 	proposedBlockReaderMismatch    = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/mismatch", nil)
+
+	// temp metrics for test purpose
+	nblCountGauge         = metrics.NewRegisteredGauge("pathdb/nbl/count", nil)
+	nblLayersGauge        = metrics.NewRegisteredGauge("pathdb/nbl/layers", nil)
+	nblPersistIDGauge     = metrics.NewRegisteredGauge("pathdb/nbl/persistid", nil)
+	nblPrePersistIDGauge  = metrics.NewRegisteredGauge("pathdb/nbl/prepersistid", nil)
+	nblBaseLayersGauge    = metrics.NewRegisteredGauge("pathdb/nbl/baselayers", nil)
+	nblPreBaseLayersGauge = metrics.NewRegisteredGauge("pathdb/nbl/prebaselayers", nil)
 )

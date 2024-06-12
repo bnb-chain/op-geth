@@ -328,6 +328,9 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	// To remove outdated history objects from the end, we set the 'tail' parameter
 	// to 'oldest-1' due to the offset between the freezer index and the history ID.
 	if overflow {
+		if nl, ok := dl.buffer.(*nodebufferlist); ok {
+			oldest = nl.persistID - dl.db.config.StateHistory + 1
+		}
 		pruned, err := truncateFromTail(ndl.db.diskdb, ndl.db.freezer, oldest-1)
 		if err != nil {
 			return nil, err

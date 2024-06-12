@@ -270,6 +270,9 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	}
 
 	commitFunc := func(buffer *multiDifflayer) bool {
+		if nf.count <= nf.rsevMdNum {
+			return false
+		}
 		if err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes); err != nil {
 			log.Crit("failed to commit nodes to base node buffer", "error", err)
 		}
@@ -277,6 +280,9 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		return true
 	}
 	nf.traverseReverse(commitFunc)
+	// delete after testing
+	//prePersistID := nf.persistID
+	//preBaseLayes := nf.base.layers
 	persistID := nf.persistID + nf.base.layers
 	err := nf.base.flush(nf.db, nf.clean, persistID)
 	if err != nil {
@@ -285,6 +291,16 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	nf.isFlushing.Store(false)
 	nf.base.reset()
 	nf.persistID = persistID
+	// add metrics, delete after testing
+	// 1. nf.count  nf.layers => Guard type
+	// 2. nf.persistID prePersistID => Guard type
+	// 2. nf.base.layers preBaseLayes => Guard type
+
+	// test:
+	// 1. setup private seq
+	// 2. 10 accounts， 1qps， native transfer
+	// 3. add metrics(above)
+	// 4. wait more 9w
 	return nil
 }
 

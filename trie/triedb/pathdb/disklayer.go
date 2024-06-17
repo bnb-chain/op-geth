@@ -322,17 +322,35 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	if !force && rawdb.ReadPersistentStateID(dl.db.diskdb) < oldest {
 		force = true
 	}
+	ancientNumber, _ := ndl.db.freezer.Ancients()
+	ancientTail, _ := ndl.db.freezer.Tail()
+	nblAncientSizeGauge.Update(int64(ancientNumber))
+	nblAncientTailGauge.Update(int64(ancientTail))
+
 	if err := ndl.buffer.flush(ndl.db.diskdb, ndl.cleans, ndl.id, force); err != nil {
 		return nil, err
 	}
 	// To remove outdated history objects from the end, we set the 'tail' parameter
 	// to 'oldest-1' due to the offset between the freezer index and the history ID.
 	if overflow {
-		if nl, ok := dl.buffer.(*nodebufferlist); ok {
-			oldest = nl.persistID - dl.db.config.StateHistory + 1
+		if _, ok := dl.buffer.(*nodebufferlist); ok {
+			persistentId := rawdb.ReadPersistentStateID(dl.db.diskdb)
+			if persistentId > dl.db.config.StateHistory {
+				oldest = persistentId - dl.db.config.StateHistory + 1
+				log.Info("force prune ancient under nodebufferlist", "disk_persistent_state_id", persistentId, "truncate_tail", oldest)
+			} else {
+				log.Info("no prune ancient under nodebufferlist, less db config state history limit")
+				return ndl, nil
+			}
 		}
+
 		pruned, err := truncateFromTail(ndl.db.diskdb, ndl.db.freezer, oldest-1)
+		ancientNumber, _ = ndl.db.freezer.Ancients()
+		ancientTail, _ = ndl.db.freezer.Tail()
+		nblAncientSizeGauge.Update(int64(ancientNumber))
+		nblAncientTailGauge.Update(int64(ancientTail))
 		if err != nil {
+			log.Error("Failed to truncate from tail", "ntail", oldest-1)
 			return nil, err
 		}
 		log.Debug("Pruned state history", "items", pruned, "tailid", oldest)

@@ -271,6 +271,8 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 
 	commitFunc := func(buffer *multiDifflayer) bool {
 		if nf.count <= nf.rsevMdNum {
+			log.Info("Skip force flush bufferlist due to bufferlist is too less",
+				"bufferlist_count", nf.count, "reserve_multi_difflayer_number", nf.rsevMdNum)
 			return false
 		}
 		if err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes); err != nil {

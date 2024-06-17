@@ -69,4 +69,6 @@ var (
 	nblPrePersistIDGauge  = metrics.NewRegisteredGauge("pathdb/nbl/prepersistid", nil)
 	nblBaseLayersGauge    = metrics.NewRegisteredGauge("pathdb/nbl/baselayers", nil)
 	nblPreBaseLayersGauge = metrics.NewRegisteredGauge("pathdb/nbl/prebaselayers", nil)
+	nblAncientSizeGauge   = metrics.NewRegisteredGauge("pathdb/nbl/ancient/size", nil)
+	nblAncientTailGauge   = metrics.NewRegisteredGauge("pathdb/nbl/ancient/tail", nil)
 )

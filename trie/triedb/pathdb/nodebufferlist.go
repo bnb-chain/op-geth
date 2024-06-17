@@ -271,8 +271,8 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 
 	commitFunc := func(buffer *multiDifflayer) bool {
 		if nf.count <= nf.rsevMdNum {
-			log.Info("Skip force flush bufferlist due to bufferlist is too less",
-				"bufferlist_count", nf.count, "reserve_multi_difflayer_number", nf.rsevMdNum)
+			log.Info("keep multiDiffLayer in node bufferList for getting withdrawal proof",
+				"reserved_multidiflayer", nf.rsevMdNum, "bufferList_count", nf.count)
 			return false
 		}
 		if err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes); err != nil {
@@ -281,10 +281,8 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		_ = nf.popBack()
 		return true
 	}
+
 	nf.traverseReverse(commitFunc)
-	// delete after testing
-	prePersistID := nf.persistID
-	preBaseLayers := nf.base.layers
 	persistID := nf.persistID + nf.base.layers
 	err := nf.base.flush(nf.db, nf.clean, persistID)
 	if err != nil {
@@ -294,22 +292,6 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	nf.base.reset()
 	nf.persistID = persistID
 
-	nblCountGauge.Update(int64(nf.count))
-	nblLayersGauge.Update(int64(nf.layers))
-	nblPersistIDGauge.Update(int64(nf.persistID))
-	nblPrePersistIDGauge.Update(int64(prePersistID))
-	nblBaseLayersGauge.Update(int64(nf.base.layers))
-	nblPreBaseLayersGauge.Update(int64(preBaseLayers))
-	// add metrics, delete after testing
-	// 1. nf.count  nf.layers => Guard type
-	// 2. nf.persistID prePersistID => Guard type
-	// 2. nf.base.layers preBaseLayes => Guard type
-
-	// test:
-	// 1. setup private seq
-	// 2. 10 accounts， 1qps， native transfer
-	// 3. add metrics(above)
-	// 4. wait more 9w
 	return nil
 }
 

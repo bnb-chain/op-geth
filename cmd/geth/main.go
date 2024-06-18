@@ -234,6 +234,7 @@ func init() {
 		removedbCommand,
 		dumpCommand,
 		dumpGenesisCommand,
+		dumpRootHashCommand,
 		// See accountcmd.go:
 		accountCommand,
 		walletCommand,

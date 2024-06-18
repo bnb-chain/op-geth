@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -159,6 +162,7 @@ type Database struct {
 	freezer    *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
 	lock       sync.RWMutex             // Lock to prevent mutations from happening at the same time
 	capLock    sync.Mutex
+	tree2      *layerTree
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -579,4 +583,170 @@ func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {
 		log.Crit("Failed to remove tries journal", "journal path", filePath, "err", errRemove)
 	}
 	return nil
+}
+
+func (db *Database) ConvertTool(loader triestate.TrieLoader) error {
+	dl := db.tree.bottom()
+	stateID := rawdb.ReadStateID(db.diskdb, dl.rootHash())
+	persistentStateID := rawdb.ReadPersistentStateID(db.diskdb)
+
+	ancient, err := db.diskdb.AncientDatadir()
+	if err != nil {
+		log.Error("Failed to get ancient datadir", "error", err)
+		return err
+	}
+	freezer, err := rawdb.NewStateFreezer(ancient, true)
+	if err != nil {
+		log.Error("Failed to new state freezer", "error", err)
+		return err
+	}
+	db.freezer = freezer
+
+	freezerLength, err := db.freezer.Ancients()
+	if err != nil {
+		log.Error("Failed to get freezer ancients", "error", err)
+		return err
+	}
+	tail, err := db.freezer.Tail()
+	if err != nil {
+		log.Error("Failed to get freezer tail", "error", err)
+		return err
+	}
+	log.Info("Print ancient db meta", "state id", *stateID, "persistent state id", persistentStateID,
+		"freezer length", freezerLength, "freezer tail", tail, "config", db.config.StateHistory,
+		"bottom stateID", dl.stateID(), "bottom root", dl.rootHash().String())
+
+	db.tree2 = newLayerTree(dl)
+	waitingRecoverNum := freezerLength - persistentStateID
+	start := time.Now()
+	var (
+		nodes *trienode.MergedNodeSet
+		count = uint64(2)
+	)
+	for {
+		h, err := readHistory(db.freezer, *stateID+count)
+		if err != nil {
+			if checkError(err) {
+				log.Info("There are no more states in disk db", "count", count)
+				break
+			}
+			log.Error("Failed to read history from freezer db", "error", err)
+			return err
+		}
+		log.Info("print history size", "size", h.Size(), "history root", h.meta.root.String(),
+			"history parent root", h.meta.parent.String(), "current state id", *stateID+count)
+
+		if count > 2 {
+			break
+		}
+		dl, nodes, err = dl.apply(dl.rootHash(), h, loader)
+		if err != nil {
+			log.Error("Failed to revert", "error", err)
+			return err
+		}
+		db.tree.reset(dl)
+
+		incomplete := make(map[common.Address]struct{})
+		for _, addr := range h.meta.incomplete {
+			incomplete[addr] = struct{}{}
+		}
+		states := triestate.New(h.accounts, h.storages, incomplete)
+
+		if err = db.addDiffLayer(nil, h.meta.root, h.meta.parent, *stateID+count, h.meta.block, nodes, states); err != nil {
+			log.Error("Failed to add diff layer", "error", err)
+			return err
+		}
+		count++
+	}
+	// for i := uint64(0); i < 2; i++ {
+	// 	h, err := readHistory(db.freezer, *stateID-i)
+	// 	if err != nil {
+	// 		log.Error("Failed to read history from freezer db", "error", err)
+	// 		return err
+	// 	}
+	// 	log.Info("print history size", "size", h.Size(), "history root", h.meta.root.String(),
+	// 		"history parent root", h.meta.parent.String(), "current state id", *stateID-i)
+	//
+	// 	dl, nodes, err = dl.revert1(h, loader)
+	// 	if err != nil {
+	// 		log.Error("Failed to revert", "error", err)
+	// 		return err
+	// 	}
+	// 	db.tree.reset(dl)
+	//
+	// 	incomplete := make(map[common.Address]struct{})
+	// 	for _, addr := range h.meta.incomplete {
+	// 		incomplete[addr] = struct{}{}
+	// 	}
+	// 	states := triestate.New(h.accounts, h.storages, incomplete)
+	//
+	// 	if err = db.addDiffLayer(h.meta.root, h.meta.parent, *stateID-i, h.meta.block, nodes, states); err != nil {
+	// 		log.Error("Failed to add diff layer", "error", err)
+	// 		return err
+	// 	}
+	// }
+	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
+		"waitingRecoverNum", waitingRecoverNum)
+
+	return nil
+}
+
+// 优化：并行读取全部history，放进map里，不需要维护parent链表的关系，后续考虑维护链表指针
+func (db *Database) addDiffLayer(dl *diskLayer, root common.Hash, parentRoot common.Hash, stateID uint64, block uint64,
+	nodes *trienode.MergedNodeSet, states *triestate.Set) error {
+	// Hold the lock to prevent concurrent mutations.
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	// Short circuit if the mutation is not allowed.
+	if err := db.modifyAllowed(); err != nil {
+		return err
+	}
+	// log.Info("print layer tree", "length", db.tree.len(), "content", db.tree.layers)
+
+	root, parentRoot = types.TrieRootHash(root), types.TrieRootHash(parentRoot)
+	if root == parentRoot {
+		return errors.New("layer cycle")
+	}
+	// TODO: parent now is nil
+	l := newDiffLayer(nil, root, stateID, block, nodes.Flatten(), states)
+
+	// TODO: no need to use lock now
+	// db.tree2.lock.Lock()
+	db.tree2.layers[l.rootHash()] = l
+	// db.tree2.lock.Unlock()
+
+	log.Info("done", "layer tree length", db.tree2.len())
+	return nil
+}
+
+// func (db *Database) revert(h *history, load triestate.TrieLoader) (*diskLayer, error) {
+// 	if h.meta.root !=
+// }
+
+func checkError(err error) bool {
+	if strings.Contains(err.Error(), "state history not found") {
+		return true
+	}
+	return false
+}
+
+func (db *Database) GetAllRooHash() [][]string {
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	data := make([][]string, 0, len(db.tree.layers))
+	for _, v := range db.tree.layers {
+		if dl, ok := v.(*diffLayer); ok {
+			data = append(data, []string{fmt.Sprintf("%d", dl.block), dl.rootHash().String()})
+		}
+	}
+	sort.Slice(data, func(i, j int) bool {
+		block1, _ := strconv.Atoi(data[i][0])
+		block2, _ := strconv.Atoi(data[j][0])
+		return block1 > block2
+	})
+
+	data = append(data, []string{"-1", db.tree.bottom().rootHash().String()})
+	return data
 }

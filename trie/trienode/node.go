@@ -197,3 +197,8 @@ func (set *MergedNodeSet) Flatten() map[common.Hash]map[string]*Node {
 	}
 	return nodes
 }
+
+// // ReverseFlatten reverts flattened two-dimensional map to merge node set
+// func ReverseFlatten(nodes map[common.Hash]map[string]*Node) MergedNodeSet {
+//
+// }

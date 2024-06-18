@@ -411,6 +411,44 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer), nil
 }
 
+func (dl *diskLayer) apply(prevRoot common.Hash, h *history, loader triestate.TrieLoader) (*diskLayer, *trienode.MergedNodeSet, error) {
+	// if h.meta.parent != dl.rootHash() {
+	// 	return nil, nil, errUnexpectedHistory
+	// }
+	// Reject if the provided state history is incomplete. It's due to
+	// a large construct SELF-DESTRUCT which can't be handled because
+	// of memory limitation.
+	if len(h.meta.incomplete) > 0 {
+		return nil, nil, errors.New("incomplete state history")
+	}
+	if dl.id == 0 {
+		return nil, nil, fmt.Errorf("%w: zero state id", errStateUnrecoverable)
+	}
+	// Apply the reverse state changes upon the current state. This must
+	// be done before holding the lock in order to access state in "this"
+	// layer.
+	set, err := triestate.ApplyForDiff(prevRoot, h.meta.parent, h.accounts, h.storages, loader)
+	if err != nil {
+		log.Error("Failed to apply state diffs", "error", err)
+		return nil, nil, err
+	}
+	// Mark the diskLayer as stale before applying any mutations on top.
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+
+	dl.stale = true
+
+	// nodes := set.Flatten()
+	// batch := dl.db.diskdb.NewBatch()
+	// writeNodes(batch, nodes, dl.cleans)
+	// rawdb.WritePersistentStateID(batch, dl.id+1)
+	// if err = batch.Write(); err != nil {
+	// 	log.Crit("Failed to write states", "err", err)
+	// }
+
+	return newDiskLayer(h.meta.parent, dl.id+1, dl.db, dl.cleans, dl.buffer), set, nil
+}
+
 // setBufferSize sets the node buffer size to the provided value.
 func (dl *diskLayer) setBufferSize(size int) error {
 	dl.lock.RLock()

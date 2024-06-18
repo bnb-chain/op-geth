@@ -489,6 +489,40 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 	return nil
 }
 
+func (h *history) Size() int {
+	size := 0
+
+	// calculate size of meta
+	if h.meta != nil {
+		metaSize := 1
+		metaSize += len(h.meta.parent) + len(h.meta.root)
+		metaSize += 8
+		metaSize += len(h.meta.incomplete) * (common.AddressLength)
+
+		size += metaSize
+	}
+	// calculate size of accounts
+	for address, data := range h.accounts {
+		size += len(address)
+		size += len(data)
+	}
+	// calculate size of accountList
+	size += len(h.accountList) * common.AddressLength
+	// calculate size of storages
+	for _, storage := range h.storages {
+		for slotHash, data := range storage {
+			size += len(slotHash)
+			size += len(data)
+		}
+	}
+	// calculate size of storageList
+	for _, slots := range h.storageList {
+		size += len(slots) * common.HashLength
+	}
+
+	return size
+}
+
 // readHistory reads and decodes the state history object by the given id.
 func readHistory(freezer *rawdb.ResettableFreezer, id uint64) (*history, error) {
 	blob := rawdb.ReadStateHistoryMeta(freezer, id)

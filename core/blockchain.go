@@ -284,10 +284,11 @@ type BlockChain struct {
 	// future blocks are blocks added for later processing
 	futureBlocks *lru.Cache[common.Hash, *types.Block]
 
-	wg            sync.WaitGroup
-	quit          chan struct{} // shutdown signal, closed in Stop.
-	stopping      atomic.Bool   // false if chain is running, true when stopped
-	procInterrupt atomic.Bool   // interrupt signaler for block processing
+	wg            sync.WaitGroup //
+	dbWg          sync.WaitGroup
+	quit          chan struct{}  // shutdown signal, closed in Stop.
+	stopping      atomic.Bool    // false if chain is running, true when stopped
+	procInterrupt atomic.Bool    // interrupt signaler for block processing
 
 	engine     consensus.Engine
 	validator  Validator // Block and state validator interface
@@ -540,7 +541,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 // into node seamlessly.
 func (bc *BlockChain) empty() bool {
 	genesis := bc.genesisBlock.Hash()
-	for _, hash := range []common.Hash{rawdb.ReadHeadBlockHash(bc.db.BlockStore()), rawdb.ReadHeadHeaderHash(bc.db.BlockStore()), rawdb.ReadHeadFastBlockHash(bc.db)} {
+	for _, hash := range []common.Hash{rawdb.ReadHeadBlockHash(bc.db.BlockStore()), rawdb.ReadHeadHeaderHash(bc.db.BlockStore()), rawdb.ReadHeadFastBlockHash(bc.db.BlockStore())} {
 		if hash != genesis {
 			return false
 		}
@@ -582,7 +583,7 @@ func (bc *BlockChain) loadLastState() error {
 	bc.currentSnapBlock.Store(headBlock.Header())
 	headFastBlockGauge.Update(int64(headBlock.NumberU64()))
 
-	if head := rawdb.ReadHeadFastBlockHash(bc.db); head != (common.Hash{}) {
+	if head := rawdb.ReadHeadFastBlockHash(bc.db.BlockStore()); head != (common.Hash{}) {
 		if block := bc.GetBlockByHash(head); block != nil {
 			bc.currentSnapBlock.Store(block.Header())
 			headFastBlockGauge.Update(int64(block.NumberU64()))
@@ -848,7 +849,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	// If SetHead was only called as a chain reparation method, try to skip
 	// touching the header chain altogether, unless the freezer is broken
 	if repair {
-		if target, force := updateFn(bc.db, bc.CurrentBlock()); force {
+		if target, force := updateFn(bc.db.BlockStore(), bc.CurrentBlock()); force {
 			bc.hc.SetHead(target.Number.Uint64(), updateFn, delFn)
 		}
 	} else {
@@ -1001,19 +1002,33 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 //
 // Note, this function assumes that the `mu` mutex is held!
 func (bc *BlockChain) writeHeadBlock(block *types.Block) {
-	// Add the block to the canonical chain number scheme and mark as the head
-	rawdb.WriteCanonicalHash(bc.db.BlockStore(), block.Hash(), block.NumberU64())
-	rawdb.WriteHeadHeaderHash(bc.db.BlockStore(), block.Hash())
-	rawdb.WriteHeadBlockHash(bc.db.BlockStore(), block.Hash())
+	bc.dbWg.Add(2)
+	defer bc.dbWg.Wait()
+	go func() {
+		defer bc.dbWg.Done()
+		// Add the block to the canonical chain number scheme and mark as the head
+		blockBatch := bc.db.BlockStore().NewBatch()
+		rawdb.WriteCanonicalHash(blockBatch, block.Hash(), block.NumberU64())
+		rawdb.WriteHeadHeaderHash(blockBatch, block.Hash())
+		rawdb.WriteHeadBlockHash(blockBatch, block.Hash())
+		rawdb.WriteHeadFastBlockHash(blockBatch, block.Hash())
+		// Flush the whole batch into the disk, exit the node if failed
+		if err := blockBatch.Write(); err != nil {
+			log.Crit("Failed to update chain indexes and markers in block db", "err", err)
+		}
+	}()
+	go func() {
+		defer bc.dbWg.Done()
 
-	batch := bc.db.NewBatch()
-	rawdb.WriteHeadFastBlockHash(batch, block.Hash())
-	rawdb.WriteTxLookupEntriesByBlock(batch, block)
+		batch := bc.db.NewBatch()
+		rawdb.WriteTxLookupEntriesByBlock(batch, block)
 
-	// Flush the whole batch into the disk, exit the node if failed
-	if err := batch.Write(); err != nil {
-		log.Crit("Failed to update chain indexes and markers", "err", err)
-	}
+		// Flush the whole batch into the disk, exit the node if failed
+		if err := batch.Write(); err != nil {
+			log.Crit("Failed to update chain indexes in chain db", "err", err)
+		}
+	}()
+
 	// Update all in-memory chain markers in the last step
 	bc.hc.SetCurrentHeader(block.Header())
 
@@ -1241,7 +1256,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			} else if !reorg {
 				return false
 			}
-			rawdb.WriteHeadFastBlockHash(bc.db, head.Hash())
+			rawdb.WriteHeadFastBlockHash(bc.db.BlockStore(), head.Hash())
 			bc.currentSnapBlock.Store(head.Header())
 			headFastBlockGauge.Update(int64(head.NumberU64()))
 			return true
@@ -1478,18 +1493,20 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	wg.Add(1)
 	defer wg.Wait()
 	go func() {
-
 		if metrics.EnabledExpensive {
 			defer func(start time.Time) { blockCommitTimer.Update(time.Since(start)) }(time.Now())
 		}
 		defer wg.Done()
-		rawdb.WritePreimages(bc.db, state.Preimages())
 		blockBatch := bc.db.BlockStore().NewBatch()
 		start := time.Now()
 		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
 		rawdb.WriteBlock(blockBatch, block)
 		rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
-		rawdb.WritePreimages(blockBatch, state.Preimages())
+		if bc.db.StateStore() != nil {
+			rawdb.WritePreimages(bc.db.StateStore(), state.Preimages())
+		} else {
+			rawdb.WritePreimages(blockBatch, state.Preimages())
+		}
 		if err := blockBatch.Write(); err != nil {
 			log.Crit("Failed to write block into disk", "err", err)
 		}

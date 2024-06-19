@@ -119,7 +119,6 @@ type Config struct {
 func (c *Config) sanitize() *Config {
 	conf := *c
 	if conf.DirtyCacheSize > MaxBufferSize {
-		conf.CleanCacheSize = conf.DirtyCacheSize - MaxBufferSize
 		log.Warn("Sanitizing invalid node buffer size", "provided", common.StorageSize(conf.DirtyCacheSize), "updated", common.StorageSize(MaxBufferSize))
 		conf.DirtyCacheSize = MaxBufferSize
 	}

@@ -198,6 +198,12 @@ func (dl *diffLayer) originDiskLayer() *diskLayer {
 	return dl.origin
 }
 
+func (dl *diffLayer) updateOriginDiskLayer(persistLayer *diskLayer) {
+	dl.lock.Lock()
+	defer dl.lock.Unlock()
+	dl.origin = persistLayer
+}
+
 // rootHash implements the layer interface, returning the root hash of
 // corresponding state.
 func (dl *diffLayer) rootHash() common.Hash {

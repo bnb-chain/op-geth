@@ -109,10 +109,7 @@ func (tree *layerTree) add(root common.Hash, parentRoot common.Hash, block uint6
 	if root == parentRoot {
 		return errors.New("layer cycle")
 	}
-	if tree.get(root) != nil {
-		log.Info("Skip add repeated difflayer", "root", root.String(), "block_id", block)
-		return nil
-	}
+
 	parent := tree.get(parentRoot)
 	if parent == nil {
 		return fmt.Errorf("triedb parent [%#x] layer missing", parentRoot)
@@ -121,6 +118,13 @@ func (tree *layerTree) add(root common.Hash, parentRoot common.Hash, block uint6
 
 	// Before adding layertree, update the hash cache.
 	l.cache.Add(l)
+
+	if old := tree.get(l.rootHash()); old != nil {
+		if oldDiff, ok := old.(*diffLayer); ok {
+			oldDiff.cache.Remove(oldDiff)
+			log.Info("remove repeated difflayer cache", "root", l.rootHash(), "block_id", l.block)
+		}
+	}
 
 	tree.lock.Lock()
 	tree.layers[l.rootHash()] = l

@@ -585,6 +585,77 @@ func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {
 	return nil
 }
 
+func (db *Database) ConvertTool1(loader triestate.TrieLoader) error {
+	dl := db.tree.bottom()
+	stateID := rawdb.ReadStateID(db.diskdb, dl.rootHash())
+	persistentStateID := rawdb.ReadPersistentStateID(db.diskdb)
+
+	ancient, err := db.diskdb.AncientDatadir()
+	if err != nil {
+		log.Error("Failed to get ancient datadir", "error", err)
+		return err
+	}
+	freezer, err := rawdb.NewStateFreezer(ancient, true)
+	if err != nil {
+		log.Error("Failed to new state freezer", "error", err)
+		return err
+	}
+	db.freezer = freezer
+
+	freezerLength, err := db.freezer.Ancients()
+	if err != nil {
+		log.Error("Failed to get freezer ancients", "error", err)
+		return err
+	}
+	tail, err := db.freezer.Tail()
+	if err != nil {
+		log.Error("Failed to get freezer tail", "error", err)
+		return err
+	}
+	log.Info("Print ancient db meta", "state id", *stateID, "persistent state id", persistentStateID,
+		"freezer length", freezerLength, "freezer tail", tail, "config", db.config.StateHistory,
+		"bottom stateID", dl.stateID(), "bottom root", dl.rootHash().String())
+
+	db.tree2 = newLayerTree(dl)
+	waitingRecoverNum := freezerLength - tail
+	start := time.Now()
+	historySize := 0
+	diffSize := uint64(0)
+	for i := uint64(0); i < waitingRecoverNum; i++ {
+		h, err := readHistory(db.freezer, *stateID-i)
+		if err != nil {
+			if checkError(err) {
+				log.Info("There are no more states in disk db", "state id", *stateID-i)
+				continue
+			}
+			log.Error("Failed to read history from freezer db", "error", err)
+			return err
+		}
+		historySize += h.Size()
+		log.Info("print history size", "size", common.StorageSize(h.Size()), "history root", h.meta.root.String(),
+			"history parent root", h.meta.parent.String(), "current state id", *stateID-i)
+
+		incomplete := make(map[common.Address]struct{})
+		for _, addr := range h.meta.incomplete {
+			incomplete[addr] = struct{}{}
+		}
+		states := triestate.New(h.accounts, h.storages, incomplete)
+
+		size, err := db.addDiffLayer(h.meta.root, h.meta.parent, *stateID-i, h.meta.block, nil, states)
+		if err != nil {
+			log.Error("Failed to add diff layer", "error", err)
+			return err
+		}
+		diffSize += size
+	}
+	layerTreeSize := uint64(db.tree2.len() * 32)
+	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
+		"waitingRecoverNum", waitingRecoverNum, "total history size", common.StorageSize(historySize),
+		"total diff size", common.StorageSize(diffSize), "layer tree size", common.StorageSize(layerTreeSize))
+
+	return nil
+}
+
 func (db *Database) ConvertTool(loader triestate.TrieLoader) error {
 	dl := db.tree.bottom()
 	stateID := rawdb.ReadStateID(db.diskdb, dl.rootHash())
@@ -652,7 +723,7 @@ func (db *Database) ConvertTool(loader triestate.TrieLoader) error {
 		}
 		states := triestate.New(h.accounts, h.storages, incomplete)
 
-		if err = db.addDiffLayer(nil, h.meta.root, h.meta.parent, *stateID+count, h.meta.block, nodes, states); err != nil {
+		if _, err = db.addDiffLayer(h.meta.root, h.meta.parent, *stateID+count, h.meta.block, nodes, states); err != nil {
 			log.Error("Failed to add diff layer", "error", err)
 			return err
 		}
@@ -691,38 +762,27 @@ func (db *Database) ConvertTool(loader triestate.TrieLoader) error {
 	return nil
 }
 
-// 优化：并行读取全部history，放进map里，不需要维护parent链表的关系，后续考虑维护链表指针
-func (db *Database) addDiffLayer(dl *diskLayer, root common.Hash, parentRoot common.Hash, stateID uint64, block uint64,
-	nodes *trienode.MergedNodeSet, states *triestate.Set) error {
+func (db *Database) addDiffLayer(root common.Hash, parentRoot common.Hash, stateID uint64, block uint64,
+	nodes *trienode.MergedNodeSet, states *triestate.Set) (uint64, error) {
 	// Hold the lock to prevent concurrent mutations.
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
-	// Short circuit if the mutation is not allowed.
-	if err := db.modifyAllowed(); err != nil {
-		return err
-	}
-	// log.Info("print layer tree", "length", db.tree.len(), "content", db.tree.layers)
-
 	root, parentRoot = types.TrieRootHash(root), types.TrieRootHash(parentRoot)
 	if root == parentRoot {
-		return errors.New("layer cycle")
+		return 0, errors.New("layer cycle")
 	}
 	// TODO: parent now is nil
-	l := newDiffLayer(nil, root, stateID, block, nodes.Flatten(), states)
+	l := newDiffLayer(nil, root, stateID, block, nil, states)
 
 	// TODO: no need to use lock now
 	// db.tree2.lock.Lock()
 	db.tree2.layers[l.rootHash()] = l
 	// db.tree2.lock.Unlock()
 
-	log.Info("done", "layer tree length", db.tree2.len())
-	return nil
+	log.Info("done", "layer tree length", db.tree2.len(), "size", common.StorageSize(l.memory))
+	return l.memory, nil
 }
-
-// func (db *Database) revert(h *history, load triestate.TrieLoader) (*diskLayer, error) {
-// 	if h.meta.root !=
-// }
 
 func checkError(err error) bool {
 	if strings.Contains(err.Error(), "state history not found") {

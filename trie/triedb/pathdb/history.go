@@ -492,36 +492,32 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 func (h *history) Size() int {
 	size := 0
 
-	// Calculate size of meta
+	// calculate size of meta
 	if h.meta != nil {
-		metaSize := 1                                               // assuming uint8 takes 1 byte.
-		metaSize += len(h.meta.parent) + len(h.meta.root)           // common.Hash's size.
-		metaSize += 8                                               // assuming uint64 for block takes 8 bytes.
-		metaSize += len(h.meta.incomplete) * (common.AddressLength) // Size of incomplete addresses
+		metaSize := 1
+		metaSize += len(h.meta.parent) + len(h.meta.root)
+		metaSize += 8
+		metaSize += len(h.meta.incomplete) * (common.AddressLength)
 
 		size += metaSize
 	}
-
-	// Calculate size of accounts
+	// calculate size of accounts
 	for address, data := range h.accounts {
-		size += len(address) // each address is 20 bytes.
-		size += len(data)    // byte slice size.
+		size += len(address)
+		size += len(data)
 	}
-
-	// Calculate size of accountList
-	size += len(h.accountList) * common.AddressLength // Each address is 20 bytes.
-
-	// Calculate size of storages
+	// calculate size of accountList
+	size += len(h.accountList) * common.AddressLength
+	// calculate size of storages
 	for _, storage := range h.storages {
 		for slotHash, data := range storage {
-			size += len(slotHash) // each slot hash is 32 bytes.
-			size += len(data)     // data byte slice size.
+			size += len(slotHash)
+			size += len(data)
 		}
 	}
-
-	// Calculate size of storageList
+	// calculate size of storageList
 	for _, slots := range h.storageList {
-		size += len(slots) * common.HashLength // Each slot hash is 32 bytes.
+		size += len(slots) * common.HashLength
 	}
 
 	return size

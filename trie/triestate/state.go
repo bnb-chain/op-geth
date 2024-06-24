@@ -161,8 +161,6 @@ func ApplyForDiff(prevRoot common.Hash, postRoot common.Hash, accounts map[commo
 	for addr, account := range accounts {
 		var err error
 		if len(account) == 0 {
-			log.Info("18189")
-			// continue
 			err = deleteAccountForRecovering(ctx, loader, addr)
 		} else {
 			err = updateAccountForRecovering(ctx, loader, addr)
@@ -171,10 +169,8 @@ func ApplyForDiff(prevRoot common.Hash, postRoot common.Hash, accounts map[commo
 		if err != nil {
 			return nil, fmt.Errorf("failed to apply state, err: %w", err)
 		}
-		log.Info("388234")
 	}
 	root, result, err := tr.Commit(false)
-	log.Info("print", "root", root, "result", result)
 
 	if err != nil {
 		return nil, err
@@ -200,27 +196,23 @@ func updateAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 	addrHash := h.hash(addr.Bytes())
 	prev, err := types.FullAccount(ctx.accounts[addr])
 	if err != nil {
-		log.Error("1")
 		return err
 	}
 	// The account may or may not existent in post-state, try to
 	// load it and decode if it's found.
 	blob, err := ctx.accountTrie.Get(addrHash.Bytes())
 	if err != nil {
-		log.Error("2")
 		return err
 	}
 	post := types.NewEmptyStateAccount()
 	if len(blob) != 0 {
 		if err := rlp.DecodeBytes(blob, &post); err != nil {
-			log.Error("3")
 			return err
 		}
 	}
 	// Apply all storage changes into the post-state storage trie.
 	st, err := loader.OpenStorageTrie(ctx.postRoot, addrHash, post.Root)
 	if err != nil {
-		log.Error("4")
 		return err
 	}
 	for key, val := range ctx.storages[addr] {
@@ -231,13 +223,11 @@ func updateAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 			err = st.Update(key.Bytes(), val)
 		}
 		if err != nil {
-			log.Error("5")
 			return err
 		}
 	}
 	root, result, err := st.Commit(false)
 	if err != nil {
-		log.Error("6")
 		return err
 	}
 	if root != prev.Root {
@@ -247,14 +237,12 @@ func updateAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 	// at all.
 	if result != nil {
 		if err := ctx.nodes.Merge(result); err != nil {
-			log.Error("7")
 			return err
 		}
 	}
 	// Write the prev-state account into the main trie
 	full, err := rlp.EncodeToBytes(prev)
 	if err != nil {
-		log.Error("8")
 		return err
 	}
 	return ctx.accountTrie.Update(addrHash.Bytes(), full)
@@ -279,12 +267,10 @@ func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 	}
 	var post types.StateAccount
 	if err := rlp.DecodeBytes(blob, &post); err != nil {
-		log.Error("10")
 		return err
 	}
 	st, err := loader.OpenStorageTrie(ctx.postRoot, addrHash, post.Root)
 	if err != nil {
-		log.Error("11")
 		return err
 	}
 	for key, val := range ctx.storages[addr] {
@@ -292,7 +278,6 @@ func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 			return errors.New("expect storage deletion")
 		}
 		if err := st.Delete(key.Bytes()); err != nil {
-			log.Error("12")
 			return err
 		}
 	}
@@ -308,7 +293,6 @@ func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 	// at all.
 	if result != nil {
 		if err := ctx.nodes.Merge(result); err != nil {
-			log.Error("14")
 			return err
 		}
 	}
@@ -326,8 +310,6 @@ func updateAccountForRecovering(ctx *context, loader TrieLoader, addr common.Add
 	defer h.release()
 
 	addrHash := h.hash(addr.Bytes())
-	a, ok := ctx.accounts[addr]
-	log.Info("uuu", "length", len(a), "addr", addr.String(), "ok", ok)
 	post, err := types.FullAccount(ctx.accounts[addr])
 	if err != nil {
 		log.Error("Failed to full account for updating", "error", err, "addr", addr.String())
@@ -355,12 +337,10 @@ func updateAccountForRecovering(ctx *context, loader TrieLoader, addr common.Add
 	}
 	for k, v := range ctx.storages[addr] {
 		if len(v) == 0 {
-			log.Info("euu")
 			err = st.Delete(k.Bytes())
 		} else {
 			err = st.Update(k.Bytes(), v)
 		}
-		// err = st.Update(k.Bytes(), v)
 		if err != nil {
 			log.Error("Failed to delete or update", "error", err)
 			return err
@@ -397,15 +377,12 @@ func deleteAccountForRecovering(ctx *context, loader TrieLoader, addr common.Add
 	h := newHasher()
 	defer h.release()
 
-	log.Info("2399324")
 	addrHash := h.hash(addr.Bytes())
 	blob, err := ctx.accountTrie.Get(addrHash.Bytes())
 	if err != nil {
-		log.Error("wueuw")
 		return err
 	}
 	if len(blob) == 0 {
-		log.Info("ewrwee", "addr", addr.String())
 		return fmt.Errorf("account is nonexistent %#x", addrHash)
 	}
 	var prev types.StateAccount

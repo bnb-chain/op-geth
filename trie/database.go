@@ -370,7 +370,7 @@ func (db *Database) DiffLayerConvertTool() error {
 	if !ok {
 		return errors.New("not supported")
 	}
-	return pdb.ConvertTool(&trieLoader{db: db})
+	return pdb.ConvertTool1(&trieLoader{db: db})
 }
 
 func (db *Database) GetAllRooHash() [][]string {

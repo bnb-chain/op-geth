@@ -67,6 +67,11 @@ var (
 	// than init code size limit.
 	ErrMaxInitCodeSizeExceeded = errors.New("max initcode size exceeded")
 
+	// ErrInsufficientBalanceWitness is returned if the transaction sender has enough
+	// funds to cover the transfer, but not enough to pay for witness access/modification
+	// costs for the transaction
+	ErrInsufficientBalanceWitness = errors.New("insufficient funds to cover witness access costs for transaction")
+
 	// ErrInsufficientFunds is returned if the total cost of executing a transaction
 	// is higher than the balance of the user's account.
 	ErrInsufficientFunds = errors.New("insufficient funds for gas * price + value")
@@ -110,6 +115,13 @@ var (
 
 	// ErrBlobTxCreate is returned if a blob transaction has no explicit to field.
 	ErrBlobTxCreate = errors.New("blob transaction of type create")
+
+	// ErrEmptyAuthList is returned if a set code transaction has an empty auth list.
+	ErrEmptyAuthList = errors.New("set code transaction with empty auth list")
+
+	// ErrAuthSignatureVeryHigh is returned if a set code transaction has a
+	// signature with R or S larger than 2^256-1.
+	ErrAuthSignatureVeryHigh = errors.New("set code transaction has authorization with R or S value greater than 2^256 - 1")
 
 	// ErrSystemTxNotSupported is returned for any deposit tx with IsSystemTx=true after the Regolith fork
 	ErrSystemTxNotSupported = errors.New("system tx not supported")

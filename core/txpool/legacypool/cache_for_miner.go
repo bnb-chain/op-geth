@@ -1,6 +1,7 @@
 package legacypool
 
 import (
+	"github.com/holiman/uint256"
 	"math/big"
 	"sort"
 	"sync"
@@ -100,8 +101,8 @@ func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.I
 					Hash:      tx.Hash(),
 					Tx:        tx,
 					Time:      tx.Time(),
-					GasFeeCap: tx.GasFeeCap(),
-					GasTipCap: tx.GasTipCap(),
+					GasFeeCap: uint256.MustFromBig(tx.GasFeeCap()),
+					GasTipCap: uint256.MustFromBig(tx.GasTipCap()),
 					Gas:       tx.Gas(),
 					BlobGas:   tx.BlobGas(),
 				}

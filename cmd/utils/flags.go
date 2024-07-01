@@ -74,9 +74,9 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/netutil"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethereum/go-ethereum/trie"
-	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
-	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
+	"github.com/ethereum/go-ethereum/triedb"
+	"github.com/ethereum/go-ethereum/triedb/hashdb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 )
 
 // These are all the command line flags we support.
@@ -292,6 +292,11 @@ var (
 	OverrideOptimismEcotone = &cli.Uint64Flag{
 		Name:     "override.ecotone",
 		Usage:    "Manually specify the Optimism Ecotone fork timestamp, overriding the bundled setting",
+		Category: flags.EthCategory,
+	}
+	OverrideOptimismFjord = &cli.Uint64Flag{
+		Name:     "override.fjord",
+		Usage:    "Manually specify the Optimism Fjord fork timestamp, overriding the bundled setting",
 		Category: flags.EthCategory,
 	}
 	OverrideOptimismInterop = &cli.Uint64Flag{
@@ -528,6 +533,12 @@ var (
 		Name:     "miner.gaslimit",
 		Usage:    "Target gas ceiling for mined blocks",
 		Value:    ethconfig.Defaults.Miner.GasCeil,
+		Category: flags.MinerCategory,
+	}
+	MinerEffectiveGasLimitFlag = &cli.Uint64Flag{
+		Name:     "miner.effectivegaslimit",
+		Usage:    "If non-zero, an effective gas limit to apply in addition to the block header gaslimit.",
+		Value:    0,
 		Category: flags.MinerCategory,
 	}
 	MinerGasPriceFlag = &flags.BigFlag{
@@ -1173,13 +1184,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 			if ctx.Uint64(NetworkIdFlag.Name) == params.OpBNBTestnet {
 				urls = params.OpBNBTestnetBootnodes
 			}
-		case ctx.IsSet(OPNetworkFlag.Name):
-			network := ctx.String(OPNetworkFlag.Name)
-			if strings.Contains(strings.ToLower(network), "mainnet") {
-				urls = params.OPMainnetBootnodes
-			} else {
-				urls = params.OPSepoliaBootnodes
-			}
 		}
 	}
 	cfg.BootstrapNodes = mustParseBootnodes(urls)
@@ -1212,9 +1216,9 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 	case ctx.IsSet(OPNetworkFlag.Name):
 		network := ctx.String(OPNetworkFlag.Name)
 		if strings.Contains(strings.ToLower(network), "mainnet") {
-			urls = append(urls, params.OPMainnetBootnodes...)
+			urls = params.V5OPBootnodes
 		} else {
-			urls = append(urls, params.OPSepoliaBootnodes...)
+			urls = params.V5OPTestnetBootnodes
 		}
 	case ctx.Bool(OpBNBTestnetFlag.Name):
 		urls = params.OpBNBTestnetBootnodes
@@ -1691,6 +1695,11 @@ func setTxPool(ctx *cli.Context, cfg *legacypool.Config) {
 	if ctx.IsSet(TxPoolLifetimeFlag.Name) {
 		cfg.Lifetime = ctx.Duration(TxPoolLifetimeFlag.Name)
 	}
+	if ctx.IsSet(MinerEffectiveGasLimitFlag.Name) {
+		// While technically this is a miner config parameter, we also want the txpool to enforce
+		// it to avoid accepting transactions that can never be included in a block.
+		cfg.EffectiveGasCeil = ctx.Uint64(MinerEffectiveGasLimitFlag.Name)
+	}
 	if ctx.IsSet(TxPoolReannounceTimeFlag.Name) {
 		cfg.ReannounceTime = ctx.Duration(TxPoolReannounceTimeFlag.Name)
 	}
@@ -1705,6 +1714,9 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 	if ctx.IsSet(MinerGasLimitFlag.Name) {
 		cfg.GasCeil = ctx.Uint64(MinerGasLimitFlag.Name)
+	}
+	if ctx.IsSet(MinerEffectiveGasLimitFlag.Name) {
+		cfg.EffectiveGasCeil = ctx.Uint64(MinerEffectiveGasLimitFlag.Name)
 	}
 	if ctx.IsSet(MinerGasPriceFlag.Name) {
 		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)
@@ -2455,8 +2467,8 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 }
 
 // MakeTrieDatabase constructs a trie database based on the configured scheme.
-func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, preimage bool, readOnly bool, isVerkle bool) *trie.Database {
-	config := &trie.Config{
+func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, preimage bool, readOnly bool, isVerkle bool) *triedb.Database {
+	config := &triedb.Config{
 		Preimages: preimage,
 		IsVerkle:  isVerkle,
 	}
@@ -2469,7 +2481,7 @@ func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, p
 		// ignore the parameter silently. TODO(rjl493456442)
 		// please config it if read mode is implemented.
 		config.HashDB = hashdb.Defaults
-		return trie.NewDatabase(disk, config)
+		return triedb.NewDatabase(disk, config)
 	}
 	if readOnly {
 		config.PathDB = pathdb.ReadOnly
@@ -2477,5 +2489,5 @@ func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, p
 		config.PathDB = pathdb.Defaults
 	}
 	config.PathDB.JournalFilePath = fmt.Sprintf("%s/%s", stack.ResolvePath("chaindata"), eth.JournalFileName)
-	return trie.NewDatabase(disk, config)
+	return triedb.NewDatabase(disk, config)
 }

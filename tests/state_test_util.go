@@ -198,7 +198,6 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config, snapshotter bo
 	st, root, err := t.RunNoVerify(subtest, vmconfig, snapshotter, scheme)
 	// Invoke the callback at the end of function for further analysis.
 	defer func() {
-		// TODO confirm it
 		postCheck(result, &st)
 		st.Close()
 	}()

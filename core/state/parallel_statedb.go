@@ -697,22 +697,6 @@ func (s *ParallelStateDB) GetState(addr common.Address, hash common.Hash) common
 		val = common.Hash{}
 		if object != nil {
 			val = object.GetState(hash)
-			// TODO-dav: delete following originStorage change, as lightCopy is copy originStorage now.
-			// test dirty, there can be a case the object saved in dirty by other changes such as SetBalance. But the
-			// addrStateChangesInSlot[addr] does not record it. So later load from the dirties would cause flaw because the
-			// first value loaded from main stateDB is not updated to the object in dirties.
-			// Moreover, there is also an issue that the other kv in the object get from snap or trie that is accessed from
-			// previous tx in same block but not touched in current tx, is missed in the dirty. which may cause issues when
-			// calculate the root.
-			_, recorded := s.parallel.addrStateChangesInSlot[addr]
-			obj, isDirty := s.parallel.dirtiedStateObjectsInSlot[addr]
-			if !recorded && isDirty {
-				v, ok := obj.originStorage.GetValue(hash)
-
-				if !(ok && v.Cmp(val) == 0) {
-					obj.originStorage.StoreValue(hash, val)
-				}
-			}
 		}
 		value = val
 	}

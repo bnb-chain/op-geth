@@ -40,11 +40,12 @@ var DryRunFlag = flag.Bool("n", false, "dry run, don't execute commands")
 // MustRun executes the given command and exits the host process for
 // any error.
 func MustRun(cmd *exec.Cmd) {
-	fmt.Println(">>>", printArgs(cmd.Args))
+	fmt.Println("start_cmd >>>", printArgs(cmd.Args))
 	if !*DryRunFlag {
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
 		if err := cmd.Run(); err != nil {
+			fmt.Println("return_err >>>", err)
 			log.Fatal(err)
 		}
 	}

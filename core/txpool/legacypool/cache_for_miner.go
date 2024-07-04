@@ -1,13 +1,10 @@
 package legacypool
 
 import (
-	"github.com/holiman/uint256"
-	"math/big"
 	"sort"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/metrics"
 )
@@ -70,7 +67,7 @@ func (pc *cacheForMiner) del(txs types.Transactions, signer types.Signer) {
 	}
 }
 
-func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.Int, enforceTip bool) map[common.Address][]*txpool.LazyTransaction {
+func (pc *cacheForMiner) dump() map[common.Address]types.Transactions {
 	pending := make(map[common.Address]types.Transactions)
 	pc.txLock.Lock()
 	for addr, txlist := range pc.pending {
@@ -80,37 +77,11 @@ func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.I
 		}
 	}
 	pc.txLock.Unlock()
-	pendingLazy := make(map[common.Address][]*txpool.LazyTransaction)
-	for addr, txs := range pending {
+	for _, txs := range pending {
 		// sorted by nonce
 		sort.Sort(types.TxByNonce(txs))
-		// If the miner requests tip enforcement, cap the lists now
-		if enforceTip && !pc.isLocal(addr) {
-			for i, tx := range txs {
-				if tx.EffectiveGasTipIntCmp(gasPrice, baseFee) < 0 {
-					txs = txs[:i]
-					break
-				}
-			}
-		}
-		if len(txs) > 0 {
-			lazies := make([]*txpool.LazyTransaction, len(txs))
-			for i, tx := range txs {
-				lazies[i] = &txpool.LazyTransaction{
-					Pool:      pool,
-					Hash:      tx.Hash(),
-					Tx:        tx,
-					Time:      tx.Time(),
-					GasFeeCap: uint256.MustFromBig(tx.GasFeeCap()),
-					GasTipCap: uint256.MustFromBig(tx.GasTipCap()),
-					Gas:       tx.Gas(),
-					BlobGas:   tx.BlobGas(),
-				}
-			}
-			pendingLazy[addr] = lazies
-		}
 	}
-	return pendingLazy
+	return pending
 }
 
 func (pc *cacheForMiner) markLocal(addr common.Address) {

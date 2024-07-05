@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -90,8 +91,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
 	}
 	statedb.MarkFullProcessed()
+	statedb.ResetMVStates(len(block.Transactions()))
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
+		statedb.BeginTxStat(i)
 		start := time.Now()
 		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
 		if err != nil {
@@ -108,6 +111,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if metrics.EnabledExpensive {
 			processTxTimer.UpdateSince(start)
 		}
+		statedb.StopTxStat(receipt.GasUsed)
 	}
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.
 	withdrawals := block.Withdrawals()
@@ -116,6 +120,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), withdrawals)
+
+	// TODO(galaio): append dag into block body, TxDAGPerformance will print metrics when profile is enabled
+	// compare input TxDAG when it enable in consensus
+	dag, exrStats := statedb.MVStates2TxDAG()
+	types.EvaluateTxDAGPerformance(dag, exrStats)
+	//fmt.Print(types.EvaluateTxDAGPerformance(dag, exrStats))
+	log.Info("Process result", "block", block.NumberU64(), "txDAG", dag)
 
 	return receipts, allLogs, *usedGas, nil
 }

@@ -1138,6 +1138,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	}
 
 	start := time.Now()
+	env.state.ResetMVStates(0)
 	pending := w.eth.TxPool().Pending(true)
 	packFromTxpoolTimer.UpdateSince(start)
 	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
@@ -1371,6 +1372,20 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		if err != nil {
 			return err
 		}
+
+		// Because the TxDAG appends after sidecar, so we only enable after cancun
+		if w.chainConfig.IsCancun(env.header.Number, env.header.Time) {
+			for i := len(env.txs); i < len(block.Transactions()); i++ {
+				env.state.RecordSystemTxRWSet(i)
+			}
+			txDAG, _ := env.state.MVStates2TxDAG()
+			rawTxDAG, err := types.EncodeTxDAG(txDAG)
+			if err != nil {
+				return err
+			}
+			block = block.WithTxDAG(rawTxDAG)
+		}
+
 		// If we're post merge, just ignore
 		if !w.isTTDReached(block.Header()) {
 			select {

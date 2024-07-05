@@ -81,6 +81,9 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 		return h.handleBlockAnnounces(peer, hashes, numbers)
 
 	case *eth.NewBlockPacket:
+		if len(packet.TxDAG) != 0 {
+			packet.Block = packet.Block.WithTxDAG(packet.TxDAG)
+		}
 		return h.handleBlockBroadcast(peer, packet.Block, packet.TD)
 
 	case *eth.NewPooledTransactionHashesPacket67:
@@ -140,6 +143,7 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, block *types.Block, td
 	if h.merger.PoSFinalized() {
 		return errors.New("disallowed block broadcast")
 	}
+
 	// Schedule the block for import
 	h.blockFetcher.Enqueue(peer.ID(), block)
 

@@ -86,6 +86,10 @@ type StateDB interface {
 	PrintParallelStateObjects()
 	GetNonceFromBaseDB(addr common.Address) uint64
 	TxIndex() int
+
+	// parallel DAG related
+	BeforeTxTransition()
+	FinaliseRWSet() error
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

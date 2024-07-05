@@ -18,8 +18,9 @@ package state
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/common"
 	"math/big"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
@@ -189,7 +190,7 @@ func (ch resetObjectChange) revert(dber StateDBer) {
 
 	if !ch.prevdestruct {
 		s.snapParallelLock.Lock()
-		delete(s.stateObjectsDestruct, ch.prev.address)
+		s.deleteStateObjectsDestruct(ch.prev.address)
 		s.snapParallelLock.Unlock()
 	}
 	if ch.prevAccount != nil {

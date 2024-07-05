@@ -20,11 +20,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"math/big"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
+	"golang.org/x/exp/slices"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -157,6 +157,11 @@ type stateObject struct {
 	origin   *types.StateAccount // Account original data without any change applied, nil means it was not existent
 	data     types.StateAccount  // Account data with all mutations applied in the scope of block
 
+	// dirty account state
+	dirtyBalance  *uint256.Int
+	dirtyNonce    *uint64
+	dirtyCodeHash []byte
+
 	// Write caches.
 	trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
@@ -243,7 +248,7 @@ func newObject(dbItf StateDBer, isParallel bool, address common.Address, acct *t
 	if acct == nil {
 		acct = types.NewEmptyStateAccount()
 	}
-	return &stateObject{
+	s := &stateObject{
 		db:             db,
 		dbItf:          dbItf,
 		address:        address,
@@ -256,6 +261,15 @@ func newObject(dbItf StateDBer, isParallel bool, address common.Address, acct *t
 		dirtyStorage:   newStorage(isParallel),
 		created:        created,
 	}
+
+	// dirty data when create a new account
+	if acct == nil {
+		s.dirtyBalance = new(uint256.Int).Set(acct.Balance)
+		s.dirtyNonce = new(uint64)
+		*s.dirtyNonce = acct.Nonce
+		s.dirtyCodeHash = acct.CodeHash
+	}
+	return s
 }
 
 // EncodeRLP implements rlp.Encoder.
@@ -346,7 +360,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	//   2) we don't have new values, and can deliver empty response back
 	//if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
 	s.db.snapParallelLock.RLock()
-	if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed { // fixme: use sync.Map, instead of RWMutex?
+	if _, destructed := s.db.queryStateObjectsDestruct(s.address); destructed { // fixme: use sync.Map, instead of RWMutex?
 		s.db.snapParallelLock.RUnlock()
 		return common.Hash{}
 	}
@@ -439,11 +453,45 @@ func (s *stateObject) finalise(prefetch bool) {
 		}
 		return true
 	})
+	if s.dirtyNonce != nil {
+		s.data.Nonce = *s.dirtyNonce
+		s.dirtyNonce = nil
+	}
+	if s.dirtyBalance != nil {
+		s.data.Balance = s.dirtyBalance
+		s.dirtyBalance = nil
+	}
+	if s.dirtyCodeHash != nil {
+		s.data.CodeHash = s.dirtyCodeHash
+		s.dirtyCodeHash = nil
+	}
 	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
 		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, slotsToPrefetch)
 	}
 	if s.dirtyStorage.Length() > 0 {
 		s.dirtyStorage = newStorage(s.isParallel)
+	}
+}
+
+func (s *stateObject) finaliseRWSet() {
+	s.dirtyStorage.Range(func(key, value interface{}) bool {
+		// three are some unclean dirtyStorage from previous reverted txs, it will skip finalise
+		// so add a new rule, if val has no change, then skip it
+		if value == s.GetCommittedState(key.(common.Hash)) {
+			return true
+		}
+		s.db.RecordWrite(types.StorageStateKey(s.address, key.(common.Hash)), value.(common.Hash))
+		return true
+	})
+
+	if s.dirtyNonce != nil && *s.dirtyNonce != s.data.Nonce {
+		s.db.RecordWrite(types.AccountStateKey(s.address, types.AccountNonce), *s.dirtyNonce)
+	}
+	if s.dirtyBalance != nil && s.dirtyBalance.Cmp(s.data.Balance) != 0 {
+		s.db.RecordWrite(types.AccountStateKey(s.address, types.AccountBalance), new(uint256.Int).Set(s.dirtyBalance))
+	}
+	if s.dirtyCodeHash != nil && !slices.Equal(s.dirtyCodeHash, s.data.CodeHash) {
+		s.db.RecordWrite(types.AccountStateKey(s.address, types.AccountCodeHash), s.dirtyCodeHash)
 	}
 }
 
@@ -645,17 +693,17 @@ func (s *stateObject) SubBalance(amount *uint256.Int) {
 func (s *stateObject) SetBalance(amount *uint256.Int) {
 	s.db.journal.append(balanceChange{
 		account: &s.address,
-		prev:    new(uint256.Int).Set(s.data.Balance),
+		prev:    new(uint256.Int).Set(s.Balance()),
 	})
 	s.setBalance(amount)
 }
 
 func (s *stateObject) setBalance(amount *uint256.Int) {
-	s.data.Balance = amount
+	s.dirtyBalance = amount
 }
 
 // ReturnGas Return the gas back to the origin. Used by the Virtual machine or Closures
-func (s *stateObject) ReturnGas(gas *big.Int) {}
+func (s *stateObject) ReturnGas(gas *uint256.Int) {}
 
 func (s *stateObject) lightCopy(db *ParallelStateDB) *stateObject {
 	object := newObject(db, s.isParallel, s.address, &s.data)
@@ -716,6 +764,17 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	obj.selfDestructed = s.selfDestructed
 	obj.dirtyCode = s.dirtyCode
 	obj.deleted = s.deleted
+
+	// dirty states
+	if s.dirtyNonce != nil {
+		obj.dirtyNonce = new(uint64)
+		*obj.dirtyNonce = *s.dirtyNonce
+	}
+	if s.dirtyBalance != nil {
+		obj.dirtyBalance = new(uint256.Int).Set(s.dirtyBalance)
+	}
+	obj.dirtyCodeHash = s.dirtyCodeHash
+
 	return obj
 }
 
@@ -785,7 +844,7 @@ func (s *stateObject) SetCode(codeHash common.Hash, code []byte) {
 
 func (s *stateObject) setCode(codeHash common.Hash, code []byte) {
 	s.code = code
-	s.data.CodeHash = codeHash[:]
+	s.dirtyCodeHash = codeHash[:]
 	s.dirtyCode = true
 	compiler.GenOrLoadOptimizedCode(codeHash, s.code)
 }
@@ -800,18 +859,27 @@ func (s *stateObject) SetNonce(nonce uint64) {
 }
 
 func (s *stateObject) setNonce(nonce uint64) {
-	s.data.Nonce = nonce
+	s.dirtyNonce = &nonce
 }
 
 func (s *stateObject) CodeHash() []byte {
+	if len(s.dirtyCodeHash) > 0 {
+		return s.dirtyCodeHash
+	}
 	return s.data.CodeHash
 }
 
 func (s *stateObject) Balance() *uint256.Int {
+	if s.dirtyBalance != nil {
+		return s.dirtyBalance
+	}
 	return s.data.Balance
 }
 
 func (s *stateObject) Nonce() uint64 {
+	if s.dirtyNonce != nil {
+		return *s.dirtyNonce
+	}
 	return s.data.Nonce
 }
 

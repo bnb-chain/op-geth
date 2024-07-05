@@ -1179,6 +1179,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	w.mu.RUnlock()
 
 	start := time.Now()
+
 	// Retrieve the pending transactions pre-filtered by the 1559/4844 dynamic fees
 	filter := txpool.PendingFilter{
 		MinTip: tip,
@@ -1201,6 +1202,8 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	// Split the pending transactions into locals and remotes.
 	localPlainTxs, remotePlainTxs := make(map[common.Address][]*txpool.LazyTransaction), pendingPlainTxs
 	localBlobTxs, remoteBlobTxs := make(map[common.Address][]*txpool.LazyTransaction), pendingBlobTxs
+
+	env.state.ResetMVStates(0)
 
 	for _, account := range w.eth.TxPool().Locals() {
 		if txs := remotePlainTxs[account]; len(txs) > 0 {
@@ -1438,6 +1441,20 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		if err != nil {
 			return err
 		}
+
+		// Because the TxDAG appends after sidecar, so we only enable after cancun
+		if w.chainConfig.IsCancun(env.header.Number, env.header.Time) {
+			for i := len(env.txs); i < len(block.Transactions()); i++ {
+				env.state.RecordSystemTxRWSet(i)
+			}
+			txDAG, _ := env.state.MVStates2TxDAG()
+			rawTxDAG, err := types.EncodeTxDAG(txDAG)
+			if err != nil {
+				return err
+			}
+			block = block.WithTxDAG(rawTxDAG)
+		}
+
 		// If we're post merge, just ignore
 		if !w.isTTDReached(block.Header()) {
 			select {

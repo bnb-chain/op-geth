@@ -187,6 +187,7 @@ type BlockHeadersRLPPacket struct {
 type NewBlockPacket struct {
 	Block *types.Block
 	TD    *big.Int
+	TxDAG []byte `rlp:"optional"`
 }
 
 // sanityCheck verifies that the values are reasonable, as a DoS protection
@@ -237,6 +238,8 @@ type BlockBody struct {
 	Transactions []*types.Transaction // Transactions contained within a block
 	Uncles       []*types.Header      // Uncles contained within a block
 	Withdrawals  []*types.Withdrawal  `rlp:"optional"` // Withdrawals contained within a block
+	// TODO(galio): add block body later
+	//TxDAGs       [][]byte             `rlp:"optional"` // TxDAGs contained within a block
 }
 
 // Unpack retrieves the transactions and uncles from the range packet and returns

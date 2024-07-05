@@ -1944,6 +1944,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 
+			// TODO(galaio): use txDAG in some accelerate scenarios.
+			if len(block.TxDAG()) > 0 {
+				txDAG, err := types.DecodeTxDAG(block.TxDAG())
+				if err != nil {
+					return it.index, err
+				}
+				log.Info("Insert chain", "block", block.NumberU64(), "txDAG", txDAG)
+			}
+
 			// Enable prefetching to pull in trie node paths while processing transactions
 			statedb.StartPrefetcher("chain")
 			activeState = statedb

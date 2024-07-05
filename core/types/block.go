@@ -171,6 +171,8 @@ type Body struct {
 	Transactions []*Transaction
 	Uncles       []*Header
 	Withdrawals  []*Withdrawal `rlp:"optional"`
+	// TODO: add TxDAG in block body
+	//TxDAG        []byte       `rlp:"optional"`
 }
 
 // Block represents an Ethereum block.
@@ -195,6 +197,8 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  Withdrawals
+	// TODO(galaio): package txDAG in consensus later
+	txDAG []byte
 
 	// caches
 	hash atomic.Value
@@ -423,6 +427,10 @@ func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
 }
 
+func (b *Block) TxDAG() []byte {
+	return b.txDAG
+}
+
 type writeCounter uint64
 
 func (c *writeCounter) Write(b []byte) (int, error) {
@@ -452,6 +460,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
+		txDAG:        b.txDAG,
 	}
 }
 
@@ -462,6 +471,7 @@ func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
 		transactions: make([]*Transaction, len(transactions)),
 		uncles:       make([]*Header, len(uncles)),
 		withdrawals:  b.withdrawals,
+		txDAG:        b.txDAG,
 	}
 	copy(block.transactions, transactions)
 	for i := range uncles {
@@ -476,10 +486,23 @@ func (b *Block) WithWithdrawals(withdrawals []*Withdrawal) *Block {
 		header:       b.header,
 		transactions: b.transactions,
 		uncles:       b.uncles,
+		txDAG:        b.txDAG,
 	}
 	if withdrawals != nil {
 		block.withdrawals = make([]*Withdrawal, len(withdrawals))
 		copy(block.withdrawals, withdrawals)
+	}
+	return block
+}
+
+// WithTxDAG returns a block containing the given txDAG.
+func (b *Block) WithTxDAG(txDAG []byte) *Block {
+	block := &Block{
+		header:       b.header,
+		transactions: b.transactions,
+		uncles:       b.uncles,
+		withdrawals:  b.withdrawals,
+		txDAG:        txDAG,
 	}
 	return block
 }

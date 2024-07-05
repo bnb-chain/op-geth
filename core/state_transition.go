@@ -443,6 +443,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 }
 
 func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
+	// start record rw set in here
+	st.state.BeforeTxTransition()
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
@@ -534,10 +536,16 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			ReturnData: ret,
 		}, nil
 	}
+	// stop record rw set in here, skip gas fee distribution
+	if err := st.state.FinaliseRWSet(); err != nil {
+		return nil, err
+	}
+
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
 	// changing the sender's balance
 	var gasRefund uint64
+
 	if !rules.IsLondon {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
 		gasRefund = st.refundGas(params.RefundQuotient)

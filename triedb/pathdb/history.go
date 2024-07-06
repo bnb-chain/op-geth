@@ -23,12 +23,15 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/exp/slices"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
-	"golang.org/x/exp/slices"
 )
 
 // State history records the state changes involved in executing a block. The
@@ -250,10 +253,11 @@ type history struct {
 	accountList []common.Address                          // Sorted account hash list
 	storages    map[common.Address]map[common.Hash][]byte // Storage data keyed by its address hash and slot hash
 	storageList map[common.Address][]common.Hash          // Sorted slot hash list
+	nodes       []journalNodes                            // Changed trie nodes
 }
 
 // newHistory constructs the state history object with provided state change set.
-func newHistory(root common.Hash, parent common.Hash, block uint64, states *triestate.Set) *history {
+func newHistory(root common.Hash, parent common.Hash, block uint64, states *triestate.Set, nodes map[common.Hash]map[string]*trienode.Node) *history {
 	var (
 		accountList []common.Address
 		storageList = make(map[common.Address][]common.Hash)
@@ -289,12 +293,13 @@ func newHistory(root common.Hash, parent common.Hash, block uint64, states *trie
 		accountList: accountList,
 		storages:    states.Storages,
 		storageList: storageList,
+		nodes:       compressTrieNodes(nodes),
 	}
 }
 
 // encode serializes the state history and returns four byte streams represent
 // concatenated account/storage data, account/storage indexes respectively.
-func (h *history) encode() ([]byte, []byte, []byte, []byte) {
+func (h *history) encode() ([]byte, []byte, []byte, []byte, []byte) {
 	var (
 		slotNumber     uint32 // the number of processed slots
 		accountData    []byte // the buffer for concatenated account data
@@ -328,7 +333,13 @@ func (h *history) encode() ([]byte, []byte, []byte, []byte) {
 		accountData = append(accountData, h.accounts[addr]...)
 		accountIndexes = append(accountIndexes, accIndex.encode()...)
 	}
-	return accountData, storageData, accountIndexes, storageIndexes
+
+	nodesBytes, err := rlp.EncodeToBytes(h.nodes)
+	if err != nil {
+		log.Error("Failed to encode trie nodes", "error", err)
+	}
+
+	return accountData, storageData, accountIndexes, storageIndexes, nodesBytes
 }
 
 // decoder wraps the byte streams for decoding with extra meta fields.
@@ -446,12 +457,13 @@ func (r *decoder) readStorage(accIndex accountIndex) ([]common.Hash, map[common.
 }
 
 // decode deserializes the account and storage data from the provided byte stream.
-func (h *history) decode(accountData, storageData, accountIndexes, storageIndexes []byte) error {
+func (h *history) decode(accountData, storageData, accountIndexes, storageIndexes, trieNodes []byte) error {
 	var (
-		accounts    = make(map[common.Address][]byte)
-		storages    = make(map[common.Address]map[common.Hash][]byte)
-		accountList []common.Address
-		storageList = make(map[common.Address][]common.Hash)
+		accounts         = make(map[common.Address][]byte)
+		storages         = make(map[common.Address]map[common.Hash][]byte)
+		accountList      []common.Address
+		storageList      = make(map[common.Address][]common.Hash)
+		decodedTrieNodes []journalNodes
 
 		r = &decoder{
 			accountData:    accountData,
@@ -482,10 +494,17 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 			storages[accIndex.address] = slotData
 		}
 	}
+
+	if err := rlp.DecodeBytes(trieNodes, &decodedTrieNodes); err != nil {
+		log.Error("Failed to decode state history trie nodes", "error", err)
+		return err
+	}
+
 	h.accounts = accounts
 	h.accountList = accountList
 	h.storages = storages
 	h.storageList = storageList
+	h.nodes = decodedTrieNodes
 	return nil
 }
 
@@ -519,8 +538,58 @@ func (h *history) Size() int {
 	for _, slots := range h.storageList {
 		size += len(slots) * common.HashLength
 	}
+	// calculate size of journalNodes
+	for _, jn := range h.nodes {
+		size += common.AddressLength
+		for _, n := range jn.Nodes {
+			size += len(n.Path)
+			size += len(n.Blob)
+		}
+	}
 
 	return size
+}
+
+func (h *history) trieNodesSize() int {
+	size := 0
+	for _, jn := range h.nodes {
+		size += common.AddressLength
+		for _, n := range jn.Nodes {
+			size += len(n.Path)
+			size += len(n.Blob)
+		}
+	}
+	return size
+}
+
+// readBlockNumber reads and decodes the state history meta and returns block number.
+func readBlockNumber(freezer *rawdb.ResettableFreezer, stateID uint64) (uint64, error) {
+	blob := rawdb.ReadStateHistoryMeta(freezer, stateID)
+	if len(blob) == 0 {
+		return 0, fmt.Errorf("state history not found %d", stateID)
+	}
+	var m meta
+	if err := m.decode(blob); err != nil {
+		return 0, err
+	}
+	return m.block, nil
+}
+
+// readAllBlockNumbers returns all block number to stateID map.
+func readAllBlockNumbers(freezer *rawdb.ResettableFreezer, startStateID, endStateID uint64) (map[uint64]uint64, error) {
+	blockMap := make(map[uint64]uint64)
+	for i := startStateID; i <= endStateID; i++ {
+		blob := rawdb.ReadStateHistoryMeta(freezer, i)
+		if len(blob) == 0 {
+			return nil, fmt.Errorf("state history not found %d", i)
+		}
+		var m meta
+		if err := m.decode(blob); err != nil {
+			return nil, err
+		}
+		blockMap[m.block] = i
+	}
+	return blockMap, nil
 }
 
 // readHistory reads and decodes the state history object by the given id.
@@ -539,8 +608,9 @@ func readHistory(freezer *rawdb.ResettableFreezer, id uint64) (*history, error) 
 		storageData    = rawdb.ReadStateStorageHistory(freezer, id)
 		accountIndexes = rawdb.ReadStateAccountIndex(freezer, id)
 		storageIndexes = rawdb.ReadStateStorageIndex(freezer, id)
+		trieNodes      = rawdb.ReadStateTrieNodesHistory(freezer, id)
 	)
-	if err := dec.decode(accountData, storageData, accountIndexes, storageIndexes); err != nil {
+	if err := dec.decode(accountData, storageData, accountIndexes, storageIndexes, trieNodes); err != nil {
 		return nil, err
 	}
 	return &dec, nil
@@ -554,18 +624,20 @@ func writeHistory(freezer *rawdb.ResettableFreezer, dl *diffLayer) error {
 	}
 	var (
 		start   = time.Now()
-		history = newHistory(dl.rootHash(), dl.parentLayer().rootHash(), dl.block, dl.states)
+		history = newHistory(dl.rootHash(), dl.parentLayer().rootHash(), dl.block, dl.states, dl.nodes)
 	)
-	accountData, storageData, accountIndex, storageIndex := history.encode()
+	accountData, storageData, accountIndex, storageIndex, trieNodes := history.encode()
 	dataSize := common.StorageSize(len(accountData) + len(storageData))
 	indexSize := common.StorageSize(len(accountIndex) + len(storageIndex))
 
 	// Write history data into five freezer table respectively.
-	rawdb.WriteStateHistory(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData)
+	rawdb.WriteStateHistory(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
 
 	historyDataBytesMeter.Mark(int64(dataSize))
 	historyIndexBytesMeter.Mark(int64(indexSize))
 	historyBuildTimeMeter.UpdateSince(start)
+	historyTotalSizeMeter1.Mark(int64(history.Size()))
+	historyTrieNodesSizeMeter.Mark(int64(history.trieNodesSize()))
 	log.Debug("Stored state history", "id", dl.stateID(), "block", dl.block, "data", dataSize, "index", indexSize, "elapsed", common.PrettyDuration(time.Since(start)))
 
 	return nil

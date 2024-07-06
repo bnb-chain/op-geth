@@ -41,9 +41,6 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/trie"
-	"github.com/ethereum/go-ethereum/triedb/pathdb"
-	"github.com/olekukonko/tablewriter"
 	"github.com/urfave/cli/v2"
 )
 
@@ -188,18 +185,6 @@ It's deprecated, please use "geth db import" instead.
 This command dumps out the state for a given block (or latest, if none provided).
 `,
 	}
-
-	dumpRootHashCommand = &cli.Command{
-		Action: dumpAllRootHashInPath,
-		Name:   "dump-roothash",
-		Usage:  "Dump all available state root hash in path mode",
-		Flags:  flags.Merge([]cli.Flag{}, utils.DatabaseFlags),
-		Description: `
-The dump-roothash command dump all available state root hash in path mode.
-If you use "dump" command in path mode, please note that it only keeps at most 129 blocks which belongs to diffLayer or diskLayer.
-Therefore, you must specify the blockNumber or blockHash that locates in diffLayer or diskLayer.
-"geth" will print all available blockNumber and related block state root hash, and you can query block hash by block number.
-`}
 )
 
 // initGenesis will initialise the given JSON format genesis file and writes it as
@@ -616,27 +601,4 @@ func dump(ctx *cli.Context) error {
 func hashish(x string) bool {
 	_, err := strconv.Atoi(x)
 	return err != nil
-}
-
-func dumpAllRootHashInPath(ctx *cli.Context) error {
-	stack, _ := makeConfigNode(ctx)
-	defer stack.Close()
-	db := utils.MakeChainDatabase(ctx, stack, true)
-	defer db.Close()
-	triedb := trie.NewDatabase(db, &trie.Config{PathDB: pathdb.ReadOnly})
-	defer triedb.Close()
-
-	scheme, err := rawdb.ParseStateScheme(ctx.String(utils.StateSchemeFlag.Name), db)
-	if err != nil {
-		return err
-	}
-	if scheme == rawdb.HashScheme {
-		return errors.New("incorrect state scheme, you should use it in path mode")
-	}
-
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Block Number", "Block State Root Hash"})
-	table.AppendBulk(triedb.GetAllRooHash())
-	table.Render()
-	return nil
 }

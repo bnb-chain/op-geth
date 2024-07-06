@@ -164,8 +164,8 @@ type CacheConfig struct {
 	KeepProofBlockSpan   uint64                // Block span of keep proof
 	SnapshotNoBuild      bool                  // Whether the background generation is allowed
 	SnapshotWait         bool                  // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
-	JournalFilePath      string
-	JournalFile          bool
+	JournalFilePath      string                // The file path to journal pathdb diff layers
+	JournalFile          bool                  // Whether to enable journal file
 
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 }

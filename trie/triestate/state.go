@@ -24,7 +24,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"golang.org/x/crypto/sha3"
@@ -143,47 +142,6 @@ func Apply(prevRoot common.Hash, postRoot common.Hash, accounts map[common.Addre
 	return ctx.nodes.Flatten(), nil
 }
 
-func ApplyForDiff(prevRoot common.Hash, postRoot common.Hash, accounts map[common.Address][]byte, storages map[common.Address]map[common.Hash][]byte,
-	loader TrieLoader) (*trienode.MergedNodeSet, error) {
-	tr, err := loader.OpenTrie(prevRoot)
-	if err != nil {
-		log.Error("Failed to open trie", "error", err)
-		return nil, err
-	}
-	ctx := &context{
-		prevRoot:    prevRoot,
-		postRoot:    postRoot,
-		accounts:    accounts,
-		storages:    storages,
-		accountTrie: tr,
-		nodes:       trienode.NewMergedNodeSet(),
-	}
-	for addr, account := range accounts {
-		var err error
-		if len(account) == 0 {
-			err = deleteAccountForRecovering(ctx, loader, addr)
-		} else {
-			err = updateAccountForRecovering(ctx, loader, addr)
-		}
-		// err = updateAccountForRecovering(ctx, loader, addr)
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply state, err: %w", err)
-		}
-	}
-	root, result, err := tr.Commit(false)
-
-	if err != nil {
-		return nil, err
-	}
-	if root != postRoot {
-		return nil, fmt.Errorf("failed to revert state, want %#x, got %#x", postRoot, root)
-	}
-	if err := ctx.nodes.Merge(result); err != nil {
-		return nil, err
-	}
-	return ctx.nodes, nil
-}
-
 // updateAccount the account was present in prev-state, and may or may not
 // existent in post-state. Apply the reverse diff and verify if the storage
 // root matches the one in prev-state account.
@@ -259,7 +217,6 @@ func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 	addrHash := h.hash(addr.Bytes())
 	blob, err := ctx.accountTrie.Get(addrHash.Bytes())
 	if err != nil {
-		log.Error("9")
 		return err
 	}
 	if len(blob) == 0 {
@@ -283,7 +240,6 @@ func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 	}
 	root, result, err := st.Commit(false)
 	if err != nil {
-		log.Error("13")
 		return err
 	}
 	if root != types.EmptyRootHash {
@@ -297,128 +253,6 @@ func deleteAccount(ctx *context, loader TrieLoader, addr common.Address) error {
 		}
 	}
 	// Delete the post-state account from the main trie.
-	return ctx.accountTrie.Delete(addrHash.Bytes())
-}
-
-// updateAccountForRecovering the account is present in post-state, and may or may not
-// be existent in prev-state. Apply the diff and verify if the storage root matches the
-// one in post-state account.
-func updateAccountForRecovering(ctx *context, loader TrieLoader, addr common.Address) error {
-	// The account was present in post-state, decode it from the
-	// 'slim-rlp' format bytes.
-	h := newHasher()
-	defer h.release()
-
-	addrHash := h.hash(addr.Bytes())
-	post, err := types.FullAccount(ctx.accounts[addr])
-	if err != nil {
-		log.Error("Failed to full account for updating", "error", err, "addr", addr.String())
-		return err
-	}
-	// The account may or may not be existent in prev-state, try to
-	// load it and decode if it's found.
-	blob, err := ctx.accountTrie.Get(addrHash.Bytes())
-	if err != nil {
-		log.Error("Failed to get for updating", "error", err)
-		return err
-	}
-	prev := types.NewEmptyStateAccount()
-	if len(blob) != 0 {
-		if err = rlp.DecodeBytes(blob, &prev); err != nil {
-			log.Error("Failed to decode bytes for updating", "error", err)
-			return err
-		}
-	}
-	// Apply all storage changes into the prev-state storage trie
-	st, err := loader.OpenStorageTrie(ctx.prevRoot, addrHash, prev.Root)
-	if err != nil {
-		log.Error("Failed to open storage trie for updating", "error", err)
-		return err
-	}
-	for k, v := range ctx.storages[addr] {
-		if len(v) == 0 {
-			err = st.Delete(k.Bytes())
-		} else {
-			err = st.Update(k.Bytes(), v)
-		}
-		if err != nil {
-			log.Error("Failed to delete or update", "error", err)
-			return err
-		}
-	}
-	root, result, err := st.Commit(false)
-	if err != nil {
-		log.Error("Failed to commit for updating", "error", err)
-		return err
-	}
-	if root != post.Root {
-		return errors.New("failed to reset storage trie")
-	}
-	if result != nil {
-		if err = ctx.nodes.Merge(result); err != nil {
-			log.Error("Failed to merge for updating", "error", err)
-			return err
-		}
-	}
-	// Write the post-state account into the main trie
-	full, err := rlp.EncodeToBytes(post)
-	if err != nil {
-		log.Error("Failed to encode bytes", "error", err)
-		return err
-	}
-	return ctx.accountTrie.Update(addrHash.Bytes(), full)
-}
-
-// deleteAccountForRecovering the account is not present in post-state, and was expected
-// to be existent in prev-state. Apply the diff and verify if the account and storage
-// is wiped out correctly.
-func deleteAccountForRecovering(ctx *context, loader TrieLoader, addr common.Address) error {
-	// The account must be existent in prev-state, load the account
-	h := newHasher()
-	defer h.release()
-
-	addrHash := h.hash(addr.Bytes())
-	blob, err := ctx.accountTrie.Get(addrHash.Bytes())
-	if err != nil {
-		return err
-	}
-	if len(blob) == 0 {
-		return fmt.Errorf("account is nonexistent %#x", addrHash)
-	}
-	var prev types.StateAccount
-	if err = rlp.DecodeBytes(blob, prev); err != nil {
-		log.Error("Failed to decode bytes for deleting accounts", "error", err)
-		return err
-	}
-	st, err := loader.OpenStorageTrie(ctx.prevRoot, addrHash, prev.Root)
-	if err != nil {
-		log.Error("Failed to open storage trie for del", "error", err)
-		return err
-	}
-	for k, v := range ctx.storages[addr] {
-		if len(v) != 0 {
-			return errors.New("expect storage deletion")
-		}
-		if err = st.Delete(k.Bytes()); err != nil {
-			log.Error("Failed to delete for del", "error", err)
-			return err
-		}
-	}
-	root, result, err := st.Commit(false)
-	if err != nil {
-		log.Error("Failed to commit for del", "error", err)
-		return err
-	}
-	if root != types.EmptyRootHash {
-		return errors.New("failed to clear storage trie")
-	}
-	if result != nil {
-		if err = ctx.nodes.Merge(result); err != nil {
-			log.Error("Failed to merge for del", "error", err)
-			return err
-		}
-	}
-	// Delete the prev-state account from the main trie.
 	return ctx.accountTrie.Delete(addrHash.Bytes())
 }
 

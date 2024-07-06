@@ -51,19 +51,21 @@ const (
 	stateHistoryTableSize = 2 * 1000 * 1000 * 1000
 
 	// stateHistoryAccountIndex indicates the name of the freezer state history table.
-	stateHistoryMeta         = "history.meta"
-	stateHistoryAccountIndex = "account.index"
-	stateHistoryStorageIndex = "storage.index"
-	stateHistoryAccountData  = "account.data"
-	stateHistoryStorageData  = "storage.data"
+	stateHistoryMeta          = "history.meta"
+	stateHistoryAccountIndex  = "account.index"
+	stateHistoryStorageIndex  = "storage.index"
+	stateHistoryAccountData   = "account.data"
+	stateHistoryStorageData   = "storage.data"
+	stateHistoryTrieNodesData = "trienodes.data"
 )
 
 var stateFreezerNoSnappy = map[string]bool{
-	stateHistoryMeta:         true,
-	stateHistoryAccountIndex: false,
-	stateHistoryStorageIndex: false,
-	stateHistoryAccountData:  false,
-	stateHistoryStorageData:  false,
+	stateHistoryMeta:          true,
+	stateHistoryAccountIndex:  false,
+	stateHistoryStorageIndex:  false,
+	stateHistoryAccountData:   false,
+	stateHistoryStorageData:   false,
+	stateHistoryTrieNodesData: false,
 }
 
 const (

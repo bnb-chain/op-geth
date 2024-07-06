@@ -87,7 +87,6 @@ Remove blockchain and state databases`,
 			dbPruneHashTrieCmd,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
-			ancientToDiffLayerCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -270,13 +269,6 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 			utils.SyncModeFlag,
 		}, utils.NetworkFlags, utils.DatabaseFlags),
 		Description: "Shows metadata about the chain status.",
-	}
-	ancientToDiffLayerCmd = &cli.Command{
-		Name:        "ancient-to-dl",
-		Usage:       "Convert the data in ancientDB into diffLayer",
-		Description: "A convenient test tool to for path db diffLayer converting",
-		Action:      ancientToDiffLayer,
-		Flags:       flags.Merge(utils.DatabaseFlags),
 	}
 )
 
@@ -1118,21 +1110,6 @@ func hbss2pbss(ctx *cli.Context) error {
 	}
 	h2p.Run()
 
-	return nil
-}
-
-func ancientToDiffLayer(ctx *cli.Context) error {
-	stack, _ := makeConfigNode(ctx)
-	defer stack.Close()
-	db := utils.MakeChainDatabase(ctx, stack, true)
-	defer db.Close()
-	triedb := utils.MakeTrieDatabase(ctx, stack, db, false, true, false)
-	// triedb := trie.NewDatabase(db, &trie.Config{PathDB: nil})
-	defer triedb.Close()
-
-	if err := triedb.DiffLayerConvertTool(); err != nil {
-		log.Error("Failed to get diff layer from ancient db", "error", err)
-	}
 	return nil
 }
 

@@ -82,6 +82,9 @@ type trienodebuffer interface {
 
 	// proposedBlockReader return the world state Reader of block that is proposed to L1.
 	proposedBlockReader(blockRoot common.Hash) (layer, error)
+
+	// getLatestStatus returns latest status for disk layer
+	getLatestStatus() (common.Hash, uint64, error)
 }
 
 type NodeBufferType int32
@@ -121,11 +124,13 @@ func NewTrieNodeBuffer(
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers, proposeBlockInterval uint64,
 	keepFunc NotifyKeepFunc,
-) trienodebuffer {
+	freezer *rawdb.ResettableFreezer,
+	recovery bool,
+) (trienodebuffer, error) {
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {
 	case NodeBufferList:
-		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, recovery)
 	case AsyncNodeBuffer:
 		return newAsyncNodeBuffer(limit, nodes, layers)
 	case SyncNodeBuffer:
@@ -346,7 +351,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 				return ndl, nil
 			}
 			oldest = targetOldest
-			log.Info("Forcing prune ancient under nodebufferlist", "disk_persistent_state_id",
+			log.Debug("Forcing prune ancient under nodebufferlist", "disk_persistent_state_id",
 				persistentID, "truncate_tail", oldest)
 		}
 
@@ -407,46 +412,13 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 		if err := batch.Write(); err != nil {
 			log.Crit("Failed to write states", "err", err)
 		}
+		if nl, ok := dl.buffer.(*nodebufferlist); ok {
+			if nl.persistID != 0 {
+				nl.persistID--
+			}
+		}
 	}
 	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer), nil
-}
-
-func (dl *diskLayer) apply(prevRoot common.Hash, h *history, loader triestate.TrieLoader) (*diskLayer, *trienode.MergedNodeSet, error) {
-	// if h.meta.parent != dl.rootHash() {
-	// 	return nil, nil, errUnexpectedHistory
-	// }
-	// Reject if the provided state history is incomplete. It's due to
-	// a large construct SELF-DESTRUCT which can't be handled because
-	// of memory limitation.
-	if len(h.meta.incomplete) > 0 {
-		return nil, nil, errors.New("incomplete state history")
-	}
-	if dl.id == 0 {
-		return nil, nil, fmt.Errorf("%w: zero state id", errStateUnrecoverable)
-	}
-	// Apply the reverse state changes upon the current state. This must
-	// be done before holding the lock in order to access state in "this"
-	// layer.
-	set, err := triestate.ApplyForDiff(prevRoot, h.meta.parent, h.accounts, h.storages, loader)
-	if err != nil {
-		log.Error("Failed to apply state diffs", "error", err)
-		return nil, nil, err
-	}
-	// Mark the diskLayer as stale before applying any mutations on top.
-	dl.lock.Lock()
-	defer dl.lock.Unlock()
-
-	dl.stale = true
-
-	// nodes := set.Flatten()
-	// batch := dl.db.diskdb.NewBatch()
-	// writeNodes(batch, nodes, dl.cleans)
-	// rawdb.WritePersistentStateID(batch, dl.id+1)
-	// if err = batch.Write(); err != nil {
-	// 	log.Crit("Failed to write states", "err", err)
-	// }
-
-	return newDiskLayer(h.meta.parent, dl.id+1, dl.db, dl.cleans, dl.buffer), set, nil
 }
 
 // setBufferSize sets the node buffer size to the provided value.

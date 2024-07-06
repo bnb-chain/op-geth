@@ -364,15 +364,6 @@ func (db *Database) Config() *Config {
 	return db.config
 }
 
-// DiffLayerConvertTool
-func (db *Database) DiffLayerConvertTool() error {
-	pdb, ok := db.backend.(*pathdb.Database)
-	if !ok {
-		return errors.New("not supported")
-	}
-	return pdb.ConvertTool1(&trieLoader{db: db})
-}
-
 func (db *Database) GetAllRooHash() [][]string {
 	pdb, ok := db.backend.(*pathdb.Database)
 	if !ok {

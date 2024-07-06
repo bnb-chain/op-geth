@@ -101,6 +101,7 @@ var (
 		utils.EnableProofKeeperFlag,
 		utils.KeepProofBlockSpanFlag,
 		utils.JournalFileFlag,
+		utils.EnablePathDBRecoverDiffLayers,
 		utils.LightServeFlag,    // deprecated
 		utils.LightIngressFlag,  // deprecated
 		utils.LightEgressFlag,   // deprecated

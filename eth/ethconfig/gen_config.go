@@ -31,7 +31,10 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		StateScheme                             string                 `toml:",omitempty"`
 		PathNodeBuffer                          pathdb.NodeBufferType  `toml:",omitempty"`
 		ProposeBlockInterval                    uint64                 `toml:",omitempty"`
+		EnableProofKeeper                       bool                   `toml:",omitempty"`
+		KeepProofBlockSpan                      uint64                 `toml:",omitempty"`
 		JournalFileEnabled                      bool                   `toml:",omitempty"`
+		EnableRecoverDiffLayers                 bool                   `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               int                    `toml:",omitempty"`
 		LightIngress                            int                    `toml:",omitempty"`
@@ -88,7 +91,10 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.StateScheme = c.StateScheme
 	enc.PathNodeBuffer = c.PathNodeBuffer
 	enc.ProposeBlockInterval = c.ProposeBlockInterval
+	enc.EnableProofKeeper = c.EnableProofKeeper
+	enc.KeepProofBlockSpan = c.KeepProofBlockSpan
 	enc.JournalFileEnabled = c.JournalFileEnabled
+	enc.EnableRecoverDiffLayers = c.EnableRecoverDiffLayers
 	enc.RequiredBlocks = c.RequiredBlocks
 	enc.LightServ = c.LightServ
 	enc.LightIngress = c.LightIngress
@@ -149,7 +155,10 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		StateScheme                             *string                `toml:",omitempty"`
 		PathNodeBuffer                          *pathdb.NodeBufferType `toml:",omitempty"`
 		ProposeBlockInterval                    *uint64                `toml:",omitempty"`
+		EnableProofKeeper                       *bool                  `toml:",omitempty"`
+		KeepProofBlockSpan                      *uint64                `toml:",omitempty"`
 		JournalFileEnabled                      *bool                  `toml:",omitempty"`
+		EnableRecoverDiffLayers                 *bool                  `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               *int                   `toml:",omitempty"`
 		LightIngress                            *int                   `toml:",omitempty"`
@@ -235,8 +244,17 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.ProposeBlockInterval != nil {
 		c.ProposeBlockInterval = *dec.ProposeBlockInterval
 	}
+	if dec.EnableProofKeeper != nil {
+		c.EnableProofKeeper = *dec.EnableProofKeeper
+	}
+	if dec.KeepProofBlockSpan != nil {
+		c.KeepProofBlockSpan = *dec.KeepProofBlockSpan
+	}
 	if dec.JournalFileEnabled != nil {
 		c.JournalFileEnabled = *dec.JournalFileEnabled
+	}
+	if dec.EnableRecoverDiffLayers != nil {
+		c.EnableRecoverDiffLayers = *dec.EnableRecoverDiffLayers
 	}
 	if dec.RequiredBlocks != nil {
 		c.RequiredBlocks = dec.RequiredBlocks

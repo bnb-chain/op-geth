@@ -192,6 +192,37 @@ func newDiffLayer(parent layer, root common.Hash, id uint64, block uint64, nodes
 	return dl
 }
 
+func newDiffLayer1(parent layer, root common.Hash, id uint64, block uint64, nodes map[common.Hash]map[string]*trienode.Node, states *triestate.Set) *diffLayer {
+	var (
+		size  int64
+		count int
+	)
+	dl := &diffLayer{
+		root:   root,
+		id:     id,
+		block:  block,
+		nodes:  nodes,
+		states: states,
+		parent: parent,
+	}
+
+	for _, subset := range nodes {
+		for path, n := range subset {
+			dl.memory += uint64(n.Size() + len(path))
+			size += int64(len(n.Blob) + len(path))
+		}
+		count += len(subset)
+	}
+	if states != nil {
+		dl.memory += uint64(states.Size())
+	}
+	dirtyWriteMeter.Mark(size)
+	diffLayerNodesMeter.Mark(int64(count))
+	diffLayerBytesMeter.Mark(int64(dl.memory))
+	log.Debug("Created new diff layer", "id", id, "block", block, "nodes", count, "size", common.StorageSize(dl.memory))
+	return dl
+}
+
 func (dl *diffLayer) originDiskLayer() *diskLayer {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()

@@ -346,6 +346,12 @@ var (
 		Value:    false,
 		Category: flags.StateCategory,
 	}
+	EnablePathDBRecoverDiffLayers = &cli.BoolFlag{
+		Name:     "pathdb.recoverdifflayers",
+		Usage:    "Enable recovering diff layers for node buffer list",
+		Value:    false,
+		Category: flags.StateCategory,
+	}
 	StateHistoryFlag = &cli.Uint64Flag{
 		Name:     "history.state",
 		Usage:    "Number of recent blocks to retain state history for (default = 90,000 blocks, 0 = entire chain)",
@@ -1886,6 +1892,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(JournalFileFlag.Name) {
 		cfg.JournalFileEnabled = true
+	}
+	if ctx.IsSet(EnablePathDBRecoverDiffLayers.Name) {
+		cfg.EnableRecoverDiffLayers = true
 	}
 
 	if ctx.String(GCModeFlag.Name) == "archive" && cfg.TransactionHistory != 0 {

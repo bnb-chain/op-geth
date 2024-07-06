@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -106,15 +107,16 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
-	TrieNodeBufferType   NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
-	StateHistory         uint64         // Number of recent blocks to maintain state history for
-	CleanCacheSize       int            // Maximum memory allowance (in bytes) for caching clean nodes
-	DirtyCacheSize       int            // Maximum memory allowance (in bytes) for caching dirty nodes
-	ReadOnly             bool           // Flag whether the database is opened in read only mode.
-	ProposeBlockInterval uint64         // Propose block to L1 block interval.
-	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
-	JournalFilePath      string         // The journal file path
-	JournalFile          bool           // Whether to use journal file mode
+	TrieNodeBufferType      NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
+	StateHistory            uint64         // Number of recent blocks to maintain state history for
+	CleanCacheSize          int            // Maximum memory allowance (in bytes) for caching clean nodes
+	DirtyCacheSize          int            // Maximum memory allowance (in bytes) for caching dirty nodes
+	ReadOnly                bool           // Flag whether the database is opened in read only mode.
+	ProposeBlockInterval    uint64         // Propose block to L1 block interval.
+	NotifyKeep              NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
+	JournalFilePath         string         // The journal file path
+	JournalFile             bool           // Whether to use journal file mode
+	EnableRecoverDiffLayers bool           // Whether enable recover diff layers for node buffer list.
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -153,16 +155,16 @@ type Database struct {
 	// readOnly is the flag whether the mutation is allowed to be applied.
 	// It will be set automatically when the database is journaled during
 	// the shutdown to reject all following unexpected mutations.
-	readOnly   bool                     // Flag if database is opened in read only mode
-	waitSync   bool                     // Flag if database is deactivated due to initial state sync
-	bufferSize int                      // Memory allowance (in bytes) for caching dirty nodes
-	config     *Config                  // Configuration for database
-	diskdb     ethdb.Database           // Persistent storage for matured trie nodes
-	tree       *layerTree               // The group for all known layers
-	freezer    *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
-	lock       sync.RWMutex             // Lock to prevent mutations from happening at the same time
-	capLock    sync.Mutex
-	tree2      *layerTree
+	readOnly            bool                     // Flag if database is opened in read only mode
+	waitSync            bool                     // Flag if database is deactivated due to initial state sync
+	isRecoverDiffLayers bool                     // Flag if recover diff layers from ancient db
+	bufferSize          int                      // Memory allowance (in bytes) for caching dirty nodes
+	config              *Config                  // Configuration for database
+	diskdb              ethdb.Database           // Persistent storage for matured trie nodes
+	tree                *layerTree               // The group for all known layers
+	freezer             *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
+	lock                sync.RWMutex             // Lock to prevent mutations from happening at the same time
+	capLock             sync.Mutex
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -213,14 +215,22 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 				log.Info("Truncated extraneous state history")
 			}
 		} else {
-			// Truncate the extra state histories above in freezer in case
-			// it's not aligned with the disk layer.
-			pruned, err := truncateFromHead(db.diskdb, freezer, diskLayerID)
-			if err != nil {
-				log.Crit("Failed to truncate extra state histories", "err", err)
-			}
-			if pruned != 0 {
-				log.Warn("Truncated extra state histories", "number", pruned)
+			log.Info("before recovering", "diskLayerID", diskLayerID)
+			if db.isRecoverDiffLayers {
+				if err = db.recoverDiffLayers(); err != nil {
+					log.Error("Failed to recover diff layers", "error", err)
+				}
+				log.Info("after recovering", "diskLayerID", db.tree.bottom().stateID())
+			} else {
+				// Truncate the extra state histories above in freezer in case
+				// it's not aligned with the disk layer.
+				pruned, err := truncateFromHead(db.diskdb, freezer, diskLayerID)
+				if err != nil {
+					log.Crit("Failed to truncate extra state histories", "err", err)
+				}
+				if pruned != 0 {
+					log.Warn("Truncated extra state histories", "number", pruned)
+				}
 			}
 		}
 	}
@@ -413,12 +423,13 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		// disk layer won't be accessible from outside.
 		db.tree.reset(dl)
 	}
-	db.DeleteTrieJournal(db.diskdb)
-	_, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
+	_ = db.DeleteTrieJournal(db.diskdb)
+	truncatedNumber, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
 	if err != nil {
 		return err
 	}
-	log.Debug("Recovered state", "root", root, "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Recovered state", "root", root, "elapsed", common.PrettyDuration(time.Since(start)),
+		"truncate number", truncatedNumber)
 	return nil
 }
 
@@ -585,23 +596,7 @@ func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {
 	return nil
 }
 
-func (db *Database) ConvertTool1(loader triestate.TrieLoader) error {
-	dl := db.tree.bottom()
-	stateID := rawdb.ReadStateID(db.diskdb, dl.rootHash())
-	persistentStateID := rawdb.ReadPersistentStateID(db.diskdb)
-
-	ancient, err := db.diskdb.AncientDatadir()
-	if err != nil {
-		log.Error("Failed to get ancient datadir", "error", err)
-		return err
-	}
-	freezer, err := rawdb.NewStateFreezer(ancient, true)
-	if err != nil {
-		log.Error("Failed to new state freezer", "error", err)
-		return err
-	}
-	db.freezer = freezer
-
+func (db *Database) recoverDiffLayers() error {
 	freezerLength, err := db.freezer.Ancients()
 	if err != nil {
 		log.Error("Failed to get freezer ancients", "error", err)
@@ -612,138 +607,86 @@ func (db *Database) ConvertTool1(loader triestate.TrieLoader) error {
 		log.Error("Failed to get freezer tail", "error", err)
 		return err
 	}
-	log.Info("Print ancient db meta", "state id", *stateID, "persistent state id", persistentStateID,
-		"freezer length", freezerLength, "freezer tail", tail, "config", db.config.StateHistory,
-		"bottom stateID", dl.stateID(), "bottom root", dl.rootHash().String())
-
-	db.tree2 = newLayerTree(dl)
-	waitingRecoverNum := freezerLength - tail
-	start := time.Now()
-	historySize := 0
-	diffSize := uint64(0)
-	for i := uint64(0); i < waitingRecoverNum; i++ {
-		h, err := readHistory(db.freezer, *stateID-i)
-		if err != nil {
-			if checkError(err) {
-				log.Info("There are no more states in disk db", "state id", *stateID-i)
-				continue
-			}
-			log.Error("Failed to read history from freezer db", "error", err)
-			return err
-		}
-		historySize += h.Size()
-		log.Info("print history size", "size", common.StorageSize(h.Size()), "history root", h.meta.root.String(),
-			"history parent root", h.meta.parent.String(), "current state id", *stateID-i)
-
-		incomplete := make(map[common.Address]struct{})
-		for _, addr := range h.meta.incomplete {
-			incomplete[addr] = struct{}{}
-		}
-		states := triestate.New(h.accounts, h.storages, incomplete)
-
-		size, err := db.addDiffLayer(h.meta.root, h.meta.parent, *stateID-i, h.meta.block, nil, states)
-		if err != nil {
-			log.Error("Failed to add diff layer", "error", err)
-			return err
-		}
-		diffSize += size
-	}
-	layerTreeSize := uint64(db.tree2.len() * 32)
-	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
-		"waitingRecoverNum", waitingRecoverNum, "total history size", common.StorageSize(historySize),
-		"total diff size", common.StorageSize(diffSize), "layer tree size", common.StorageSize(layerTreeSize))
-
-	return nil
-}
-
-func (db *Database) ConvertTool(loader triestate.TrieLoader) error {
 	dl := db.tree.bottom()
 	stateID := rawdb.ReadStateID(db.diskdb, dl.rootHash())
 	persistentStateID := rawdb.ReadPersistentStateID(db.diskdb)
 
-	ancient, err := db.diskdb.AncientDatadir()
-	if err != nil {
-		log.Error("Failed to get ancient datadir", "error", err)
-		return err
-	}
-	freezer, err := rawdb.NewStateFreezer(ancient, true)
-	if err != nil {
-		log.Error("Failed to new state freezer", "error", err)
-		return err
-	}
-	db.freezer = freezer
-
-	freezerLength, err := db.freezer.Ancients()
-	if err != nil {
-		log.Error("Failed to get freezer ancients", "error", err)
-		return err
-	}
-	tail, err := db.freezer.Tail()
-	if err != nil {
-		log.Error("Failed to get freezer tail", "error", err)
-		return err
-	}
 	log.Info("Print ancient db meta", "state id", *stateID, "persistent state id", persistentStateID,
 		"freezer length", freezerLength, "freezer tail", tail, "config", db.config.StateHistory,
 		"bottom stateID", dl.stateID(), "bottom root", dl.rootHash().String())
 
-	db.tree2 = newLayerTree(dl)
-	waitingRecoverNum := freezerLength - persistentStateID
-	start := time.Now()
+	// 创建一个定长数组，存储diffLayer，数组用完后需要reset
 	var (
-		nodes *trienode.MergedNodeSet
-		count = uint64(2)
+		wg                sync.WaitGroup
+		start             = time.Now()
+		waitingRecoverNum = freezerLength - persistentStateID
+		numGoroutines     = runtime.NumCPU()
+		tasksPerGoroutine = int(waitingRecoverNum) / numGoroutines
 	)
-	for {
-		h, err := readHistory(db.freezer, *stateID+count)
-		if err != nil {
-			if checkError(err) {
-				log.Info("There are no more states in disk db", "count", count)
-				break
-			}
-			log.Error("Failed to read history from freezer db", "error", err)
-			return err
-		}
-		log.Info("print history size", "size", h.Size(), "history root", h.meta.root.String(),
-			"history parent root", h.meta.parent.String(), "current state id", *stateID+count)
-
-		if count > 2 {
-			break
-		}
-		dl, nodes, err = dl.apply(dl.rootHash(), h, loader)
-		if err != nil {
-			log.Error("Failed to revert", "error", err)
-			return err
-		}
-		db.tree.reset(dl)
-
-		incomplete := make(map[common.Address]struct{})
-		for _, addr := range h.meta.incomplete {
-			incomplete[addr] = struct{}{}
-		}
-		states := triestate.New(h.accounts, h.storages, incomplete)
-
-		if _, err = db.addDiffLayer(h.meta.root, h.meta.parent, *stateID+count, h.meta.block, nodes, states); err != nil {
-			log.Error("Failed to add diff layer", "error", err)
-			return err
-		}
-		count++
+	isDivision := int(waitingRecoverNum) % numGoroutines
+	var length int
+	if isDivision == 0 {
+		length = numGoroutines
+	} else {
+		length = numGoroutines + 1
 	}
-	// for i := uint64(0); i < 2; i++ {
-	// 	h, err := readHistory(db.freezer, *stateID-i)
+	results := make([][]*diffLayer, length)
+	sID := *stateID + 1
+	log.Info("info", "num goroutines", numGoroutines, "task", tasksPerGoroutine, "division", isDivision, "length", length)
+	// results := make([][]*diffLayer, length)
+	for i := range results {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			startStateID := sID + uint64(index*tasksPerGoroutine)
+
+			diffLayers := make([]*diffLayer, 0, tasksPerGoroutine)
+			for j := 0; j < tasksPerGoroutine; j++ {
+				h, err := readHistory(db.freezer, startStateID+uint64(j))
+				if err != nil {
+					if checkError(err) {
+						log.Info("No more state history in ancient db", "state_id", startStateID+uint64(j))
+						return
+					}
+					log.Crit("Failed to read history from freezer db", "error", err)
+				}
+
+				incomplete := make(map[common.Address]struct{})
+				for _, addr := range h.meta.incomplete {
+					incomplete[addr] = struct{}{}
+				}
+				states := triestate.New(h.accounts, h.storages, incomplete)
+				diffLayers = append(diffLayers, newDiffLayer1(dl, h.meta.root, startStateID+uint64(j), h.meta.block,
+					flattenTrieNodes(h.nodes), states))
+			}
+			results[index] = diffLayers
+		}(i)
+	}
+	wg.Wait()
+
+	for i, j := range results {
+		log.Info("2823r", "index", i, "length", len(j))
+		for _, data := range j {
+			dl, err = dl.commit(data, false)
+			if err != nil {
+				log.Crit("Failed to update diff layers into pathdb", "error", err)
+			}
+			db.tree.reset(dl)
+		}
+	}
+
+	// for {
+	// 	h, err := readHistory(db.freezer, *stateID+count)
 	// 	if err != nil {
+	// 		if checkError(err) {
+	// 			log.Info("There are no more states in disk db", "count", count)
+	// 			break
+	// 		}
 	// 		log.Error("Failed to read history from freezer db", "error", err)
 	// 		return err
 	// 	}
-	// 	log.Info("print history size", "size", h.Size(), "history root", h.meta.root.String(),
-	// 		"history parent root", h.meta.parent.String(), "current state id", *stateID-i)
-	//
-	// 	dl, nodes, err = dl.revert1(h, loader)
-	// 	if err != nil {
-	// 		log.Error("Failed to revert", "error", err)
-	// 		return err
-	// 	}
-	// 	db.tree.reset(dl)
+	// 	// log.Info("print history size", "size", h.Size(), "history root", h.meta.root.String(),
+	// 	// 	"history parent root", h.meta.parent.String(), "current state id", *stateID+count)
 	//
 	// 	incomplete := make(map[common.Address]struct{})
 	// 	for _, addr := range h.meta.incomplete {
@@ -751,37 +694,26 @@ func (db *Database) ConvertTool(loader triestate.TrieLoader) error {
 	// 	}
 	// 	states := triestate.New(h.accounts, h.storages, incomplete)
 	//
-	// 	if err = db.addDiffLayer(h.meta.root, h.meta.parent, *stateID-i, h.meta.block, nodes, states); err != nil {
-	// 		log.Error("Failed to add diff layer", "error", err)
-	// 		return err
+	// 	bottom := newDiffLayer(dl, h.meta.root, *stateID+count, h.meta.block, flattenTrieNodes(h.nodes), states)
+	// 	dl, err = dl.commit(bottom, false)
+	// 	if err != nil {
+	// 		log.Crit("Failed to update diff layers into pathdb", "error", err)
 	// 	}
+	// 	db.tree.reset(dl)
+	// 	// if err = db.Update(h.meta.root, h.meta.parent, h.meta.block, trienode.CompressTrieNodes(flattenTrieNodes(h.nodes)), states); err != nil {
+	// 	// 	log.Crit("Failed to update diff layers into pathdb", "error", err)
+	// 	// }
+	// 	count++
 	// }
+
+	dl = db.tree.bottom()
+	dl.recovery = false
+	log.Info("updated layer tree info", "length", db.tree.len(), "bottom stateID", dl.stateID(),
+		"bottom root", dl.rootHash().String())
+
 	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
 		"waitingRecoverNum", waitingRecoverNum)
-
 	return nil
-}
-
-func (db *Database) addDiffLayer(root common.Hash, parentRoot common.Hash, stateID uint64, block uint64,
-	nodes *trienode.MergedNodeSet, states *triestate.Set) (uint64, error) {
-	// Hold the lock to prevent concurrent mutations.
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
-	root, parentRoot = types.TrieRootHash(root), types.TrieRootHash(parentRoot)
-	if root == parentRoot {
-		return 0, errors.New("layer cycle")
-	}
-	// TODO: parent now is nil
-	l := newDiffLayer(nil, root, stateID, block, nil, states)
-
-	// TODO: no need to use lock now
-	// db.tree2.lock.Lock()
-	db.tree2.layers[l.rootHash()] = l
-	// db.tree2.lock.Unlock()
-
-	log.Info("done", "layer tree length", db.tree2.len(), "size", common.StorageSize(l.memory))
-	return l.memory, nil
 }
 
 func checkError(err error) bool {

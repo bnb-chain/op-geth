@@ -136,13 +136,14 @@ func NewTrieNodeBuffer(
 
 // diskLayer is a low level persistent layer built on top of a key-value store.
 type diskLayer struct {
-	root   common.Hash      // Immutable, root hash to which this layer was made for
-	id     uint64           // Immutable, corresponding state id
-	db     *Database        // Path-based trie database
-	cleans *fastcache.Cache // GC friendly memory cache of clean node RLPs
-	buffer trienodebuffer   // Node buffer to aggregate writes
-	stale  bool             // Signals that the layer became stale (state progressed)
-	lock   sync.RWMutex     // Lock used to protect stale flag
+	root     common.Hash      // Immutable, root hash to which this layer was made for
+	id       uint64           // Immutable, corresponding state id
+	db       *Database        // Path-based trie database
+	cleans   *fastcache.Cache // GC friendly memory cache of clean node RLPs
+	buffer   trienodebuffer   // Node buffer to aggregate writes
+	stale    bool             // Signals that the layer became stale (state progressed)
+	recovery bool             // Signals that pathdb is recovering diff layers
+	lock     sync.RWMutex     // Lock used to protect stale flag
 }
 
 // newDiskLayer creates a new disk layer based on the passing arguments.
@@ -284,9 +285,10 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 		limit    = dl.db.config.StateHistory
 	)
 	if dl.db.freezer != nil {
-		err := writeHistory(dl.db.freezer, bottom)
-		if err != nil {
-			return nil, err
+		if !dl.recovery {
+			if err := writeHistory(dl.db.freezer, bottom); err != nil {
+				return nil, err
+			}
 		}
 		// Determine if the persisted history object has exceeded the configured
 		// limitation, set the overflow as true if so.
@@ -308,7 +310,9 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	if dl.id == 0 {
 		rawdb.WriteStateID(dl.db.diskdb, dl.root, 0)
 	}
-	rawdb.WriteStateID(dl.db.diskdb, bottom.rootHash(), bottom.stateID())
+	if !dl.recovery {
+		rawdb.WriteStateID(dl.db.diskdb, bottom.rootHash(), bottom.stateID())
+	}
 
 	// Construct a new disk layer by merging the nodes from the provided diff
 	// layer, and flush the content in disk layer if there are too many nodes
@@ -406,44 +410,6 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 		}
 	}
 	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer), nil
-}
-
-func (dl *diskLayer) apply(prevRoot common.Hash, h *history, loader triestate.TrieLoader) (*diskLayer, *trienode.MergedNodeSet, error) {
-	// if h.meta.parent != dl.rootHash() {
-	// 	return nil, nil, errUnexpectedHistory
-	// }
-	// Reject if the provided state history is incomplete. It's due to
-	// a large construct SELF-DESTRUCT which can't be handled because
-	// of memory limitation.
-	if len(h.meta.incomplete) > 0 {
-		return nil, nil, errors.New("incomplete state history")
-	}
-	if dl.id == 0 {
-		return nil, nil, fmt.Errorf("%w: zero state id", errStateUnrecoverable)
-	}
-	// Apply the reverse state changes upon the current state. This must
-	// be done before holding the lock in order to access state in "this"
-	// layer.
-	set, err := triestate.ApplyForDiff(prevRoot, h.meta.parent, h.accounts, h.storages, loader)
-	if err != nil {
-		log.Error("Failed to apply state diffs", "error", err)
-		return nil, nil, err
-	}
-	// Mark the diskLayer as stale before applying any mutations on top.
-	dl.lock.Lock()
-	defer dl.lock.Unlock()
-
-	dl.stale = true
-
-	// nodes := set.Flatten()
-	// batch := dl.db.diskdb.NewBatch()
-	// writeNodes(batch, nodes, dl.cleans)
-	// rawdb.WritePersistentStateID(batch, dl.id+1)
-	// if err = batch.Write(); err != nil {
-	// 	log.Crit("Failed to write states", "err", err)
-	// }
-
-	return newDiskLayer(h.meta.parent, dl.id+1, dl.db, dl.cleans, dl.buffer), set, nil
 }
 
 // setBufferSize sets the node buffer size to the provided value.

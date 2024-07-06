@@ -149,24 +149,25 @@ const (
 // CacheConfig contains the configuration values for the trie database
 // and state snapshot these are resident in a blockchain.
 type CacheConfig struct {
-	TrieCleanLimit       int                   // Memory allowance (MB) to use for caching trie nodes in memory
-	TrieCleanNoPrefetch  bool                  // Whether to disable heuristic state prefetching for followup blocks
-	TrieDirtyLimit       int                   // Memory limit (MB) at which to start flushing dirty trie nodes to disk
-	TrieDirtyDisabled    bool                  // Whether to disable trie write caching and GC altogether (archive node)
-	TrieTimeLimit        time.Duration         // Time limit after which to flush the current in-memory trie to disk
-	SnapshotLimit        int                   // Memory allowance (MB) to use for caching snapshot entries in memory
-	Preimages            bool                  // Whether to store preimage of trie key to the disk
-	NoTries              bool                  // Insecure settings. Do not have any tries in databases if enabled.
-	StateHistory         uint64                // Number of blocks from head whose state histories are reserved.
-	StateScheme          string                // Scheme used to store ethereum states and merkle tree nodes on top
-	PathNodeBuffer       pathdb.NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
-	ProposeBlockInterval uint64                // Propose block to L1 block interval.
-	EnableProofKeeper    bool                  // Whether to enable proof keeper
-	KeepProofBlockSpan   uint64                // Block span of keep proof
-	SnapshotNoBuild      bool                  // Whether the background generation is allowed
-	SnapshotWait         bool                  // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
-	JournalFilePath      string
-	JournalFile          bool
+	TrieCleanLimit          int                   // Memory allowance (MB) to use for caching trie nodes in memory
+	TrieCleanNoPrefetch     bool                  // Whether to disable heuristic state prefetching for followup blocks
+	TrieDirtyLimit          int                   // Memory limit (MB) at which to start flushing dirty trie nodes to disk
+	TrieDirtyDisabled       bool                  // Whether to disable trie write caching and GC altogether (archive node)
+	TrieTimeLimit           time.Duration         // Time limit after which to flush the current in-memory trie to disk
+	SnapshotLimit           int                   // Memory allowance (MB) to use for caching snapshot entries in memory
+	Preimages               bool                  // Whether to store preimage of trie key to the disk
+	NoTries                 bool                  // Insecure settings. Do not have any tries in databases if enabled.
+	StateHistory            uint64                // Number of blocks from head whose state histories are reserved.
+	StateScheme             string                // Scheme used to store ethereum states and merkle tree nodes on top
+	PathNodeBuffer          pathdb.NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
+	ProposeBlockInterval    uint64                // Propose block to L1 block interval.
+	EnableProofKeeper       bool                  // Whether to enable proof keeper
+	KeepProofBlockSpan      uint64                // Block span of keep proof
+	SnapshotNoBuild         bool                  // Whether the background generation is allowed
+	SnapshotWait            bool                  // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+	JournalFilePath         string                // The file path to journal pathdb diff layers
+	JournalFile             bool                  // Whether to enable journal file
+	EnableRecoverDiffLayers bool                  // Whether enable recover diff layers for node buffer list.
 
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 }
@@ -184,14 +185,15 @@ func (c *CacheConfig) triedbConfig(keepFunc pathdb.NotifyKeepFunc) *trie.Config 
 	}
 	if c.StateScheme == rawdb.PathScheme {
 		config.PathDB = &pathdb.Config{
-			TrieNodeBufferType:   c.PathNodeBuffer,
-			StateHistory:         c.StateHistory,
-			CleanCacheSize:       c.TrieCleanLimit * 1024 * 1024,
-			DirtyCacheSize:       c.TrieDirtyLimit * 1024 * 1024,
-			ProposeBlockInterval: c.ProposeBlockInterval,
-			NotifyKeep:           keepFunc,
-			JournalFilePath:      c.JournalFilePath,
-			JournalFile:          c.JournalFile,
+			TrieNodeBufferType:      c.PathNodeBuffer,
+			StateHistory:            c.StateHistory,
+			CleanCacheSize:          c.TrieCleanLimit * 1024 * 1024,
+			DirtyCacheSize:          c.TrieDirtyLimit * 1024 * 1024,
+			ProposeBlockInterval:    c.ProposeBlockInterval,
+			NotifyKeep:              keepFunc,
+			JournalFilePath:         c.JournalFilePath,
+			JournalFile:             c.JournalFile,
+			EnableRecoverDiffLayers: c.EnableRecoverDiffLayers,
 		}
 	}
 	return config
@@ -396,6 +398,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	// Make sure the state associated with the block is available, or log out
 	// if there is no available state, waiting for state sync.
 	head := bc.CurrentBlock()
+	log.Info("current block", "root", head.Root.String(), "number", head.Number.String())
 	if !bc.NoTries() && !bc.HasState(head.Root) {
 		if head.Number.Uint64() == 0 {
 			// The genesis state is missing, which is only possible in the path-based
@@ -411,11 +414,14 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			var diskRoot common.Hash
 			if bc.cacheConfig.SnapshotLimit > 0 {
 				diskRoot = rawdb.ReadSnapshotRoot(bc.db)
+				log.Info("22jd", "limit", bc.cacheConfig.SnapshotLimit, "diskRoot", diskRoot.String())
 			}
 			if bc.triedb.Scheme() == rawdb.PathScheme {
 				recoverable, _ := bc.triedb.Recoverable(diskRoot)
+				log.Info("2392hfwde", "1", !bc.HasState(diskRoot), "2", !recoverable)
 				if !bc.HasState(diskRoot) && !recoverable {
 					diskRoot = bc.triedb.Head()
+					log.Info("f2m20i", "diskRoot", diskRoot.String())
 				}
 			}
 			if diskRoot != (common.Hash{}) {
@@ -718,6 +724,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	// current freezer limit to start nuking id underflown
 	pivot := rawdb.ReadLastPivotNumber(bc.db)
 	frozen, _ := bc.db.Ancients()
+	log.Info("setHeadBeyondRoot", "root", root.String(), "head", head)
 
 	updateFn := func(db ethdb.KeyValueWriter, header *types.Header) (*types.Header, bool) {
 		// Rewind the blockchain, ensuring we don't end up with a stateless head
@@ -732,13 +739,14 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 				// Block exists. Keep rewinding until either we find one with state
 				// or until we exceed the optional threshold root hash
 				beyondRoot := (root == common.Hash{}) // Flag whether we're beyond the requested root (no root, always true)
-
 				for {
 					// If a root threshold was requested but not yet crossed, check
 					if root != (common.Hash{}) && !beyondRoot && newHeadBlock.Root() == root {
+						log.Info("3en9iud9")
 						beyondRoot, rootNumber = true, newHeadBlock.NumberU64()
 					}
 					if !bc.HasState(newHeadBlock.Root()) && !bc.stateRecoverable(newHeadBlock.Root()) {
+						// log.Info("Block state missing, rewinding further", "number", newHeadBlock.NumberU64(), "hash", newHeadBlock.Hash())
 						log.Trace("Block state missing, rewinding further", "number", newHeadBlock.NumberU64(), "hash", newHeadBlock.Hash())
 						if pivot == nil || newHeadBlock.NumberU64() > *pivot {
 							parent := bc.GetBlock(newHeadBlock.ParentHash(), newHeadBlock.NumberU64()-1)
@@ -757,6 +765,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 						if !bc.HasState(newHeadBlock.Root()) && bc.stateRecoverable(newHeadBlock.Root()) {
 							// Rewind to a block with recoverable state. If the state is
 							// missing, run the state recovery here.
+							log.Info("238328h", "root", newHeadBlock.Root().String(), "number", newHeadBlock.NumberU64())
 							if err := bc.triedb.Recover(newHeadBlock.Root()); err != nil {
 								log.Crit("Failed to rollback state", "err", err) // Shouldn't happen
 							}
@@ -2217,6 +2226,7 @@ func (bc *BlockChain) recoverAncestors(block *types.Block) (common.Hash, error) 
 	)
 	for parent != nil && !bc.HasState(parent.Root()) {
 		if bc.stateRecoverable(parent.Root()) {
+			log.Info("7777")
 			if err := bc.triedb.Recover(parent.Root()); err != nil {
 				return common.Hash{}, err
 			}

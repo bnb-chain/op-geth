@@ -61,4 +61,11 @@ var (
 	baseNodeBufferDifflayerAvgSize = metrics.NewRegisteredGauge("pathdb/basenodebuffer/difflayeravgsize", nil)
 	proposedBlockReaderSuccess     = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/success", nil)
 	proposedBlockReaderMismatch    = metrics.NewRegisteredMeter("pathdb/nodebufferlist/proposedblockreader/mismatch", nil)
+
+	// pbss difflayer cache
+	diffHashCacheHitMeter      = metrics.NewRegisteredMeter("pathdb/difflayer/hashcache/hit", nil)
+	diffHashCacheReadMeter     = metrics.NewRegisteredMeter("pathdb/difflayer/hashcache/read", nil)
+	diffHashCacheMissMeter     = metrics.NewRegisteredMeter("pathdb/difflayer/hashcache/miss", nil)
+	diffHashCacheSlowPathMeter = metrics.NewRegisteredMeter("pathdb/difflayer/hashcache/slowpath", nil)
+	diffHashCacheLengthGauge   = metrics.NewRegisteredGauge("pathdb/difflayer/hashcache/size", nil)
 )

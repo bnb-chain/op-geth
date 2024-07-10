@@ -652,7 +652,7 @@ func dbTrieGet(ctx *cli.Context) error {
 	defer stack.Close()
 
 	var db ethdb.Database
-	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
+	chaindb := utils.MakeChainDatabase(ctx, stack, true)
 	if chaindb.StateStore() != nil {
 		db = chaindb.StateStore()
 	} else {
@@ -725,7 +725,7 @@ func dbTrieDelete(ctx *cli.Context) error {
 	defer stack.Close()
 
 	var db ethdb.Database
-	chaindb := utils.MakeChainDatabase(ctx, stack, true, false)
+	chaindb := utils.MakeChainDatabase(ctx, stack, true)
 	if chaindb.StateStore() != nil {
 		db = chaindb.StateStore()
 	} else {
@@ -1140,29 +1140,20 @@ func hbss2pbss(ctx *cli.Context) error {
 
 	db := utils.MakeChainDatabase(ctx, stack, false)
 	db.Sync()
-	stateDiskDb := db.StateStore()
 	defer db.Close()
 
-	// convert hbss trie node to pbss trie node
-	var lastStateID uint64
-	if stateDiskDb != nil {
-		lastStateID = rawdb.ReadPersistentStateID(stateDiskDb)
-	} else {
-		lastStateID = rawdb.ReadPersistentStateID(db)
-	}
-	if lastStateID == 0 || force {
-		config := triedb.HashDefaults
-		triedb := triedb.NewDatabase(db, config)
-		triedb.Cap(0)
-		log.Info("hbss2pbss triedb", "scheme", triedb.Scheme())
-		defer triedb.Close()
+	config := triedb.HashDefaults
+	triedb := triedb.NewDatabase(db, config)
+	triedb.Cap(0)
+	log.Info("hbss2pbss triedb", "scheme", triedb.Scheme())
+	defer triedb.Close()
 
-		headerHash := rawdb.ReadHeadHeaderHash(db.BlockStore())
-		blockNumber := rawdb.ReadHeaderNumber(db.BlockStore(), headerHash)
-		if blockNumber == nil {
-			log.Error("Failed to read header number")
-			return fmt.Errorf("failed to read header number")
-		}
+	headerHash := rawdb.ReadHeadHeaderHash(db)
+	blockNumber := rawdb.ReadHeaderNumber(db, headerHash)
+	if blockNumber == nil {
+		log.Error("Failed to read header number")
+		return fmt.Errorf("failed to read header number")
+	}
 
 	log.Info("hbss2pbss converting", "HeaderHash", headerHash.String(), "blockNumber", *blockNumber)
 
@@ -1197,39 +1188,6 @@ func hbss2pbss(ctx *cli.Context) error {
 	}
 	h2p.Run()
 
-	// repair state ancient offset
-	if stateDiskDb != nil {
-		lastStateID = rawdb.ReadPersistentStateID(stateDiskDb)
-	} else {
-		lastStateID = rawdb.ReadPersistentStateID(db)
-	}
-
-	if lastStateID == 0 {
-		log.Error("Convert hbss to pbss trie node error. The last state id is still 0")
-	}
-
-	var ancient string
-	if db.StateStore() != nil {
-		dirName := filepath.Join(stack.ResolvePath("chaindata"), "state")
-		ancient = filepath.Join(dirName, "ancient")
-	} else {
-		ancient = stack.ResolveAncient("chaindata", ctx.String(utils.AncientFlag.Name))
-	}
-	err = rawdb.ResetStateFreezerTableOffset(ancient, lastStateID)
-	if err != nil {
-		log.Error("Reset state freezer table offset failed", "error", err)
-		return err
-	}
-	// prune hbss trie node
-	if stateDiskDb != nil {
-		err = rawdb.PruneHashTrieNodeInDataBase(stateDiskDb)
-	} else {
-		err = rawdb.PruneHashTrieNodeInDataBase(db)
-	}
-	if err != nil {
-		log.Error("Prune Hash trie node in database failed", "error", err)
-		return err
-	}
 	return nil
 }
 

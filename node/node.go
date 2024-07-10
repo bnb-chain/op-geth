@@ -82,7 +82,6 @@ const (
 
 const StateDBNamespace = "eth/db/statedata/"
 
-
 // New creates a new P2P node, ready for protocol registration.
 func New(conf *Config) (*Node, error) {
 	// Copy config and resolve the datadir so future changes to the current
@@ -736,12 +735,13 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 		db = rawdb.NewMemoryDatabase()
 	} else {
 		db, err = rawdb.Open(rawdb.OpenOptions{
-			Type:      n.config.DBEngine,
-			Directory: n.ResolvePath(name),
-			Namespace: namespace,
-			Cache:     cache,
-			Handles:   handles,
-			ReadOnly:  readonly,
+			Type:          n.config.DBEngine,
+			Directory:     n.ResolvePath(name),
+			Namespace:     namespace,
+			Cache:         cache,
+			Handles:       handles,
+			ReadOnly:      readonly,
+			MultiDataBase: n.CheckIfMultiDataBase(),
 		})
 	}
 
@@ -758,14 +758,10 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 		blockDb              ethdb.Database
 		disableChainDbFreeze = false
 		blockDbHandlesSize   int
-		diffStoreHandles     int
 		chainDataHandles     = config.DatabaseHandles
 		chainDbCache         = config.DatabaseCache
 	)
 
-	if config.PersistDiff {
-		diffStoreHandles = config.DatabaseHandles * diffStoreHandlesPercentage / 100
-	}
 	isMultiDatabase := n.CheckIfMultiDataBase()
 	// Open the separated state database if the state directory exists
 	if isMultiDatabase {
@@ -785,19 +781,19 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 		disableChainDbFreeze = true
 
 		// Allocate half of the  handles and chainDbCache to this separate state data database
-		stateDiskDb, err = n.OpenDatabaseWithFreezer(name+"/state", stateDbCache, stateDbHandles, "", "eth/db/statedata/", readonly, true, false, config.PruneAncientData)
+		stateDiskDb, err = n.OpenDatabaseWithFreezer(name+"/state", stateDbCache, stateDbHandles, "", "eth/db/statedata/", readonly, true)
 		if err != nil {
 			return nil, err
 		}
 
-		blockDb, err = n.OpenDatabaseWithFreezer(name+"/block", blockDbCacheSize, blockDbHandlesSize, "", "eth/db/blockdata/", readonly, false, false, config.PruneAncientData)
+		blockDb, err = n.OpenDatabaseWithFreezer(name+"/block", blockDbCacheSize, blockDbHandlesSize, "", "eth/db/blockdata/", readonly, false)
 		if err != nil {
 			return nil, err
 		}
 		log.Warn("Multi-database is an experimental feature")
 	}
 
-	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, config.DatabaseFreezer, namespace, readonly, disableChainDbFreeze, false, config.PruneAncientData)
+	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, config.DatabaseFreezer, namespace, readonly, disableChainDbFreeze)
 	if err != nil {
 		return nil, err
 	}
@@ -805,15 +801,6 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 	if isMultiDatabase {
 		chainDB.SetStateStore(stateDiskDb)
 		chainDB.SetBlockStore(blockDb)
-	}
-
-	if config.PersistDiff {
-		diffStore, err := n.OpenDiffDatabase(name, diffStoreHandles, config.DatabaseDiff, namespace, readonly)
-		if err != nil {
-			chainDB.Close()
-			return nil, err
-		}
-		chainDB.SetDiffStore(diffStore)
 	}
 
 	return chainDB, nil
@@ -824,7 +811,7 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
-func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient string, namespace string, readonly bool) (ethdb.Database, error) {
+func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient string, namespace string, readonly, disableFreeze bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {

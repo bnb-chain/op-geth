@@ -221,7 +221,7 @@ func initGenesis(ctx *cli.Context) error {
 		overrides.OverrideVerkle = &v
 	}
 	for _, name := range []string{"chaindata", "lightchaindata"} {
-		chaindb, err := stack.OpenDatabaseWithFreezer(name, 0, 0, ctx.String(utils.AncientFlag.Name), "", false)
+		chaindb, err := stack.OpenDatabaseWithFreezer(name, 0, 0, ctx.String(utils.AncientFlag.Name), "", false, false)
 		if err != nil {
 			utils.Fatalf("Failed to open database: %v", err)
 		}
@@ -229,12 +229,12 @@ func initGenesis(ctx *cli.Context) error {
 
 		// if the trie data dir has been set, new trie db with a new state database
 		if ctx.IsSet(utils.MultiDataBaseFlag.Name) {
-			statediskdb, dbErr := stack.OpenDatabaseWithFreezer(name+"/state", 0, 0, "", "", false, false, false, false)
+			statediskdb, dbErr := stack.OpenDatabaseWithFreezer(name+"/state", 0, 0, "", "", false, false)
 			if dbErr != nil {
 				utils.Fatalf("Failed to open separate trie database: %v", dbErr)
 			}
 			chaindb.SetStateStore(statediskdb)
-			blockdb, err := stack.OpenDatabaseWithFreezer(name+"/block", 0, 0, "", "", false, false, false, false)
+			blockdb, err := stack.OpenDatabaseWithFreezer(name+"/block", 0, 0, "", "", false, false)
 			if err != nil {
 				utils.Fatalf("Failed to open separate block database: %v", err)
 			}
@@ -242,7 +242,7 @@ func initGenesis(ctx *cli.Context) error {
 			log.Warn("Multi-database is an experimental feature")
 		}
 
-		triedb := utils.MakeTrieDatabase(ctx, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false, genesis.IsVerkle())
+		triedb := utils.MakeTrieDatabase(ctx, stack, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false, genesis.IsVerkle())
 		defer triedb.Close()
 
 		_, hash, err := core.SetupGenesisBlockWithOverride(chaindb, triedb, genesis, &overrides)
@@ -537,15 +537,11 @@ func importPreimages(ctx *cli.Context) error {
 }
 
 func parseDumpConfig(ctx *cli.Context, stack *node.Node) (*state.DumpConfig, ethdb.Database, common.Hash, error) {
-	db := utils.MakeChainDatabase(ctx, stack, true)
-	defer db.Close()
-
-	var header *types.Header
 	if ctx.NArg() > 1 {
 		return nil, nil, common.Hash{}, fmt.Errorf("expected 1 argument (number or hash), got %d", ctx.NArg())
 	}
 
-	db := utils.MakeChainDatabase(ctx, stack, true, false)
+	db := utils.MakeChainDatabase(ctx, stack, true)
 	scheme, err := rawdb.ParseStateScheme(ctx.String(utils.StateSchemeFlag.Name), db)
 	if err != nil {
 		return nil, nil, common.Hash{}, err

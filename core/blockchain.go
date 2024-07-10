@@ -286,9 +286,9 @@ type BlockChain struct {
 
 	wg            sync.WaitGroup //
 	dbWg          sync.WaitGroup
-	quit          chan struct{}  // shutdown signal, closed in Stop.
-	stopping      atomic.Bool    // false if chain is running, true when stopped
-	procInterrupt atomic.Bool    // interrupt signaler for block processing
+	quit          chan struct{} // shutdown signal, closed in Stop.
+	stopping      atomic.Bool   // false if chain is running, true when stopped
+	procInterrupt atomic.Bool   // interrupt signaler for block processing
 
 	engine     consensus.Engine
 	validator  Validator // Block and state validator interface
@@ -674,10 +674,10 @@ func (bc *BlockChain) SetHeadWithTimestamp(timestamp uint64) error {
 func (bc *BlockChain) SetFinalized(header *types.Header) {
 	bc.currentFinalBlock.Store(header)
 	if header != nil {
-		rawdb.WriteFinalizedBlockHash(bc.db, header.Hash())
+		rawdb.WriteFinalizedBlockHash(bc.db.BlockStore(), header.Hash())
 		headFinalizedBlockGauge.Update(int64(header.Number.Uint64()))
 	} else {
-		rawdb.WriteFinalizedBlockHash(bc.db, common.Hash{})
+		rawdb.WriteFinalizedBlockHash(bc.db.BlockStore(), common.Hash{})
 		headFinalizedBlockGauge.Update(0)
 	}
 }
@@ -689,17 +689,6 @@ func (bc *BlockChain) SetSafe(header *types.Header) {
 		headSafeBlockGauge.Update(int64(header.Number.Uint64()))
 	} else {
 		headSafeBlockGauge.Update(0)
-	}
-}
-
-// SetFinalized sets the finalized block.
-// This function differs slightly from Ethereum; we fine-tune it through the outer-layer setting finalizedBlockGauge.
-func (bc *BlockChain) SetFinalized(header *types.Header) {
-	bc.currentFinalBlock.Store(header)
-	if header != nil {
-		rawdb.WriteFinalizedBlockHash(bc.db.BlockStore(), header.Hash())
-	} else {
-		rawdb.WriteFinalizedBlockHash(bc.db.BlockStore(), common.Hash{})
 	}
 }
 
@@ -1638,17 +1627,8 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 		// canonical blocks. Avoid firing too many ChainHeadEvents,
 		// we will fire an accumulated ChainHeadEvent and disable fire
 		// event here.
-		var finalizedHeader *types.Header
-		if posa, ok := bc.Engine().(consensus.PoSA); ok {
-			if finalizedHeader = posa.GetFinalizedHeader(bc, block.Header()); finalizedHeader != nil {
-				bc.SetFinalized(finalizedHeader)
-			}
-		}
 		if emitHeadEvent {
 			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
-			if finalizedHeader != nil {
-				bc.finalizedHeaderFeed.Send(FinalizedHeaderEvent{finalizedHeader})
-			}
 		}
 	} else {
 		bc.chainSideFeed.Send(ChainSideEvent{Block: block})

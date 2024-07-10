@@ -299,9 +299,9 @@ func resolveChainFreezerDir(ancient string) string {
 // value data store with a freezer moving immutable chain segments into cold
 // storage. The passed ancient indicates the path of root ancient directory
 // where the chain freezer can be opened.
-func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace string, readonly bool) (ethdb.Database, error) {
+func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace string, readonly bool, multiDatabase bool) (ethdb.Database, error) {
 	// Create the idle freezer instance
-	frdb, err := newChainFreezer(resolveChainFreezerDir(ancient), namespace, readonly)
+	frdb, err := newChainFreezer(resolveChainFreezerDir(ancient), namespace, readonly, multiDatabase)
 	if err != nil {
 		printChainMetadata(db)
 		return nil, err
@@ -383,11 +383,6 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			// Otherwise, the head header is still the genesis, we're allowed to init a new
 			// freezer.
 		}
-	}
-
-	// no prune ancient start success
-	if !readonly {
-		WriteAncientType(db, EntireFreezerType)
 	}
 	// Freezer is consistent with the key-value database, permit combining the two
 	if !frdb.readonly {
@@ -475,7 +470,8 @@ type OpenOptions struct {
 	PruneAncientData bool
 	// Ephemeral means that filesystem sync operations should be avoided: data integrity in the face of
 	// a crash is not important. This option should typically be used in tests.
-	Ephemeral bool
+	Ephemeral     bool
+	MultiDataBase bool
 }
 
 // openKeyValueDatabase opens a disk-based key-value database, e.g. leveldb or pebble.
@@ -521,7 +517,7 @@ func Open(o OpenOptions) (ethdb.Database, error) {
 	if len(o.AncientsDirectory) == 0 {
 		return kvdb, nil
 	}
-	frdb, err := NewDatabaseWithFreezer(kvdb, o.AncientsDirectory, o.Namespace, o.ReadOnly)
+	frdb, err := NewDatabaseWithFreezer(kvdb, o.AncientsDirectory, o.Namespace, o.ReadOnly, o.MultiDataBase)
 	if err != nil {
 		kvdb.Close()
 		return nil, err

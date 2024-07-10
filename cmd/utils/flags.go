@@ -2326,7 +2326,7 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 	case ctx.String(SyncModeFlag.Name) == "light":
 		chainDb, err = stack.OpenDatabase("lightchaindata", cache, handles, "", readonly)
 	default:
-		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", cache, handles, ctx.String(AncientFlag.Name), "", readonly, disableFreeze, false, false)
+		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", cache, handles, ctx.String(AncientFlag.Name), "", readonly, false)
 		// set the separate state database
 		if stack.CheckIfMultiDataBase() && err == nil {
 			stateDiskDb := MakeStateDataBase(ctx, stack, readonly, false)
@@ -2345,7 +2345,7 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
 	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
 	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) * 90 / 100
-	statediskdb, err := stack.OpenDatabaseWithFreezer("chaindata/state", cache, handles, "", "", readonly, disableFreeze, false, false)
+	statediskdb, err := stack.OpenDatabaseWithFreezer("chaindata/state", cache, handles, "", "", readonly, disableFreeze)
 	if err != nil {
 		Fatalf("Failed to open separate trie database: %v", err)
 	}
@@ -2356,7 +2356,7 @@ func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 func MakeBlockDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
 	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
 	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) / 10
-	blockDb, err := stack.OpenDatabaseWithFreezer("chaindata/block", cache, handles, "", "", readonly, disableFreeze, false, false)
+	blockDb, err := stack.OpenDatabaseWithFreezer("chaindata/block", cache, handles, "", "", readonly, disableFreeze)
 	if err != nil {
 		Fatalf("Failed to open separate block database: %v", err)
 	}

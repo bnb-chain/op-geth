@@ -896,5 +896,5 @@ func getBody(block *types.Block) *engine.ExecutionPayloadBodyV1 {
 }
 
 func shouldDeleteData(currentSafe *types.Header, currentHead *types.Header, safeBlock *types.Block) bool {
-	return currentSafe.Number.Uint64() > currentHead.Number.Uint64() && currentSafe.Number.Uint64() > safeBlock.NumberU64()
+	return currentSafe != nil && currentSafe.Number.Uint64() > currentHead.Number.Uint64() && currentSafe.Number.Uint64() > safeBlock.NumberU64()
 }

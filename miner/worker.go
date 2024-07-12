@@ -1114,7 +1114,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	start := time.Now()
 	pending := w.eth.TxPool().Pending(true)
 	packFromTxpoolTimer.UpdateSince(start)
-	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
+	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash(), "txs", len(pending))
 
 	// Split the pending transactions into locals and remotes.
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending

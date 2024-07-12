@@ -1,7 +1,6 @@
 package legacypool
 
 import (
-	"math/big"
 	"sort"
 	"sync"
 
@@ -22,12 +21,18 @@ type cacheForMiner struct {
 	pending  map[common.Address]map[*types.Transaction]struct{}
 	locals   map[common.Address]bool
 	addrLock sync.Mutex
+
+	allCache      map[common.Address][]*txpool.LazyTransaction
+	filteredCache map[common.Address][]*txpool.LazyTransaction
+	cacheLock     sync.Mutex
 }
 
 func newCacheForMiner() *cacheForMiner {
 	return &cacheForMiner{
-		pending: make(map[common.Address]map[*types.Transaction]struct{}),
-		locals:  make(map[common.Address]bool),
+		pending:       make(map[common.Address]map[*types.Transaction]struct{}),
+		locals:        make(map[common.Address]bool),
+		allCache:      make(map[common.Address][]*txpool.LazyTransaction),
+		filteredCache: make(map[common.Address][]*txpool.LazyTransaction),
 	}
 }
 
@@ -69,8 +74,9 @@ func (pc *cacheForMiner) del(txs types.Transactions, signer types.Signer) {
 	}
 }
 
-func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.Int, enforceTip bool) map[common.Address][]*txpool.LazyTransaction {
+func (pc *cacheForMiner) sync2cache(pool txpool.LazyResolver, filter func(txs types.Transactions, addr common.Address) types.Transactions) {
 	pending := make(map[common.Address]types.Transactions)
+
 	pc.txLock.Lock()
 	for addr, txlist := range pc.pending {
 		pending[addr] = make(types.Transactions, 0, len(txlist))
@@ -79,19 +85,14 @@ func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.I
 		}
 	}
 	pc.txLock.Unlock()
-	pendingLazy := make(map[common.Address][]*txpool.LazyTransaction)
+
+	// convert pending to lazyTransactions
+	filteredLazy := make(map[common.Address][]*txpool.LazyTransaction)
+	allLazy := make(map[common.Address][]*txpool.LazyTransaction)
 	for addr, txs := range pending {
 		// sorted by nonce
 		sort.Sort(types.TxByNonce(txs))
-		// If the miner requests tip enforcement, cap the lists now
-		if enforceTip && !pc.isLocal(addr) {
-			for i, tx := range txs {
-				if tx.EffectiveGasTipIntCmp(gasPrice, baseFee) < 0 {
-					txs = txs[:i]
-					break
-				}
-			}
-		}
+		filterd := filter(txs, addr)
 		if len(txs) > 0 {
 			lazies := make([]*txpool.LazyTransaction, len(txs))
 			for i, tx := range txs {
@@ -106,10 +107,49 @@ func (pc *cacheForMiner) dump(pool txpool.LazyResolver, gasPrice, baseFee *big.I
 					BlobGas:   tx.BlobGas(),
 				}
 			}
-			pendingLazy[addr] = lazies
+			allLazy[addr] = lazies
+			filteredLazy[addr] = lazies[:len(filterd)]
 		}
 	}
-	return pendingLazy
+
+	pc.cacheLock.Lock()
+	pc.filteredCache = filteredLazy
+	pc.allCache = allLazy
+	pc.cacheLock.Unlock()
+}
+
+func (pc *cacheForMiner) dump(filtered bool) map[common.Address][]*txpool.LazyTransaction {
+	pc.cacheLock.Lock()
+	pending := pc.allCache
+	if filtered {
+		pending = pc.filteredCache
+	}
+	pc.cacheLock.Unlock()
+	return pending
+
+	//pendingLazy := make(map[common.Address][]*txpool.LazyTransaction)
+	//var txnum = 0
+	//for addr, txs := range pending {
+	//	// If the miner requests tip enforcement, cap the lists now
+	//	if enforceTip && !pc.IsLocal(addr) {
+	//		for i, tx := range txs {
+	//			if tx.Tx.EffectiveGasTipIntCmp(gasPrice, baseFee) < 0 {
+	//				txs = txs[:i]
+	//				break
+	//			}
+	//		}
+	//	}
+	//	if len(txs) > 0 {
+	//		lazies := make([]*txpool.LazyTransaction, len(txs))
+	//		for i, tx := range txs {
+	//			lazies[i] = tx
+	//			txnum++
+	//		}
+	//		pendingLazy[addr] = lazies
+	//	}
+	//}
+	//log.Info("cacheForMiner dump", "duration", time.Since(start), "accounts", len(pending), "txs", txnum)
+	//return pendingLazy
 }
 
 func (pc *cacheForMiner) markLocal(addr common.Address) {
@@ -119,7 +159,7 @@ func (pc *cacheForMiner) markLocal(addr common.Address) {
 	pc.locals[addr] = true
 }
 
-func (pc *cacheForMiner) isLocal(addr common.Address) bool {
+func (pc *cacheForMiner) IsLocal(addr common.Address) bool {
 	pc.addrLock.Lock()
 	defer pc.addrLock.Unlock()
 	return pc.locals[addr]

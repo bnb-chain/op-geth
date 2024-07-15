@@ -1180,7 +1180,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		work.tcount++
 	}
 	commitDepositTxsTimer.UpdateSince(start)
-	log.Debug("commitDepositTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
+	log.Info("commitDepositTxsTimer (execution)(slave)", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	// forced transactions done, fill rest of block with transactions
 	if !genParams.noTxs {
@@ -1192,6 +1192,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		timer := time.AfterFunc(w.newpayloadTimeout, func() {
 			interrupt.Store(commitInterruptTimeout)
 		})
+		start := time.Now()
 
 		err := w.fillTransactions(interrupt, work)
 		timer.Stop() // don't need timeout interruption any more
@@ -1202,6 +1203,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			log.Info("Block building got interrupted by payload resolution", "parentHash", genParams.parentHash)
 			isBuildBlockInterruptCounter.Inc(1)
 		}
+		log.Info("commitDepositTxsTimer (execution)(master)", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 	}
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
 		return &newPayloadResult{err: errInterruptedUpdate}
@@ -1217,7 +1219,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	}
 
 	assembleBlockTimer.UpdateSince(start)
-	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
+	log.Info("assembleBlockTimer (validation)", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	accountReadTimer.Update(work.state.AccountReads)                 // Account reads are complete(in commit txs)
 	storageReadTimer.Update(work.state.StorageReads)                 // Storage reads are complete(in commit txs)
@@ -1230,7 +1232,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 
 	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
 
-	log.Debug("build payload statedb metrics", "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
+	log.Info("build payload statedb metrics", "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
 
 	return &newPayloadResult{
 		block:    block,

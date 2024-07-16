@@ -149,6 +149,10 @@ func newStorage(isParallel bool) Storage {
 // - First you need to obtain a state object.
 // - Account values as well as storages can be accessed and modified through the object.
 // - Finally, call commit to return the changes of storage trie and update account data.
+//
+// NOTICE: For Parallel, there is lightCopy and deepCopy used for cloning object between
+// slot DB and global DB, and it is not guaranteed to be happened after finalise(), so any
+// field added into the stateObject must be handled in lightCopy and deepCopy.
 type stateObject struct {
 	db       *StateDB            // The baseDB for parallel.
 	dbItf    StateDBer           // The slotDB for parallel.
@@ -321,7 +325,16 @@ func (s *stateObject) GetState(key common.Hash) common.Hash {
 		return value
 	}
 	// Otherwise return the entry's original value
-	return s.GetCommittedState(key)
+	result := s.GetCommittedState(key)
+	// Record first read for conflict verify
+	if s.db.isParallel && s.db.parallel.isSlotDB {
+		addr := s.address
+		if s.db.parallel.kvReadsInSlot[addr] == nil {
+			s.db.parallel.kvReadsInSlot[addr] = newStorage(false)
+		}
+		s.db.parallel.kvReadsInSlot[addr].StoreValue(key, result)
+	}
+	return result
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
@@ -394,7 +407,9 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 			s.db.setError(err)
 			return common.Hash{}
 		}
+		s.db.trieParallelLock.Lock()
 		val, err := tr.GetStorage(s.address, key.Bytes())
+		s.db.trieParallelLock.Unlock()
 		if metrics.EnabledExpensive {
 			s.db.StorageReads += time.Since(start)
 		}
@@ -405,7 +420,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		value.SetBytes(val)
 	}
 	s.originStorage.StoreValue(key, value)
-
 	return value
 }
 
@@ -430,7 +444,7 @@ func (s *stateObject) SetState(key, value common.Hash) {
 		prevalue: prev,
 	})
 
-	if s.db.parallel.isSlotDB {
+	if s.db.isParallel && s.db.parallel.isSlotDB {
 		s.db.parallel.kvChangesInSlot[s.address][key] = struct{}{} // should be moved to here, after `s.db.GetState()`
 	}
 	s.setState(key, value)
@@ -502,6 +516,16 @@ func (s *stateObject) finaliseRWSet() {
 // this function will return the mutated storage trie, or nil if there is no
 // storage change at all.
 func (s *stateObject) updateTrie() (Trie, error) {
+	maindb := s.db
+	if s.db.isParallel && s.db.parallel.isSlotDB {
+		// we need to fixup the origin storage with the mainDB. otherwise the changes maybe problem since the origin
+		// is wrong.
+		maindb = s.db.parallel.baseStateDB
+		// TODO: consider delete as it is dup with accountMux and storageMux
+		maindb.accountStorageParallelLock.Lock()
+		defer maindb.accountStorageParallelLock.Unlock()
+	}
+
 	// Make sure all dirty slots are finalized into the pending storage area
 	s.finalise(false)
 
@@ -511,7 +535,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	}
 	// Track the amount of time wasted on updating the storage trie
 	if metrics.EnabledExpensive {
-		defer func(start time.Time) { s.db.StorageUpdates += time.Since(start) }(time.Now())
+		defer func(start time.Time) { maindb.StorageUpdates += time.Since(start) }(time.Now())
 	}
 	// The snapshot storage map for the object
 	var (
@@ -521,10 +545,9 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	)
 	tr, err := s.getTrie()
 	if err != nil {
-		s.db.setError(err)
+		maindb.setError(err)
 		return nil, err
 	}
-
 	// Insert all the pending storage updates into the trie
 	usedStorage := make([][]byte, 0, s.pendingStorage.Length())
 	dirtyStorage := make(map[common.Hash][]byte)
@@ -552,14 +575,14 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		for key, value := range dirtyStorage {
 			if len(value) == 0 {
 				if err := tr.DeleteStorage(s.address, key[:]); err != nil {
-					s.db.setError(err)
+					maindb.setError(err)
 				}
-				s.db.StorageDeleted += 1
+				maindb.StorageDeleted += 1
 			} else {
 				if err := tr.UpdateStorage(s.address, key[:], value); err != nil {
-					s.db.setError(err)
+					maindb.setError(err)
 				}
-				s.db.StorageUpdated += 1
+				maindb.StorageUpdated += 1
 			}
 			// Cache the items for preloading
 			usedStorage = append(usedStorage, common.CopyBytes(key[:]))
@@ -569,20 +592,20 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		s.db.StorageMux.Lock()
+		maindb.StorageMux.Lock()
 		// The snapshot storage map for the object
-		storage = s.db.storages[s.addrHash]
+		storage = maindb.storages[s.addrHash]
 		if storage == nil {
 			storage = make(map[common.Hash][]byte, len(dirtyStorage))
-			s.db.storages[s.addrHash] = storage
+			maindb.storages[s.addrHash] = storage
 		}
 		// Cache the original value of mutated storage slots
-		origin = s.db.storagesOrigin[s.address]
+		origin = maindb.storagesOrigin[s.address]
 		if origin == nil {
 			origin = make(map[common.Hash][]byte)
-			s.db.storagesOrigin[s.address] = origin
+			maindb.storagesOrigin[s.address] = origin
 		}
-		s.db.StorageMux.Unlock()
+		maindb.StorageMux.Unlock()
 		for key, value := range dirtyStorage {
 			khash := crypto.HashData(hasher, key[:])
 
@@ -609,26 +632,89 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	}()
 	wg.Wait()
 
-	if s.db.prefetcher != nil {
-		s.db.prefetcher.used(s.addrHash, s.data.Root, usedStorage)
+	if maindb.prefetcher != nil {
+		maindb.prefetcher.used(s.addrHash, s.data.Root, usedStorage)
 	}
 	s.pendingStorage = newStorage(s.isParallel) // reset pending map
 	return tr, nil
+	/*
+		s.pendingStorage.Range(func(keyItf, valueItf interface{}) bool {
+			key := keyItf.(common.Hash)
+			value := valueItf.(common.Hash)
+			// Skip noop changes, persist actual changes
+			originalValue, _ := s.originStorage.GetValue(key)
+			if value == originalValue {
+				return true
+			}
+
+			prev, _ := s.originStorage.GetValue(key)
+			s.originStorage.StoreValue(key, value)
+
+			var encoded []byte // rlp-encoded value to be used by the snapshot
+			if (value == common.Hash{}) {
+				if err := tr.DeleteStorage(s.address, key[:]); err != nil {
+					maindb.setError(err)
+				}
+				maindb.StorageDeleted += 1
+			} else {
+				// Encoding []byte cannot fail, ok to ignore the error.
+				trimmed := common.TrimLeftZeroes(value[:])
+				encoded, _ = rlp.EncodeToBytes(trimmed)
+				if err := tr.UpdateStorage(s.address, key[:], trimmed); err != nil {
+					maindb.setError(err)
+				}
+				maindb.StorageUpdated += 1
+			}
+			// Cache the mutated storage slots until commit
+			if storage == nil {
+				if storage = maindb.storages[s.addrHash]; storage == nil {
+					storage = make(map[common.Hash][]byte)
+					maindb.storages[s.addrHash] = storage
+				}
+			}
+
+			khash := crypto.HashData(maindb.hasher, key[:])
+			storage[khash] = encoded // encoded will be nil if it's deleted
+
+			// Cache the original value of mutated storage slots
+			if origin == nil {
+				if origin = maindb.storagesOrigin[s.address]; origin == nil {
+					origin = make(map[common.Hash][]byte)
+					maindb.storagesOrigin[s.address] = origin
+				}
+			}
+			// Track the original value of slot only if it's mutated first time
+			if _, ok := origin[khash]; !ok {
+				if prev == (common.Hash{}) {
+					origin[khash] = nil // nil if it was not present previously
+				} else {
+					// Encoding []byte cannot fail, ok to ignore the error.
+					b, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(prev[:]))
+					origin[khash] = b
+				}
+			}
+			// Cache the items for preloading
+			usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
+			return true
+		})
+		if maindb.prefetcher != nil {
+			maindb.prefetcher.used(s.addrHash, s.data.Root, usedStorage)
+		}
+		s.pendingStorage = newStorage(s.isParallel) // reset pending map
+
+		return tr, nil
+	*/
 }
 
 // updateRoot flushes all cached storage mutations to trie, recalculating the
 // new storage trie root.
 func (s *stateObject) updateRoot() {
-	// If node runs in no trie mode, set root to empty.
-	defer func() {
-		if s.db.db.NoTries() {
-			s.data.Root = types.EmptyRootHash
-		}
-	}()
-
 	// Flush cached storage mutations into trie, short circuit if any error
 	// is occurred or there is not change in the trie.
+	// TODO: The trieParallelLock seems heavy, can we remove it?
+	s.db.trieParallelLock.Lock()
 	tr, err := s.updateTrie()
+	s.db.trieParallelLock.Unlock()
 	if err != nil || tr == nil {
 		return
 	}
@@ -707,45 +793,42 @@ func (s *stateObject) ReturnGas(gas *uint256.Int) {}
 
 func (s *stateObject) lightCopy(db *ParallelStateDB) *stateObject {
 	object := newObject(db, s.isParallel, s.address, &s.data)
+	if s.trie != nil {
+		s.db.trieParallelLock.Lock()
+		object.trie = db.db.CopyTrie(s.trie)
+		s.db.trieParallelLock.Unlock()
+	}
 	object.code = s.code
 	object.selfDestructed = s.selfDestructed // should be false
 	object.dirtyCode = s.dirtyCode           // it is not used in slot, but keep it is ok
 	object.deleted = s.deleted               // should be false
 
-	// we must copy because it is possible that s comes from unconfirmedDB and hence storage is necessary.
-	// otherwise there is problem that the light copied obj is in dirty and addrStateChangeInSlot is marked, but
-	// GetState get empty from storages and load from mainDB, which is inconsistent with real execution.
-	// Moreover, as the wrong object already in dirty, no KVStateRead recorded. and hence can not identified in
-	// conflict detection.
-	// example: block contains tx1 tx2
-	// after execution of tx1, it store object@theAddr in unconfirmedDB.
-	// at tx2, it first AddBalance of theAddr, which cause lightcopy and store in dirty, and mark the addrStateChangeInSlot
-	// Then the GetState(theAddr) find addrStateChangeInSlot and get obj in dirty, but the slot is empty so it load from
-	// mainDB, and return is inconsistent with unconfirmedDB of Tx1 result. (and as object in dirty, it doesn't mark KVStateRead.)
-	if object.address.Hex() == "0x864BbDA5C698aC34b47a9ea3BD4228802cC5ce3b" {
-		fmt.Printf("Dav -- ligthCopy -- update storage :%s\n storages:\ndirty:", object.address.Hex())
-		s.dirtyStorage.Range(func(key, value interface{}) bool {
-			fmt.Printf("key: %s, value: %s\n",
-				key.(common.Hash), value.(common.Hash))
-			return true
-		})
-		fmt.Printf("\npending:\n")
-		s.pendingStorage.Range(func(key, value interface{}) bool {
-			fmt.Printf("key: %s, value: %s\n",
-				key.(common.Hash), value.(common.Hash))
-			return true
-		})
-	}
+	object.dirtyBalance = s.dirtyBalance
+	object.dirtyNonce = s.dirtyNonce
+	object.dirtyCodeHash = s.dirtyCodeHash
 
-	object.dirtyStorage = s.dirtyStorage.Copy()
+	// object generated by lightCopy() is supposed to be used in the slot.
+	// and the origin storage will be filled at GetState() etc.
+	// the dirty and pending will be recorded in the execution for new changes.
+	// so no need to do the copy.
+	// moreover, copy storage here is tricky, as the stateDB is changed concurrently with
+	// the slot execution, and the snap is updated only at Commit stage.
+	// so the origin may different between the time NOW and the time of merge, so the conflict check is vital to avoid
+	// the problem. fortunately, the KVRead will record this and compare it with mainDB.
+
+	//object.dirtyStorage = s.dirtyStorage.Copy()
+	s.db.accountStorageParallelLock.RLock()
 	object.originStorage = s.originStorage.Copy()
 	object.pendingStorage = s.pendingStorage.Copy()
-
+	s.db.accountStorageParallelLock.RUnlock()
 	return object
 }
 
+// deepCopy happens only at global serial execution stage.
+// E.g. prepareForParallel and merge (copy slotObj to mainDB)
+// otherwise the origin/dirty/pending storages may cause incorrect issue.
 func (s *stateObject) deepCopy(db *StateDB) *stateObject {
-	obj := &stateObject{
+	object := &stateObject{
 		db:         db.getBaseStateDB(),
 		dbItf:      db,
 		address:    s.address,
@@ -755,27 +838,23 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 		isParallel: s.isParallel,
 	}
 	if s.trie != nil {
-		obj.trie = db.db.CopyTrie(s.trie)
+		s.db.trieParallelLock.Lock()
+		object.trie = db.db.CopyTrie(s.trie)
+		s.db.trieParallelLock.Unlock()
 	}
-	obj.code = s.code
-	obj.dirtyStorage = s.dirtyStorage.Copy()
-	obj.originStorage = s.originStorage.Copy()
-	obj.pendingStorage = s.pendingStorage.Copy()
-	obj.selfDestructed = s.selfDestructed
-	obj.dirtyCode = s.dirtyCode
-	obj.deleted = s.deleted
 
-	// dirty states
-	if s.dirtyNonce != nil {
-		obj.dirtyNonce = new(uint64)
-		*obj.dirtyNonce = *s.dirtyNonce
-	}
-	if s.dirtyBalance != nil {
-		obj.dirtyBalance = new(uint256.Int).Set(s.dirtyBalance)
-	}
-	obj.dirtyCodeHash = s.dirtyCodeHash
+	object.code = s.code
+	object.dirtyStorage = s.dirtyStorage.Copy()
+	object.originStorage = s.originStorage.Copy()
+	object.pendingStorage = s.pendingStorage.Copy()
+	object.selfDestructed = s.selfDestructed
+	object.dirtyCode = s.dirtyCode
+	object.deleted = s.deleted
+	object.dirtyBalance = s.dirtyBalance
+	object.dirtyNonce = s.dirtyNonce
+	object.dirtyCodeHash = s.dirtyCodeHash
 
-	return obj
+	return object
 }
 
 func (s *stateObject) MergeSlotObject(db Database, dirtyObjs *stateObject, keys StateKeys) {
@@ -801,16 +880,13 @@ func (s *stateObject) Code() []byte {
 	if s.code != nil {
 		return s.code
 	}
-
 	if bytes.Equal(s.CodeHash(), types.EmptyCodeHash.Bytes()) {
 		return nil
 	}
-
 	code, err := s.db.db.ContractCode(s.address, common.BytesToHash(s.CodeHash()))
 	if err != nil {
 		s.db.setError(fmt.Errorf("can't load code hash %x: %v", s.CodeHash(), err))
 	}
-
 	s.code = code
 	return code
 }
@@ -885,4 +961,24 @@ func (s *stateObject) Nonce() uint64 {
 
 func (s *stateObject) Root() common.Hash {
 	return s.data.Root
+}
+
+// fixUpOriginAndResetPendingStorage is used for slot object only, the target is to fix up the origin storage of the
+// object with the latest mainDB. And reset the pendingStorage as the execution recorded the changes in dirty and the
+// dirties will be merged to pending at finalise. so the current pendingStorage contains obsoleted info mainly from
+// lightCopy()
+func (s *stateObject) fixUpOriginAndResetPendingStorage() {
+	if s.db.isParallel && s.db.parallel.isSlotDB {
+		mainDB := s.db.parallel.baseStateDB
+		origObj := mainDB.getStateObject(s.address)
+		mainDB.accountStorageParallelLock.RLock()
+		if origObj != nil && origObj.originStorage.Length() != 0 {
+			s.originStorage = origObj.originStorage.Copy()
+		}
+		// isParallel is unnecessary since the pendingStorage for slotObject will be used serially from now on.
+		if s.pendingStorage.Length() > 0 {
+			s.pendingStorage = newStorage(false)
+		}
+		mainDB.accountStorageParallelLock.RUnlock()
+	}
 }

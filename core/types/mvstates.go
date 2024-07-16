@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/holiman/uint256"
-	"slices"
+	"golang.org/x/exp/slices"
 	"strings"
 	"sync"
 )

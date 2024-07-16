@@ -2022,8 +2022,28 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if !setHead {
 			// Don't set the head, only insert the block
 			err = bc.writeBlockWithState(block, receipts, statedb)
+			if false {
+				fmt.Printf("Dav -- After writeBlockWithState: %d check balance\n", block.NumberU64())
+				actual := statedb.GetBalance(block.Coinbase())
+				fmt.Printf("Dav -- AfterwriteBlockWithState: %d balance: %d\n", block.NumberU64(), actual.Uint64())
+			}
 		} else {
 			status, err = bc.writeBlockAndSetHead(block, receipts, logs, statedb, false)
+			if false {
+				fmt.Printf("Dav -- After writeBlockAndSetHead: %d check balance\n", block.NumberU64())
+				actual := statedb.GetBalance(block.Coinbase())
+				fmt.Printf("Dav -- writeBlockAndSetHead: %d balance: %d\n", block.NumberU64(), actual.Uint64())
+
+				s, _ := bc.State()
+				bk := bc.CurrentBlock()
+				fmt.Printf("Dav -- writeBlockAndSetHead - currentBlock: %d root: %s\n", bk.Number.Uint64(), bk.Root)
+				obj, _ := s.GetStateObjectFromSnapshotOrTrie(block.Coinbase())
+
+				//obj, _ := statedb.GetStateObjectFromSnapshotOrTrie(block.Coinbase())
+
+				fmt.Printf("Dav -- writeBlockAndSetHead: %d obj from snap or trie: %p\n", block.NumberU64(), obj)
+
+			}
 		}
 		followupInterrupt.Store(true)
 		if err != nil {

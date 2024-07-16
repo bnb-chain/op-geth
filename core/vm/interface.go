@@ -83,8 +83,6 @@ type StateDB interface {
 	ParallelMakeUp(addr common.Address, input []byte)
 
 	// todo -dav : delete following
-	PrintParallelStateObjects()
-	GetNonceFromBaseDB(addr common.Address) uint64
 	TxIndex() int
 
 	// parallel DAG related

@@ -213,6 +213,10 @@ func (a *asyncnodebuffer) proposedBlockReader(blockRoot common.Hash) (layer, err
 	return nil, errors.New("async node buffer not support to get proposed block reader")
 }
 
+func (a *asyncnodebuffer) getHeadDiffLayer() (common.Hash, uint64) {
+	return common.Hash{}, 0
+}
+
 type nodecache struct {
 	layers    uint64                                    // The number of diff layers aggregated inside
 	size      uint64                                    // The size of aggregated writes

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -73,6 +74,165 @@ type nodebufferlist struct {
 	forceKeepCh     chan struct{}  // Trigger force keep event loop.
 	waitForceKeepCh chan struct{}  // Wait force keep event loop.
 	keepFunc        NotifyKeepFunc // Used to keep op-proposer output proof.
+
+	recovery bool // Signals that pathdb is recovering node buffer list
+}
+
+// newNodeBufferListForRecovery initializes the node buffer list for recovering diff layers
+func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFreezer, base *multiDifflayer,
+	limit, wpBlocks, rsevMdNum, dlInMd uint64) *nodebufferlist {
+	nbl := &nodebufferlist{
+		db:              db,
+		wpBlocks:        wpBlocks,
+		rsevMdNum:       rsevMdNum,
+		dlInMd:          dlInMd,
+		limit:           limit,
+		base:            base,
+		stopCh:          make(chan struct{}),
+		waitStopCh:      make(chan struct{}),
+		forceKeepCh:     make(chan struct{}),
+		waitForceKeepCh: make(chan struct{}),
+		recovery:        true,
+	}
+	freezerLength, err := freezer.Ancients()
+	if err != nil {
+		log.Crit("Failed to get freezer ancients", "error", err)
+		return nil
+	}
+	tail, err := freezer.Tail()
+	if err != nil {
+		log.Crit("Failed to get freezer tail", "error", err)
+		return nil
+	}
+	persistentStateID := rawdb.ReadPersistentStateID(db)
+
+	log.Info("Print ancient db meta", "persistent state id", persistentStateID, "freezer length", freezerLength,
+		"freezer tail", tail, "waitingRecoverNum", freezerLength-persistentStateID)
+
+	var (
+		wg           sync.WaitGroup
+		start        = time.Now()
+		startStateID = persistentStateID + 1
+	)
+	startBlock, err := readHistoryMetaBlockNumber(freezer, startStateID)
+	if err != nil {
+		log.Crit("Failed to read start block number", "error", err, "state_id", persistentStateID+1)
+	}
+	endBlock, err := readHistoryMetaBlockNumber(freezer, freezerLength)
+	if err != nil {
+		log.Crit("Failed to read end block number", "error", err, "state_id", freezerLength)
+	}
+	blockIntervals := nbl.createBlockInterval(startBlock, endBlock)
+	stateIntervals := nbl.createStateInterval(freezer, startStateID, freezerLength, blockIntervals)
+
+	log.Info("slice", "blockIntervals", blockIntervals, "stateIntervals", stateIntervals, "startBlock",
+		startBlock, "endBlock", endBlock)
+
+	nbl.linkMultiDiffLayers(startBlock, endBlock)
+	for current, i := nbl.head, 0; current != nil; current, i = current.next, i+1 {
+		wg.Add(1)
+		go func(index int, slice []uint64, mdl *multiDifflayer) {
+			defer wg.Done()
+			for j := slice[0]; j <= slice[1]; j++ {
+				h := nbl.readStateHistory(freezer, j)
+				if h == nil {
+					return
+				}
+				if err = mdl.commit(h.meta.root, j, h.meta.block, 1, flattenTrieNodes(h.nodes)); err != nil {
+					log.Crit("Failed to commit trie nodes to multi diff layer", "error", err)
+				}
+			}
+		}(i, stateIntervals[i], current)
+	}
+	wg.Wait()
+
+	for current, i := nbl.head, 0; current != nil; current, i = current.next, i+1 {
+		nbl.size += current.size
+		nbl.layers += current.layers
+	}
+
+	log.Info("diff to base", "tail state id", nbl.tail.id, "head", nbl.head.id, "nbl layers", nbl.layers,
+		"base layers", nbl.base.layers)
+	nbl.diffToBase()
+
+	persistentStateID = rawdb.ReadPersistentStateID(db)
+	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
+		"new persistentStateID", persistentStateID, "nbl layers", nbl.layers, "base layers", nbl.base.layers)
+	nbl.recovery = false
+	nbl.persistID = persistentStateID
+	return nbl
+}
+
+// linkMultiDiffLayers links specified amount of multiDiffLayers for recovering
+func (nf *nodebufferlist) linkMultiDiffLayers(startBlock, endBlock uint64) {
+	length := len(nf.createBlockInterval(startBlock, endBlock))
+	for i := 0; i < length; i++ {
+		mdl := newMultiDifflayer(nf.limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
+		nf.pushFront(mdl)
+	}
+	nf.count = uint64(length)
+}
+
+func (nf *nodebufferlist) readStateHistory(freezer *rawdb.ResettableFreezer, stateID uint64) *history {
+	h, err := readHistory(freezer, stateID)
+	if err != nil {
+		if checkError(err) {
+			log.Info("No more state history in ancient db", "state_id", stateID)
+			return nil
+		}
+		log.Crit("Failed to read history from freezer db", "error", err)
+	}
+	return h
+}
+
+func (nf *nodebufferlist) createBlockInterval(startBlock, endBlock uint64) [][]uint64 {
+	var intervalBoundaries [][]uint64
+	firstIntervalEnd := startBlock + nf.dlInMd - (startBlock % nf.dlInMd)
+	intervalBoundaries = append(intervalBoundaries, []uint64{startBlock, firstIntervalEnd})
+
+	for start := firstIntervalEnd + 1; start <= endBlock; start += nf.dlInMd {
+		end := start + nf.dlInMd - 1
+		if end > endBlock {
+			end = endBlock
+		}
+		intervalBoundaries = append(intervalBoundaries, []uint64{start, end})
+	}
+
+	sort.Slice(intervalBoundaries, func(i, j int) bool {
+		return intervalBoundaries[i][0] > intervalBoundaries[j][0]
+	})
+	return intervalBoundaries
+}
+
+// startStateID: persistentStateID+1, endStateID: freezerLength
+func (nf *nodebufferlist) createStateInterval(freezer *rawdb.ResettableFreezer, startStateID, endStateID uint64,
+	blockIntervals [][]uint64) [][]uint64 {
+	blockMap, err := readAllHistoryMeta(freezer, startStateID, endStateID)
+	if err != nil {
+		log.Crit("Failed to read all history meta", "error", err)
+	}
+
+	var stateIntervals [][]uint64
+	for _, blockList := range blockIntervals {
+		firstStateID, ok := blockMap[blockList[0]]
+		if !ok {
+			log.Crit("Corresponding state id is not found 000", "block", blockList[0])
+		}
+
+		secondStateID, ok := blockMap[blockList[1]]
+		if !ok {
+			log.Crit("Corresponding state id is not found 111", "block", blockList[1])
+		}
+		stateIntervals = append(stateIntervals, []uint64{firstStateID, secondStateID})
+	}
+	return stateIntervals
+}
+
+func (nf *nodebufferlist) getHeadDiffLayer() (common.Hash, uint64) {
+	head := nf.head
+	log.Info("last head diff layer info", "root", head.root, "id", head.id, "block", head.block,
+		"layer", head.layers, "size", head.size)
+	return head.root, head.id
 }
 
 // newNodeBufferList initializes the node buffer list with the provided nodes
@@ -82,7 +242,10 @@ func newNodeBufferList(
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers uint64,
 	proposeBlockInterval uint64,
-	keepFunc NotifyKeepFunc) *nodebufferlist {
+	keepFunc NotifyKeepFunc,
+	freezer *rawdb.ResettableFreezer,
+	recovery bool,
+) *nodebufferlist {
 	var (
 		rsevMdNum uint64
 		dlInMd    uint64
@@ -110,23 +273,30 @@ func newNodeBufferList(
 		}
 	}
 	base := newMultiDifflayer(limit, size, common.Hash{}, nodes, layers)
-	ele := newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
-	nf := &nodebufferlist{
-		db:              db,
-		wpBlocks:        wpBlocks,
-		rsevMdNum:       rsevMdNum,
-		dlInMd:          dlInMd,
-		limit:           limit,
-		base:            base,
-		head:            ele,
-		tail:            ele,
-		count:           1,
-		persistID:       rawdb.ReadPersistentStateID(db),
-		stopCh:          make(chan struct{}),
-		waitStopCh:      make(chan struct{}),
-		forceKeepCh:     make(chan struct{}),
-		waitForceKeepCh: make(chan struct{}),
-		keepFunc:        keepFunc,
+
+	var nf *nodebufferlist
+	if recovery {
+		nf = newNodeBufferListForRecovery(db, freezer, base, limit, wpBlocks, rsevMdNum, dlInMd)
+	} else {
+		ele := newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
+		nf = &nodebufferlist{
+			db:              db,
+			wpBlocks:        wpBlocks,
+			rsevMdNum:       rsevMdNum,
+			dlInMd:          dlInMd,
+			limit:           limit,
+			base:            base,
+			head:            ele,
+			tail:            ele,
+			count:           1,
+			persistID:       rawdb.ReadPersistentStateID(db),
+			stopCh:          make(chan struct{}),
+			waitStopCh:      make(chan struct{}),
+			forceKeepCh:     make(chan struct{}),
+			waitForceKeepCh: make(chan struct{}),
+			keepFunc:        keepFunc,
+			recovery:        false,
+		}
 	}
 
 	go nf.loop()
@@ -356,6 +526,7 @@ func (nf *nodebufferlist) getLayers() uint64 {
 	defer nf.mux.RUnlock()
 	defer nf.baseMux.RUnlock()
 
+	log.Info("layers number", "layers", nf.layers+nf.base.layers)
 	return nf.layers + nf.base.layers
 }
 
@@ -395,6 +566,7 @@ func (nf *nodebufferlist) pushFront(cache *multiDifflayer) {
 	nf.size += cache.size
 	nf.layers += cache.layers
 	nf.count++
+	log.Info("nodebufferlist pushFront", "nf layers", nf.layers, "cache.layers", cache.layers)
 
 	return
 }

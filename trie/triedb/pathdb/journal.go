@@ -261,17 +261,23 @@ func (db *Database) loadLayers() layer {
 		log.Info("Failed to load journal, discard it", "err", err)
 	}
 
-	// Return single layer with persistent state.
-	stateID := rawdb.ReadPersistentStateID(db.diskdb)
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval, db.config.NotifyKeep)
-	dl := newDiskLayer(root, stateID, db, nil, nb)
-	nb.setClean(dl.cleans)
-	log.Info("load layers", "stateID", stateID)
-
+	var (
+		nb      trienodebuffer
+		dl      *diskLayer
+		stateID uint64
+	)
 	if errors.Is(err, errMissJournal) && db.config.EnableRecoverDiffLayers {
 		log.Info("Recover diff layers from ancient db")
 		db.isRecoverDiffLayers = true
-		dl.recovery = true
+		return nil
+	} else {
+		// Return single layer with persistent state.
+		stateID = rawdb.ReadPersistentStateID(db.diskdb)
+		nb = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
+			db.config.ProposeBlockInterval, db.config.NotifyKeep, nil, false)
+		dl = newDiskLayer(root, stateID, db, nil, nb)
+		nb.setClean(dl.cleans)
+		log.Info("load layers", "stateID", stateID)
 	}
 
 	return dl
@@ -340,7 +346,8 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 	}
 
 	// Calculate the internal state transitions by id difference.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval, db.config.NotifyKeep)
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval,
+		db.config.NotifyKeep, nil, false)
 	base := newDiskLayer(root, id, db, nil, nb)
 	nb.setClean(base.cleans)
 	return base, nil

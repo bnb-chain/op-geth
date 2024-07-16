@@ -307,3 +307,7 @@ func (b *nodebuffer) setClean(clean *fastcache.Cache) {
 func (b *nodebuffer) proposedBlockReader(blockRoot common.Hash) (layer, error) {
 	return nil, errors.New("anode buffer not support to get proposed block reader")
 }
+
+func (b *nodebuffer) getHeadDiffLayer() (common.Hash, uint64) {
+	return common.Hash{}, 0
+}

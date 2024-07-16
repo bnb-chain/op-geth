@@ -81,6 +81,9 @@ type trienodebuffer interface {
 
 	// proposedBlockReader return the world state Reader of block that is proposed to L1.
 	proposedBlockReader(blockRoot common.Hash) (layer, error)
+
+	// getHeadDiffLayer returns head diff layer for disk layer
+	getHeadDiffLayer() (common.Hash, uint64)
 }
 
 type NodeBufferType int32
@@ -120,11 +123,13 @@ func NewTrieNodeBuffer(
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers, proposeBlockInterval uint64,
 	keepFunc NotifyKeepFunc,
+	freezer *rawdb.ResettableFreezer,
+	recovery bool,
 ) trienodebuffer {
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {
 	case NodeBufferList:
-		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, recovery)
 	case AsyncNodeBuffer:
 		return newAsyncNodeBuffer(limit, nodes, layers)
 	case SyncNodeBuffer:
@@ -383,6 +388,7 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 	// layer.
 	nodes, err := triestate.Apply(h.meta.parent, h.meta.root, h.accounts, h.storages, loader)
 	if err != nil {
+		log.Error("Failed to apply state", "error", err, "root", h.meta.root.String(), "block", h.meta.block)
 		return nil, err
 	}
 	// Mark the diskLayer as stale before applying any mutations on top.
@@ -399,6 +405,7 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 	if !dl.buffer.empty() {
 		err := dl.buffer.revert(dl.db.diskdb, nodes)
 		if err != nil {
+			log.Error("Failed to revert node buffer data", "error", err)
 			return nil, err
 		}
 	} else {

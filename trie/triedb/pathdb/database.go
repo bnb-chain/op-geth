@@ -199,28 +199,32 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 		}
 		db.freezer = freezer
 
-		diskLayerID := db.tree.bottom().stateID()
-		if diskLayerID == 0 {
-			// Reset the entire state histories in case the trie database is
-			// not initialized yet, as these state histories are not expected.
-			frozen, err := db.freezer.Ancients()
-			if err != nil {
-				log.Crit("Failed to retrieve head of state history", "err", err)
-			}
-			if frozen != 0 {
-				err := db.freezer.Reset()
-				if err != nil {
-					log.Crit("Failed to reset state histories", "err", err)
-				}
-				log.Info("Truncated extraneous state history")
-			}
+		if db.isRecoverDiffLayers {
+			log.Info("recover diff layers")
+			nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
+				db.config.ProposeBlockInterval, db.config.NotifyKeep, db.freezer, true)
+			root, stateID := nb.getHeadDiffLayer()
+			dl := newDiskLayer(root, stateID, db, nil, nb)
+			nb.setClean(dl.cleans)
+			db.tree = newLayerTree(dl)
+			db.isRecoverDiffLayers = false
+			log.Info("after recovering", "diskLayerID", db.tree.bottom().stateID())
 		} else {
-			log.Info("before recovering", "diskLayerID", diskLayerID)
-			if db.isRecoverDiffLayers {
-				if err = db.recoverDiffLayers(); err != nil {
-					log.Error("Failed to recover diff layers", "error", err)
+			diskLayerID := db.tree.bottom().stateID()
+			if diskLayerID == 0 {
+				// Reset the entire state histories in case the trie database is
+				// not initialized yet, as these state histories are not expected.
+				frozen, err := db.freezer.Ancients()
+				if err != nil {
+					log.Crit("Failed to retrieve head of state history", "err", err)
 				}
-				log.Info("after recovering", "diskLayerID", db.tree.bottom().stateID())
+				if frozen != 0 {
+					err := db.freezer.Reset()
+					if err != nil {
+						log.Crit("Failed to reset state histories", "err", err)
+					}
+					log.Info("Truncated extraneous state history")
+				}
 			} else {
 				// Truncate the extra state histories above in freezer in case
 				// it's not aligned with the disk layer.
@@ -371,7 +375,8 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval, db.config.NotifyKeep)
+	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval,
+		db.config.NotifyKeep, nil, false)
 	dl := newDiskLayer(root, 0, db, nil, nb)
 	nb.setClean(dl.cleans)
 	db.tree.reset(dl)
@@ -409,6 +414,8 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		start = time.Now()
 		dl    = db.tree.bottom()
 	)
+	log.Info("recover info", "root", root.String(), "state id", dl.stateID())
+	count := 0
 	for dl.rootHash() != root {
 		h, err := readHistory(db.freezer, dl.stateID())
 		if err != nil {
@@ -416,12 +423,14 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		}
 		dl, err = dl.revert(h, loader)
 		if err != nil {
+			log.Error("Failed to revert disk layer", "error", err, "count", count)
 			return err
 		}
 		// reset layer with newly created disk layer. It must be
 		// done after each revert operation, otherwise the new
 		// disk layer won't be accessible from outside.
 		db.tree.reset(dl)
+		count++
 	}
 	_ = db.DeleteTrieJournal(db.diskdb)
 	truncatedNumber, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
@@ -615,7 +624,6 @@ func (db *Database) recoverDiffLayers() error {
 		"freezer length", freezerLength, "freezer tail", tail, "config", db.config.StateHistory,
 		"bottom stateID", dl.stateID(), "bottom root", dl.rootHash().String())
 
-	// 创建一个定长数组，存储diffLayer，数组用完后需要reset
 	var (
 		wg                sync.WaitGroup
 		start             = time.Now()
@@ -633,7 +641,6 @@ func (db *Database) recoverDiffLayers() error {
 	results := make([][]*diffLayer, length)
 	sID := *stateID + 1
 	log.Info("info", "num goroutines", numGoroutines, "task", tasksPerGoroutine, "division", isDivision, "length", length)
-	// results := make([][]*diffLayer, length)
 	for i := range results {
 		wg.Add(1)
 		go func(index int) {
@@ -656,7 +663,7 @@ func (db *Database) recoverDiffLayers() error {
 					incomplete[addr] = struct{}{}
 				}
 				states := triestate.New(h.accounts, h.storages, incomplete)
-				diffLayers = append(diffLayers, newDiffLayer1(dl, h.meta.root, startStateID+uint64(j), h.meta.block,
+				diffLayers = append(diffLayers, newDiffLayer(dl, h.meta.root, startStateID+uint64(j), h.meta.block,
 					flattenTrieNodes(h.nodes), states))
 			}
 			results[index] = diffLayers
@@ -664,8 +671,7 @@ func (db *Database) recoverDiffLayers() error {
 	}
 	wg.Wait()
 
-	for i, j := range results {
-		log.Info("2823r", "index", i, "length", len(j))
+	for _, j := range results {
 		for _, data := range j {
 			dl, err = dl.commit(data, false)
 			if err != nil {

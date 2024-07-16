@@ -19,11 +19,11 @@ package pathdb
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/exp/slices"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -334,8 +334,8 @@ func (h *history) encode() ([]byte, []byte, []byte, []byte, []byte) {
 		accountIndexes = append(accountIndexes, accIndex.encode()...)
 	}
 
-	nodesBytes, err := json.Marshal(h.nodes)
-	// nodesBytes, err := rlp.EncodeToBytes(h.nodes)
+	// nodesBytes, err := json.Marshal(h.nodes)
+	nodesBytes, err := rlp.EncodeToBytes(h.nodes)
 	if err != nil {
 		log.Error("Failed to encode trie nodes", "error", err)
 	}
@@ -495,7 +495,9 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 			storages[accIndex.address] = slotData
 		}
 	}
-	if err := json.Unmarshal(trieNodes, &encoded); err != nil {
+
+	// json.Unmarshal(trieNodes, &encoded)
+	if err := rlp.DecodeBytes(trieNodes, &encoded); err != nil {
 		log.Error("Failed to decode state history trie nodes", "error", err)
 		return err
 	}
@@ -540,6 +542,37 @@ func (h *history) Size() int {
 	}
 
 	return size
+}
+
+// readHistoryMetaBlockNumber reads and decodes the state history meta and returns block number.
+func readHistoryMetaBlockNumber(freezer *rawdb.ResettableFreezer, stateID uint64) (uint64, error) {
+	blob := rawdb.ReadStateHistoryMeta(freezer, stateID)
+	if len(blob) == 0 {
+		return 0, fmt.Errorf("state history not found %d", stateID)
+	}
+	var m meta
+	if err := m.decode(blob); err != nil {
+		return 0, err
+	}
+	return m.block, nil
+}
+
+// readAllHistoryMeta returns all block number to stateID map.
+func readAllHistoryMeta(freezer *rawdb.ResettableFreezer, startStateID, endStateID uint64) (map[uint64]uint64, error) {
+	blockMap := make(map[uint64]uint64)
+	for i := startStateID; i <= endStateID; i++ {
+		blob := rawdb.ReadStateHistoryMeta(freezer, i)
+		if len(blob) == 0 {
+			return nil, fmt.Errorf("state history not found %d", i)
+		}
+		var m meta
+		if err := m.decode(blob); err != nil {
+			return nil, err
+		}
+		blockMap[m.block] = i
+	}
+	log.Info("state id", "startStateID", startStateID, "endStateID", endStateID, "length", len(blockMap))
+	return blockMap, nil
 }
 
 // readHistory reads and decodes the state history object by the given id.

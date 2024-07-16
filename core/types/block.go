@@ -241,8 +241,6 @@ func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*
 	} else {
 		b.header.ReceiptHash = DeriveSha(Receipts(receipts), hasher)
 		b.header.Bloom = CreateBloom(receipts)
-		//fmt.Printf("Dav -- NewBlock -- ReceptHash: %s\nRecepts: %v\nBloom: %s\n", b.header.ReceiptHash, receipts, hexutils.BytesToHex(b.header.Bloom.Bytes()))
-		//debug.PrintStack()
 	}
 
 	if len(uncles) == 0 {

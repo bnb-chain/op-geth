@@ -17,7 +17,6 @@
 package state
 
 import (
-	"fmt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 )
@@ -175,11 +174,6 @@ func (ch createObjectChange) dirtied() *common.Address {
 func (ch resetObjectChange) revert(dber StateDBer) {
 	s := dber.getBaseStateDB()
 	if s.parallel.isSlotDB {
-
-		if ch.prev.address.Hex() == "0x6295eE1B4F6dD65047762F924Ecd367c17eaBf8f" {
-			fmt.Printf("Dav - revert() - set dirtiedStateObjectsInSlot[%s] = obj, obj.codehash: %s\n",
-				ch.prev.address, common.Bytes2Hex(ch.prev.CodeHash()))
-		}
 		// ch.prev must be from dirtiedStateObjectsInSlot, put it back
 		s.parallel.dirtiedStateObjectsInSlot[ch.prev.address] = ch.prev
 	} else {

@@ -258,7 +258,7 @@ func newObject(dbItf StateDBer, isParallel bool, address common.Address, acct *t
 		address:        address,
 		addrHash:       crypto.Keccak256Hash(address[:]),
 		origin:         origin,
-		data:           *acct,
+		data:           *acct.Copy(),
 		isParallel:     isParallel,
 		originStorage:  newStorage(isParallel),
 		pendingStorage: newStorage(isParallel),
@@ -267,7 +267,8 @@ func newObject(dbItf StateDBer, isParallel bool, address common.Address, acct *t
 	}
 
 	// dirty data when create a new account
-	if acct == nil {
+
+	if created {
 		s.dirtyBalance = new(uint256.Int).Set(acct.Balance)
 		s.dirtyNonce = new(uint64)
 		*s.dirtyNonce = acct.Nonce
@@ -834,7 +835,7 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 		address:    s.address,
 		addrHash:   s.addrHash,
 		origin:     s.origin,
-		data:       s.data,
+		data:       *s.data.Copy(),
 		isParallel: s.isParallel,
 	}
 	if s.trie != nil {
@@ -972,7 +973,7 @@ func (s *stateObject) Root() common.Hash {
 func (s *stateObject) fixUpOriginAndResetPendingStorage() {
 	if s.db.isParallel && s.db.parallel.isSlotDB {
 		mainDB := s.db.parallel.baseStateDB
-		origObj := mainDB.getStateObject(s.address)
+		origObj := mainDB.getStateObjectNoUpdate(s.address)
 		mainDB.accountStorageParallelLock.RLock()
 		if origObj != nil && origObj.originStorage.Length() != 0 {
 			s.originStorage = origObj.originStorage.Copy()

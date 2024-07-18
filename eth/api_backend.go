@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"time"
 
 	"github.com/ethereum/go-ethereum"
@@ -321,6 +322,31 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 		return nil
 	}
 	return b.eth.txPool.Add([]*types.Transaction{signedTx}, true, false)[0]
+}
+
+func (b *EthAPIBackend) SendBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
+	return b.eth.txPool.AddBundle(bundle, originBundle)
+}
+
+func (b *EthAPIBackend) BundlePrice() *big.Int {
+	bundles := b.eth.txPool.AllBundles()
+	gasFloor := big.NewInt(b.eth.config.Miner.MevGasPriceFloor)
+
+	if len(bundles) == 0 {
+		return gasFloor
+	}
+
+	sort.SliceStable(bundles, func(i, j int) bool {
+		return bundles[j].Price.Cmp(bundles[i].Price) < 0
+	})
+
+	idx := len(bundles) / 2
+
+	if bundles[idx] == nil || bundles[idx].Price.Cmp(gasFloor) < 0 {
+		return gasFloor
+	}
+
+	return bundles[idx].Price
 }
 
 func (b *EthAPIBackend) GetPoolTransactions() (types.Transactions, error) {

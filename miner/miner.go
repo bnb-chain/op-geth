@@ -19,7 +19,10 @@ package miner
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"math/big"
 	"sync"
 	"time"
@@ -41,10 +44,10 @@ import (
 
 var (
 	commitDepositTxsTimer = metrics.NewRegisteredTimer("miner/commit/deposit/txs", nil)
-	packFromTxpoolTimer = metrics.NewRegisteredTimer("miner/pack/txpool/txs", nil)
-	commitTxpoolTxsTimer = metrics.NewRegisteredTimer("miner/commit/txpool/txs", nil)
-	assembleBlockTimer = metrics.NewRegisteredTimer("miner/assemble/block", nil)
-	buildBlockTimer = metrics.NewRegisteredTimer("miner/build/block", nil)
+	packFromTxpoolTimer   = metrics.NewRegisteredTimer("miner/pack/txpool/txs", nil)
+	commitTxpoolTxsTimer  = metrics.NewRegisteredTimer("miner/commit/txpool/txs", nil)
+	assembleBlockTimer    = metrics.NewRegisteredTimer("miner/assemble/block", nil)
+	buildBlockTimer       = metrics.NewRegisteredTimer("miner/build/block", nil)
 
 	accountReadTimer   = metrics.NewRegisteredTimer("miner/account/reads", nil)
 	accountHashTimer   = metrics.NewRegisteredTimer("miner/account/hashes", nil)
@@ -63,6 +66,25 @@ var (
 
 	isBuildBlockInterruptCounter = metrics.NewRegisteredCounter("miner/build/interrupt", nil)
 )
+
+var defaultCoinBaseAddress = common.HexToAddress("0x4200000000000000000000000000000000000011")
+
+type SequencerConfig struct {
+	URL string
+}
+
+type MevConfig struct {
+	Enabled    bool              // Whether to enable Mev or not
+	Sequencers []SequencerConfig // The list of builders
+
+	BuilderEnabled bool // Whether to enable bidder or not
+}
+
+var DefaultMevConfig = MevConfig{
+	Enabled:        false,
+	Sequencers:     nil,
+	BuilderEnabled: false,
+}
 
 // Backend wraps all methods required for mining. Only full node is capable
 // to offer all the functions here.
@@ -87,6 +109,9 @@ type Config struct {
 	NewPayloadTimeout time.Duration // The maximum time allowance for creating a new payload
 
 	RollupComputePendingBlock bool // Compute the pending block from tx-pool, instead of copying the latest-block
+
+	MevGasPriceFloor int64     `toml:",omitempty"`
+	Mev              MevConfig // Mev configuration
 }
 
 // DefaultConfig contains default settings for miner.
@@ -100,6 +125,8 @@ var DefaultConfig = Config{
 	// run 3 rounds.
 	Recommit:          2 * time.Second,
 	NewPayloadTimeout: 2 * time.Second,
+
+	Mev: DefaultMevConfig,
 }
 
 // Miner creates blocks and searches for proof-of-work values.
@@ -277,4 +304,67 @@ func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscript
 // BuildPayload builds the payload according to the provided parameters.
 func (miner *Miner) BuildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	return miner.worker.buildPayload(args)
+}
+
+func (miner *Miner) SimulateBundle(bundle *types.Bundle) (*big.Int, error) {
+	parent := miner.eth.BlockChain().CurrentBlock()
+	timestamp := int64(parent.Time + 1)
+
+	header := &types.Header{
+		ParentHash: parent.Hash(),
+		Number:     new(big.Int).Add(parent.Number, common.Big1),
+		GasLimit:   core.CalcGasLimit(parent.GasLimit, miner.worker.config.GasCeil),
+		Time:       uint64(timestamp),
+		Coinbase:   defaultCoinBaseAddress,
+	}
+
+	// Set baseFee and GasLimit if we are on an EIP-1559 chain
+	if miner.worker.chainConfig.IsLondon(header.Number) {
+		header.BaseFee = eip1559.CalcBaseFee(miner.worker.chainConfig, parent, header.Time)
+	}
+
+	if miner.worker.chainConfig.Optimism != nil && miner.worker.config.GasCeil != 0 {
+		// configure the gas limit of pending blocks with the miner gas limit config when using optimism
+		header.GasLimit = miner.worker.config.GasCeil
+	}
+
+	// Apply EIP-4844, EIP-4788.
+	if miner.worker.chainConfig.IsCancun(header.Number, header.Time) {
+		var excessBlobGas uint64
+		if miner.worker.chainConfig.IsCancun(parent.Number, parent.Time) {
+			excessBlobGas = eip4844.CalcExcessBlobGas(*parent.ExcessBlobGas, *parent.BlobGasUsed)
+		} else {
+			// For the first post-fork block, both parent.data_gas_used and parent.excess_data_gas are evaluated as 0
+			excessBlobGas = eip4844.CalcExcessBlobGas(0, 0)
+		}
+		header.BlobGasUsed = new(uint64)
+		header.ExcessBlobGas = &excessBlobGas
+	}
+
+	if err := miner.worker.engine.Prepare(miner.eth.BlockChain(), header); err != nil {
+		log.Error("Failed to prepare header for simulateBundle", "err", err)
+		return nil, err
+	}
+
+	state, err := miner.eth.BlockChain().StateAt(parent.Root)
+	if err != nil {
+		return nil, err
+	}
+
+	env := &environment{
+		header: header,
+		state:  state.Copy(),
+		signer: types.MakeSigner(miner.worker.chainConfig, header.Number, header.Time),
+	}
+
+	s, err := miner.worker.simulateBundles(env, []*types.Bundle{bundle})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(s) == 0 {
+		return nil, errors.New("no valid sim result")
+	}
+
+	return s[0].BundleGasPrice, nil
 }

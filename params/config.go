@@ -482,6 +482,7 @@ type ChainConfig struct {
 	// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
 	EcotoneTime *uint64 `json:"ecotoneTime,omitempty"` // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
 	HaberTime   *uint64 `json:"haberTime,omitempty"`   // Haber switch time (nil = no fork, 0 = already on haber)
+	WrightTime  *uint64 `json:"wrightTime,omitempty"`  // Wright switch time (nil = no fork, 0 = already on wright)
 
 	InteropTime *uint64 `json:"interopTime,omitempty"` // Interop switch time (nil = no fork, 0 = already on optimism interop)
 
@@ -652,6 +653,9 @@ func (c *ChainConfig) Description() string {
 	if c.HaberTime != nil {
 		banner += fmt.Sprintf(" - Haber:                    @%-10v\n", *c.HaberTime)
 	}
+	if c.WrightTime != nil {
+		banner += fmt.Sprintf(" - Wright:                    @%-10v\n", *c.WrightTime)
+	}
 
 	return banner
 }
@@ -775,6 +779,10 @@ func (c *ChainConfig) IsEcotone(time uint64) bool {
 
 func (c *ChainConfig) IsHaber(time uint64) bool {
 	return isTimestampForked(c.HaberTime, time)
+}
+
+func (c *ChainConfig) IsWright(time uint64) bool {
+	return isTimestampForked(c.WrightTime, time)
 }
 
 func (c *ChainConfig) IsInterop(time uint64) bool {
@@ -1140,6 +1148,7 @@ type Rules struct {
 	IsOptimismCanyon                                        bool
 	IsFermat                                                bool
 	IsHaber                                                 bool
+	IsWright                                                bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1172,5 +1181,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		// OPBNB
 		IsFermat: c.IsFermat(num),
 		IsHaber:  c.IsHaber(timestamp),
+		IsWright: c.IsWright(timestamp),
 	}
 }

@@ -518,10 +518,10 @@ func (s *stateObject) finaliseRWSet() {
 func (s *stateObject) updateTrie() (Trie, error) {
 	maindb := s.db
 	if s.db.isParallel && s.db.parallel.isSlotDB {
-		// we need to fixup the origin storage with the mainDB. otherwise the changes maybe problem since the origin
+		// we need to fixup the origin storage with the mainDB. otherwise the changes maybe problematic since the origin
 		// is wrong.
 		maindb = s.db.parallel.baseStateDB
-		// TODO: consider delete as it is dup with accountMux and storageMux
+		// For dirty/pending/origin Storage access and update.
 		maindb.accountStorageParallelLock.Lock()
 		defer maindb.accountStorageParallelLock.Unlock()
 	}
@@ -844,6 +844,8 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	}
 
 	object.code = s.code
+
+	// The lock is unnecessary since deepCopy only invoked at global phase. No concurrent racing.
 	object.dirtyStorage = s.dirtyStorage.Copy()
 	object.originStorage = s.originStorage.Copy()
 	object.pendingStorage = s.pendingStorage.Copy()

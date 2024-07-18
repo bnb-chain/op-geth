@@ -28,6 +28,7 @@ type TxDAG interface {
 	DelayGasDistribution() bool
 
 	// TxDep query TxDeps from TxDAG
+	// TODO(galaio): txDAG must convert to dependency relation
 	TxDep(int) TxDep
 
 	// TxCount return tx count
@@ -136,7 +137,7 @@ func NewPlainTxDAG(txLen int) *PlainTxDAG {
 
 func (d *PlainTxDAG) String() string {
 	builder := strings.Builder{}
-	exePaths := travelExecutionPaths(d)
+	exePaths := travelTxDAGExecutionPaths(d)
 	for _, path := range exePaths {
 		builder.WriteString(fmt.Sprintf("%v\n", path))
 	}
@@ -151,15 +152,67 @@ func (d *PlainTxDAG) Size() int {
 	return len(enc)
 }
 
-func travelExecutionPaths(d TxDAG) [][]uint64 {
+// MergeTxDAGExecutionPaths will merge duplicate tx path for scheduling parallel.
+// Any tx cannot exist in >= 2 paths.
+func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
+	mergeMap := make(map[uint64][]uint64, d.TxCount())
+	txMap := make(map[uint64]uint64, d.TxCount())
+	for i := d.TxCount() - 1; i >= 0; i-- {
+		index, merge := uint64(i), uint64(i)
+		deps := d.TxDep(i).TxIndexes
+		if oldIdx, exist := findTxPathIndex(deps, index, txMap); exist {
+			merge = oldIdx
+		}
+		for _, tx := range deps {
+			txMap[tx] = merge
+		}
+		txMap[index] = merge
+	}
+
+	// result by index order
+	for f, t := range txMap {
+		if mergeMap[t] == nil {
+			mergeMap[t] = make([]uint64, 0)
+		}
+		mergeMap[t] = append(mergeMap[t], f)
+	}
+	mergePaths := make([][]uint64, 0, len(mergeMap))
+	for i := 0; i < d.TxCount(); i++ {
+		path, ok := mergeMap[uint64(i)]
+		if !ok {
+			continue
+		}
+		slices.Sort(path)
+		mergePaths = append(mergePaths, path)
+	}
+
+	return mergePaths
+}
+
+func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64, bool) {
+	if old, ok := txMap[cur]; ok {
+		return old, true
+	}
+
+	for _, index := range path {
+		if old, ok := txMap[index]; ok {
+			return old, true
+		}
+	}
+
+	return 0, false
+}
+
+// travelTxDAGExecutionPaths will print all tx execution path
+func travelTxDAGExecutionPaths(d TxDAG) [][]uint64 {
 	txCount := d.TxCount()
 	deps := make([]TxDep, txCount)
 	for i := 0; i < txCount; i++ {
 		dep := d.TxDep(i)
 		if dep.Relation == 0 {
 			deps[i] = dep
+			continue
 		}
-
 		// recover to relation 0
 		for j := 0; j < i; j++ {
 			if !dep.Exist(j) {
@@ -171,7 +224,7 @@ func travelExecutionPaths(d TxDAG) [][]uint64 {
 	exePaths := make([][]uint64, 0)
 	// travel tx deps with BFS
 	for i := uint64(0); i < uint64(txCount); i++ {
-		exePaths = append(exePaths, travelTargetPath(deps, i))
+		exePaths = append(exePaths, travelTxDAGTargetPath(deps, i))
 	}
 	return exePaths
 }
@@ -197,6 +250,17 @@ func (d *TxDep) Exist(i int) bool {
 	}
 
 	return false
+}
+
+func (d *TxDep) Count() int {
+	return len(d.TxIndexes)
+}
+
+func (d *TxDep) Last() int {
+	if d.Count() == 0 {
+		return -1
+	}
+	return int(d.TxIndexes[len(d.TxIndexes)-1])
 }
 
 var (
@@ -225,7 +289,7 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) string {
 	//	sb.WriteString(fmt.Sprintf("%v: %v\n", i, dep.TxIndexes))
 	//}
 	//sb.WriteString("Parallel Execution Path:\n")
-	paths := travelExecutionPaths(dag)
+	paths := travelTxDAGExecutionPaths(dag)
 	// Attention: this is based on best schedule, it will reduce a lot by executing previous txs in parallel
 	// It assumes that there is no parallel thread limit
 	txCount := dag.TxCount()
@@ -327,23 +391,24 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) string {
 	return sb.String()
 }
 
-func travelTargetPath(deps []TxDep, from uint64) []uint64 {
-	q := make([]uint64, 0, len(deps))
+// travelTxDAGTargetPath will print target execution path
+func travelTxDAGTargetPath(deps []TxDep, from uint64) []uint64 {
+	queue := make([]uint64, 0, len(deps))
 	path := make([]uint64, 0, len(deps))
 
-	q = append(q, from)
+	queue = append(queue, from)
 	path = append(path, from)
-	for len(q) > 0 {
-		t := make([]uint64, 0, len(deps))
-		for _, i := range q {
+	for len(queue) > 0 {
+		next := make([]uint64, 0, len(deps))
+		for _, i := range queue {
 			for _, dep := range deps[i].TxIndexes {
 				if !slices.Contains(path, dep) {
 					path = append(path, dep)
-					t = append(t, dep)
+					next = append(next, dep)
 				}
 			}
 		}
-		q = t
+		queue = next
 	}
 	slices.Sort(path)
 	return path

@@ -355,27 +355,7 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 		s.stats[index] = stat
 	}
 
-	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
-	if _, ok := s.depsCache[index]; !ok {
-		s.depsCache[index] = NewTxDeps(0)
-	}
-	for prev := 0; prev < index; prev++ {
-		// if there are some parallel execution or system txs, it will fulfill in advance
-		// it's ok, and try re-generate later
-		if _, ok := s.rwSets[prev]; !ok {
-			continue
-		}
-		if checkDependency(s.rwSets[prev].writeSet, rwSet.readSet) {
-			s.depsCache[index].add(prev)
-			// clear redundancy deps compared with prev
-			for dep := range s.depsCache[index] {
-				if s.depsCache[prev].exist(dep) {
-					s.depsCache[index].remove(dep)
-				}
-			}
-		}
-	}
-
+	s.resolveDepsCache(index, rwSet)
 	// append to pending write set
 	for k, v := range rwSet.writeSet {
 		// TODO(galaio): this action is only for testing, it can be removed in production mode.
@@ -388,6 +368,31 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 	}
 	s.rwSets[index] = rwSet
 	return nil
+}
+
+func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
+	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
+	if _, ok := s.depsCache[index]; !ok {
+		s.depsCache[index] = NewTxDeps(0)
+	}
+	for prev := 0; prev < index; prev++ {
+		// if there are some parallel execution or system txs, it will fulfill in advance
+		// it's ok, and try re-generate later
+		if _, ok := s.rwSets[prev]; !ok {
+			continue
+		}
+		// TODO: check if there are RW with system address for gas delay calculation
+		// check if there has written op before i
+		if checkDependency(s.rwSets[prev].writeSet, rwSet.readSet) {
+			s.depsCache[index].add(prev)
+			// clear redundancy deps compared with prev
+			for dep := range s.depsCache[index] {
+				if s.depsCache[prev].exist(dep) {
+					s.depsCache[index].remove(dep)
+				}
+			}
+		}
+	}
 }
 
 func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*ReadRecord, writeSet map[RWKey]*WriteRecord) bool {
@@ -423,18 +428,10 @@ func (s *MVStates) ResolveTxDAG() TxDAG {
 			txDAG.TxDeps[i].Relation = 1
 			continue
 		}
-		if s.depsCache[i] != nil {
-			txDAG.TxDeps[i].TxIndexes = s.depsCache[i].toArray()
-			continue
+		if s.depsCache[i] == nil {
+			s.resolveDepsCache(i, rwSets[i])
 		}
-		readSet := rwSets[i].ReadSet()
-		// TODO: check if there are RW with system address
-		// check if there has written op before i
-		for j := 0; j < i; j++ {
-			if checkDependency(rwSets[j].writeSet, readSet) {
-				txDAG.TxDeps[i].AppendDep(j)
-			}
-		}
+		txDAG.TxDeps[i].TxIndexes = s.depsCache[i].toArray()
 	}
 
 	return txDAG

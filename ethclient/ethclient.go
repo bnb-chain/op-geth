@@ -626,6 +626,23 @@ func (ec *Client) SendTransaction(ctx context.Context, tx *types.Transaction) er
 	return ec.c.CallContext(ctx, nil, "eth_sendRawTransaction", hexutil.Encode(data))
 }
 
+// SendBundle sends a bundle
+func (ec *Client) SendBundle(ctx context.Context, args types.SendBundleArgs) (common.Hash, error) {
+	var hash common.Hash
+	err := ec.c.CallContext(ctx, &hash, "eth_sendBundle", args)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return hash, nil
+}
+
+// BundlePrice returns the price of a bundle
+func (ec *Client) BundlePrice(ctx context.Context) *big.Int {
+	var price *big.Int
+	_ = ec.c.CallContext(ctx, &price, "eth_bundlePrice")
+	return price
+}
+
 func toBlockNumArg(number *big.Int) string {
 	if number == nil {
 		return "latest"

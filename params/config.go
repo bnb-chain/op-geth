@@ -482,6 +482,8 @@ type ChainConfig struct {
 	// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
 	EcotoneTime *uint64 `json:"ecotoneTime,omitempty"` // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
 	HaberTime   *uint64 `json:"haberTime,omitempty"`   // Haber switch time (nil = no fork, 0 = already on haber)
+	// TODO fork name
+	GaslessTime *uint64 `json:"gaslessTime,omitempty"` // Gasless switch time (nil = no fork, 0 = already on gasless)
 
 	InteropTime *uint64 `json:"interopTime,omitempty"` // Interop switch time (nil = no fork, 0 = already on optimism interop)
 
@@ -652,6 +654,9 @@ func (c *ChainConfig) Description() string {
 	if c.HaberTime != nil {
 		banner += fmt.Sprintf(" - Haber:                    @%-10v\n", *c.HaberTime)
 	}
+	if c.GaslessTime != nil {
+		banner += fmt.Sprintf(" - Gasless:                    @%-10v\n", *c.GaslessTime)
+	}
 
 	return banner
 }
@@ -775,6 +780,10 @@ func (c *ChainConfig) IsEcotone(time uint64) bool {
 
 func (c *ChainConfig) IsHaber(time uint64) bool {
 	return isTimestampForked(c.HaberTime, time)
+}
+
+func (c *ChainConfig) IsGasless(time uint64) bool {
+	return isTimestampForked(c.GaslessTime, time)
 }
 
 func (c *ChainConfig) IsInterop(time uint64) bool {
@@ -1140,6 +1149,7 @@ type Rules struct {
 	IsOptimismCanyon                                        bool
 	IsFermat                                                bool
 	IsHaber                                                 bool
+	IsGasless                                               bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1170,7 +1180,8 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
 		IsOptimismCanyon:   c.IsOptimismCanyon(timestamp),
 		// OPBNB
-		IsFermat: c.IsFermat(num),
-		IsHaber:  c.IsHaber(timestamp),
+		IsFermat:  c.IsFermat(num),
+		IsHaber:   c.IsHaber(timestamp),
+		IsGasless: c.IsGasless(timestamp),
 	}
 }

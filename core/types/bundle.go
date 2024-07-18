@@ -11,7 +11,7 @@ import (
 
 const (
 	// MaxBundleAliveBlock is the max alive block for bundle
-	MaxBundleAliveBlock = 100
+	MaxBundleAliveBlock = 300
 	// MaxBundleAliveTime is the max alive time for bundle
 	MaxBundleAliveTime = 5 * 60 // second
 )
@@ -42,10 +42,10 @@ type Bundle struct {
 type SimulatedBundle struct {
 	OriginalBundle *Bundle
 
-	BundleGasFees   *big.Int
-	BundleGasPrice  *big.Int
-	BundleGasUsed   uint64
-	EthSentToSystem *big.Int
+	BundleGasFees  *big.Int
+	BundleGasPrice *big.Int
+	BundleGasUsed  uint64
+	// EthSentToSystem *big.Int
 }
 
 func (bundle *Bundle) Size() uint64 {

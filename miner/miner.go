@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"math/big"
 	"sync"
 	"time"
@@ -30,7 +31,6 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
-	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -68,6 +68,25 @@ var (
 	isBuildBlockInterruptCounter = metrics.NewRegisteredCounter("miner/build/interrupt", nil)
 )
 
+var defaultCoinBaseAddress = common.HexToAddress("0x4200000000000000000000000000000000000011")
+
+type SequencerConfig struct {
+	URL string
+}
+
+type MevConfig struct {
+	Enabled    bool              // Whether to enable Mev or not
+	Sequencers []SequencerConfig // The list of builders
+
+	BuilderEnabled bool // Whether to enable bidder or not
+}
+
+var DefaultMevConfig = MevConfig{
+	Enabled:        false,
+	Sequencers:     nil,
+	BuilderEnabled: false,
+}
+
 // Backend wraps all methods required for mining. Only full node is capable
 // to offer all the functions here.
 type Backend interface {
@@ -82,13 +101,12 @@ type BackendWithHistoricalState interface {
 
 // Config is the configuration parameters of mining.
 type Config struct {
-	Etherbase     common.Address `toml:",omitempty"` // Public address for block mining rewards
-	ExtraData     hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
-	DelayLeftOver time.Duration  // Time reserved to finalize a block(calculate root, distribute income...)
-	GasFloor      uint64         // Target gas floor for mined blocks.
-	GasCeil       uint64         // Target gas ceiling for mined blocks.
-	GasPrice      *big.Int       // Minimum gas price for mining a transaction
-	Recommit      time.Duration  // The time interval for miner to re-create mining work.
+	Etherbase common.Address `toml:",omitempty"` // Public address for block mining rewards
+	ExtraData hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
+	GasFloor  uint64         // Target gas floor for mined blocks.
+	GasCeil   uint64         // Target gas ceiling for mined blocks.
+	GasPrice  *big.Int       // Minimum gas price for mining a transaction
+	Recommit  time.Duration  // The time interval for miner to re-create mining work.
 
 	NewPayloadTimeout time.Duration // The maximum time allowance for creating a new payload
 
@@ -123,8 +141,6 @@ type Miner struct {
 	stopCh  chan struct{}
 	worker  *worker
 
-	bidSimulator *bidSimulator
-
 	wg sync.WaitGroup
 }
 
@@ -138,10 +154,6 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		stopCh:  make(chan struct{}),
 		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, true),
 	}
-
-	miner.bidSimulator = newBidSimulator(&config.Mev, config.DelayLeftOver, config.GasPrice, eth.BlockChain(), chainConfig, engine, miner.worker)
-	miner.worker.setBestBidFetcher(miner.bidSimulator)
-
 	miner.wg.Add(1)
 	go miner.update()
 	return miner
@@ -176,7 +188,6 @@ func (miner *Miner) update() {
 			case downloader.StartEvent:
 				wasMining := miner.Mining()
 				miner.worker.stop()
-				miner.bidSimulator.stop()
 				canStart = false
 				if wasMining {
 					// Resume mining after sync was finished
@@ -189,7 +200,6 @@ func (miner *Miner) update() {
 				canStart = true
 				if shouldStart {
 					miner.worker.start()
-					miner.bidSimulator.start()
 				}
 				miner.worker.syncing.Store(false)
 
@@ -197,7 +207,6 @@ func (miner *Miner) update() {
 				canStart = true
 				if shouldStart {
 					miner.worker.start()
-					miner.bidSimulator.start()
 				}
 				miner.worker.syncing.Store(false)
 
@@ -207,16 +216,13 @@ func (miner *Miner) update() {
 		case <-miner.startCh:
 			if canStart {
 				miner.worker.start()
-				miner.bidSimulator.start()
 			}
 			shouldStart = true
 		case <-miner.stopCh:
 			shouldStart = false
 			miner.worker.stop()
-			miner.bidSimulator.stop()
 		case <-miner.exitCh:
 			miner.worker.close()
-			miner.bidSimulator.close()
 			return
 		}
 	}
@@ -309,18 +315,14 @@ func (miner *Miner) BuildPayload(args *BuildPayloadArgs) (*Payload, error) {
 
 func (miner *Miner) SimulateBundle(bundle *types.Bundle) (*big.Int, error) {
 	parent := miner.eth.BlockChain().CurrentBlock()
-	timestamp := time.Now().Unix()
-	if parent.Time >= uint64(timestamp) {
-		timestamp = int64(parent.Time + 1)
-	}
+	timestamp := int64(parent.Time + 1)
 
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     new(big.Int).Add(parent.Number, common.Big1),
 		GasLimit:   core.CalcGasLimit(parent.GasLimit, miner.worker.config.GasCeil),
-		Extra:      miner.worker.extra,
 		Time:       uint64(timestamp),
-		Coinbase:   miner.worker.etherbase(),
+		Coinbase:   defaultCoinBaseAddress,
 	}
 
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
@@ -328,8 +330,9 @@ func (miner *Miner) SimulateBundle(bundle *types.Bundle) (*big.Int, error) {
 		header.BaseFee = eip1559.CalcBaseFee(miner.worker.chainConfig, parent, header.Time)
 	}
 
-	if err := miner.worker.engine.Prepare(miner.eth.BlockChain(), header); err != nil {
-		return nil, err
+	if miner.worker.chainConfig.Optimism != nil && miner.worker.config.GasCeil != 0 {
+		// configure the gas limit of pending blocks with the miner gas limit config when using optimism
+		header.GasLimit = miner.worker.config.GasCeil
 	}
 
 	// Apply EIP-4844, EIP-4788.
@@ -343,7 +346,11 @@ func (miner *Miner) SimulateBundle(bundle *types.Bundle) (*big.Int, error) {
 		}
 		header.BlobGasUsed = new(uint64)
 		header.ExcessBlobGas = &excessBlobGas
-		header.WithdrawalsHash = &types.EmptyWithdrawalsHash
+	}
+
+	if err := miner.worker.engine.Prepare(miner.eth.BlockChain(), header); err != nil {
+		log.Error("Failed to prepare header for simulateBundle", "err", err)
+		return nil, err
 	}
 
 	state, err := miner.eth.BlockChain().StateAt(parent.Root)

@@ -25,7 +25,12 @@ var (
 // fillTransactions retrieves the pending bundles and transactions from the txpool and fills them
 // into the given sealing block. The selection and ordering strategy can be extended in the future.
 func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *environment) error {
-	env.state.StopPrefetcher() // no need to prefetch txs for a builder
+	// TODO will remove after fix txpool perf issue
+	if interrupt != nil {
+		if signal := interrupt.Load(); signal != commitInterruptNone {
+			return signalToErr(signal)
+		}
+	}
 
 	bundles := w.eth.TxPool().PendingBundles(env.header.Number.Uint64(), env.header.Time)
 
@@ -34,7 +39,7 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 		return errors.New("no bundles in bundle pool")
 	}
 
-	txs, bundle, err := w.generateOrderedBundles(env, bundles)
+	txs, _, err := w.generateOrderedBundles(env, bundles)
 	if err != nil {
 		log.Error("fail to generate ordered bundles", "err", err)
 		return err
@@ -42,18 +47,11 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 
 	if err = w.commitBundles(env, txs, interrupt); err != nil {
 		log.Error("fail to commit bundles", "err", err)
+		// if commit bundles failed, set profit is 0, discard all fill bundles
+		env.profit.Set(big.NewInt(0))
 		return err
 	}
-
-	env.profit.Add(env.profit, bundle.EthSentToSystem)
 	log.Info("fill bundles", "bundles_count", len(bundles))
-
-	// TODO will remove after fix txpool perf issue
-	if interrupt != nil {
-		if signal := interrupt.Load(); signal != commitInterruptNone {
-			return signalToErr(signal)
-		}
-	}
 
 	start := time.Now()
 	pending := w.eth.TxPool().Pending(true)
@@ -87,6 +85,7 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 	}
 	commitTxpoolTxsTimer.UpdateSince(start)
 	log.Debug("commitTxpoolTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
+	log.Info("fill bundles and transactions done", "total_txs_count", len(env.txs))
 	return nil
 }
 
@@ -102,13 +101,6 @@ func (w *worker) commitBundles(
 	var coalescedLogs []*types.Log
 
 	for _, tx := range txs {
-		// In the following three cases, we will interrupt the execution of the transaction.
-		// (1) new head block event arrival, the reason is 1
-		// (2) worker start or restart, the reason is 1
-		// (3) worker recreate the sealing block with any newly arrived transactions, the reason is 2.
-		// For the first two cases, the semi-finished work will be discarded.
-		// For the third case, the semi-finished work will be submitted to the consensus engine.
-		// Check interruption signal and abort building if it's fired.
 		if interrupt != nil {
 			if signal := interrupt.Load(); signal != commitInterruptNone {
 				return signalToErr(signal)
@@ -120,8 +112,7 @@ func (w *worker) commitBundles(
 			break
 		}
 		if tx == nil {
-			log.Error("Unexpected nil transaction in bundle")
-			return signalToErr(commitInterruptBundleTxNil)
+			return errors.New("unexpected nil transaction in bundle")
 		}
 		// Error may be ignored here. The error has already been checked
 		// during transaction acceptance is the transaction pool.
@@ -131,8 +122,7 @@ func (w *worker) commitBundles(
 		// Check whether the tx is replay protected. If we're not in the EIP155 hf
 		// phase, start ignoring the sender until we do.
 		if tx.Protected() && !w.chainConfig.IsEIP155(env.header.Number) {
-			log.Debug("Unexpected protected transaction in bundle")
-			return signalToErr(commitInterruptBundleTxProtected)
+			return errors.New("unexpected protected transaction in bundle")
 		}
 		// Start executing the transaction
 		env.state.SetTxContext(tx.Hash(), env.tcount)
@@ -285,10 +275,9 @@ func (w *worker) mergeBundles(
 
 	includedTxs := types.Transactions{}
 	mergedBundle := types.SimulatedBundle{
-		BundleGasFees:   new(big.Int),
-		BundleGasUsed:   0,
-		BundleGasPrice:  new(big.Int),
-		EthSentToSystem: new(big.Int),
+		BundleGasFees:  new(big.Int),
+		BundleGasUsed:  0,
+		BundleGasPrice: new(big.Int),
 	}
 
 	for _, bundle := range bundles {
@@ -342,10 +331,9 @@ func (w *worker) simulateBundle(
 	prune, pruneGasExceed bool,
 ) (*types.SimulatedBundle, error) {
 	var (
-		tempGasUsed     uint64
-		bundleGasUsed   uint64
-		bundleGasFees   = new(big.Int)
-		ethSentToSystem = new(big.Int)
+		tempGasUsed   uint64
+		bundleGasUsed uint64
+		bundleGasFees = new(big.Int)
 	)
 
 	for i, tx := range bundle.Txs {
@@ -385,7 +373,6 @@ func (w *worker) simulateBundle(
 		txGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
 		txGasFees := new(big.Int).Mul(txGasUsed, tx.GasPrice())
 		bundleGasFees.Add(bundleGasFees, txGasFees)
-		ethSentToSystem.Add(ethSentToSystem, txGasFees)
 	}
 
 	bundleGasPrice := new(big.Int).Div(bundleGasFees, new(big.Int).SetUint64(bundleGasUsed))
@@ -403,11 +390,10 @@ func (w *worker) simulateBundle(
 	}
 
 	return &types.SimulatedBundle{
-		OriginalBundle:  bundle,
-		BundleGasFees:   bundleGasFees,
-		BundleGasPrice:  bundleGasPrice,
-		BundleGasUsed:   bundleGasUsed,
-		EthSentToSystem: ethSentToSystem,
+		OriginalBundle: bundle,
+		BundleGasFees:  bundleGasFees,
+		BundleGasPrice: bundleGasPrice,
+		BundleGasUsed:  bundleGasUsed,
 	}, nil
 }
 

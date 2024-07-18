@@ -2,7 +2,10 @@ package bundlepool
 
 import (
 	"container/heap"
+	"context"
 	"errors"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/miner"
 	"math/big"
 	"sync"
 	"time"
@@ -70,7 +73,8 @@ type BundleSimulator interface {
 }
 
 type BundlePool struct {
-	config Config
+	config    Config
+	mevConfig miner.MevConfig
 
 	bundles    map[common.Hash]*types.Bundle
 	bundleHeap BundleHeap
@@ -79,19 +83,70 @@ type BundlePool struct {
 	slots uint64 // Number of slots currently allocated
 
 	simulator BundleSimulator
+
+	sequencerClients map[string]*ethclient.Client
+	deliverBundleCh  chan *types.SendBundleArgs
+	exitCh           chan struct{}
 }
 
-func New(config Config) *BundlePool {
+func New(config Config, mevConfig miner.MevConfig) *BundlePool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
 	pool := &BundlePool{
-		config:     config,
-		bundles:    make(map[common.Hash]*types.Bundle),
-		bundleHeap: make(BundleHeap, 0),
+		config:          config,
+		mevConfig:       mevConfig,
+		bundles:         make(map[common.Hash]*types.Bundle),
+		bundleHeap:      make(BundleHeap, 0),
+		deliverBundleCh: make(chan *types.SendBundleArgs),
+		exitCh:          make(chan struct{}),
+	}
+	if !pool.mevConfig.BuilderEnabled {
+		return pool
+	}
+	for _, v := range mevConfig.Sequencers {
+		pool.register(v.URL)
+	}
+	if len(pool.sequencerClients) == 0 {
+		log.Error("No valid sequencers")
 	}
 
 	return pool
+}
+
+func (p *BundlePool) deliverLoop() {
+	for {
+		select {
+		case bundle := <-p.deliverBundleCh:
+			for url, cli := range p.sequencerClients {
+				cli := cli
+				url := url
+				go func() {
+					_, err := cli.SendBundle(context.Background(), *bundle)
+					if err != nil {
+						log.Error("failed to deliver bundle to sequencer", "url", url, "err", err)
+					}
+				}()
+			}
+		case <-p.exitCh:
+			log.Warn("the deliverBundleCh is closed")
+			return
+		}
+	}
+}
+
+func (p *BundlePool) register(url string) error {
+	var sequencerClient *ethclient.Client
+	if url != "" {
+		var err error
+		sequencerClient, err = ethclient.Dial(url)
+		if err != nil {
+			log.Error("failed to dial sequencer", "url", url, "err", err)
+			return err
+		}
+		p.sequencerClients[url] = sequencerClient
+	}
+	return nil
 }
 
 func (p *BundlePool) SetBundleSimulator(simulator BundleSimulator) {
@@ -112,7 +167,7 @@ func (p *BundlePool) FilterBundle(bundle *types.Bundle) bool {
 }
 
 // AddBundle adds a mev bundle to the pool
-func (p *BundlePool) AddBundle(bundle *types.Bundle) error {
+func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
 	if p.simulator == nil {
 		return ErrSimulatorMissing
 	}
@@ -125,6 +180,11 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle) error {
 	if err != nil {
 		return err
 	}
+
+	if p.mevConfig.BuilderEnabled {
+		p.deliverBundleCh <- originBundle
+	}
+
 	if price.Cmp(p.minimalBundleGasPrice()) < 0 && p.slots+numSlots(bundle) > p.config.GlobalSlots {
 		return ErrBundleGasPriceLow
 	}

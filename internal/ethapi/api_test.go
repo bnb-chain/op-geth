@@ -722,7 +722,7 @@ func (b testBackend) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) even
 func (b testBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
 	panic("implement me")
 }
-func (b testBackend) SendBundle(ctx context.Context, bundle *types.Bundle) error {
+func (b testBackend) SendBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
 	panic("implement me")
 }
 func (b testBackend) BundlePrice() *big.Int {

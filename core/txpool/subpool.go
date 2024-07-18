@@ -149,7 +149,7 @@ type BundleSubpool interface {
 	FilterBundle(bundle *types.Bundle) bool
 
 	// AddBundle enqueues a bundle into the pool if it is valid.
-	AddBundle(bundle *types.Bundle) error
+	AddBundle(bundle *types.Bundle, originBundle *types.SendBundleArgs) error
 
 	// PendingBundles retrieves all currently processable bundles.
 	PendingBundles(blockNumber uint64, blockTimestamp uint64) []*types.Bundle

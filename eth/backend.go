@@ -262,7 +262,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 	legacyPool := legacypool.New(config.TxPool, eth.blockchain)
-	bundlePool := bundlepool.New(config.BundlePool)
+	bundlePool := bundlepool.New(config.BundlePool, config.Miner.Mev)
 
 	txPools := []txpool.SubPool{legacyPool}
 	if !eth.BlockChain().Config().IsOptimism() {

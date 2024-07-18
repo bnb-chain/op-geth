@@ -324,8 +324,8 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 	return b.eth.txPool.Add([]*types.Transaction{signedTx}, true, false)[0]
 }
 
-func (b *EthAPIBackend) SendBundle(ctx context.Context, bundle *types.Bundle) error {
-	return b.eth.txPool.AddBundle(bundle)
+func (b *EthAPIBackend) SendBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
+	return b.eth.txPool.AddBundle(bundle, originBundle)
 }
 
 func (b *EthAPIBackend) BundlePrice() *big.Int {
@@ -481,40 +481,3 @@ func (b *EthAPIBackend) HistoricalRPCService() *rpc.Client {
 func (b *EthAPIBackend) Genesis() *types.Block {
 	return b.eth.blockchain.Genesis()
 }
-
-func (b *EthAPIBackend) MevRunning() bool {
-	return b.Miner().MevRunning()
-}
-
-func (b *EthAPIBackend) MevParams() *types.MevParams {
-	return b.Miner().MevParams()
-}
-
-func (b *EthAPIBackend) StartMev() {
-	b.Miner().StartMev()
-}
-
-func (b *EthAPIBackend) StopMev() {
-	b.Miner().StopMev()
-}
-
-func (b *EthAPIBackend) AddBuilder(builder common.Address, url string) error {
-	return b.Miner().AddBuilder(builder, url)
-}
-
-func (b *EthAPIBackend) RemoveBuilder(builder common.Address) error {
-	return b.Miner().RemoveBuilder(builder)
-}
-
-func (b *EthAPIBackend) SendBid(ctx context.Context, bid *types.BidArgs) (common.Hash, error) {
-	return b.Miner().SendBid(ctx, bid)
-}
-
-func (b *EthAPIBackend) BestBidGasFee(parentHash common.Hash) *big.Int {
-	return b.Miner().BestPackedBlockReward(parentHash)
-}
-
-// TODO remove
-//func (b *EthAPIBackend) MinerInTurn() bool {
-//	return b.Miner().InTurn()
-//}

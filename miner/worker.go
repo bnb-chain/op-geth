@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	mapset "github.com/deckarep/golang-set/v2"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -78,10 +77,11 @@ const (
 )
 
 var (
-	errBlockInterruptedByNewHead  = errors.New("new head arrived while building block")
-	errBlockInterruptedByRecommit = errors.New("recommit interrupt while building block")
-	errBlockInterruptedByTimeout  = errors.New("timeout while building block")
-	errBlockInterruptedByResolve  = errors.New("payload resolution while building block")
+	errBlockInterruptedByNewHead      = errors.New("new head arrived while building block")
+	errBlockInterruptedByRecommit     = errors.New("recommit interrupt while building block")
+	errBlockInterruptedByTimeout      = errors.New("timeout while building block")
+	errBlockInterruptedByResolve      = errors.New("payload resolution while building block")
+	errBlockInterruptedByBundleCommit = errors.New("failed bundle commit while building block")
 )
 
 // environment is the worker's current environment and holds all
@@ -99,7 +99,7 @@ type environment struct {
 	sidecars []*types.BlobTxSidecar
 	blobs    int
 
-	profit       *big.Int // block gas fee + BNBSentToSystem
+	profit       *big.Int
 	UnRevertible []common.Hash
 }
 
@@ -150,9 +150,6 @@ const (
 	commitInterruptResubmit
 	commitInterruptTimeout
 	commitInterruptResolve
-	commitInterruptBetterBid
-	commitInterruptBundleTxNil
-	commitInterruptBundleTxProtected
 	commitInterruptBundleCommit
 )
 
@@ -177,10 +174,6 @@ type getWorkReq struct {
 	result chan *newPayloadResult // non-blocking channel
 }
 
-type bidFetcher interface {
-	GetBestBid(parentHash common.Hash) *BidRuntime
-}
-
 // intervalAdjust represents a resubmitting interval adjustment.
 type intervalAdjust struct {
 	ratio float64
@@ -190,7 +183,6 @@ type intervalAdjust struct {
 // worker is the main object which takes care of submitting new work to consensus engine
 // and gathering the sealing result.
 type worker struct {
-	bidFetcher  bidFetcher
 	config      *Config
 	chainConfig *params.ChainConfig
 	engine      consensus.Engine
@@ -259,7 +251,6 @@ type worker struct {
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 
 	// MEV
-	bidder      *Bidder
 	bundleCache *BundleCache
 }
 
@@ -285,7 +276,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		exitCh:             make(chan struct{}),
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
-		bidder:             NewBidder(&config.Mev, config.DelayLeftOver, engine, eth),
 		bundleCache:        NewBundleCache(),
 	}
 	// Subscribe for transaction insertion events (whether from network or resurrects)
@@ -312,26 +302,18 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	}
 	worker.newpayloadTimeout = newpayloadTimeout
 
-	worker.wg.Add(3)
+	worker.wg.Add(5)
 	go worker.mainLoop()
 	go worker.opLoop()
 	go worker.newWorkLoop(recommit)
-	// if not builder
-	if !worker.bidder.enabled() {
-		worker.wg.Add(2)
-		go worker.resultLoop()
-		go worker.taskLoop()
-	}
+	go worker.resultLoop()
+	go worker.taskLoop()
 
 	// Submit first work to initialize pending state.
 	if init {
 		worker.startCh <- struct{}{}
 	}
 	return worker
-}
-
-func (w *worker) setBestBidFetcher(fetcher bidFetcher) {
-	w.bidFetcher = fetcher
 }
 
 // setEtherbase sets the etherbase used to initialize the block coinbase field.
@@ -632,7 +614,6 @@ func (w *worker) mainLoop() {
 
 		// System stopped
 		case <-w.exitCh:
-			w.bidder.exit()
 			return
 		case <-w.txsSub.Err():
 			return
@@ -837,8 +818,11 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 
-	gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-	env.profit.Add(env.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
+	if w.chainConfig.IsGasless(env.header.Time) && w.config.Mev.Enabled &&
+		tx.Type() != types.DepositTxType {
+		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+		env.profit.Add(env.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
+	}
 
 	return receipt.Logs, nil
 }
@@ -1120,7 +1104,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 // fillTransactions retrieves the pending transactions from the txpool and fills them
 // into the given sealing block. The transaction selection and ordering strategy can
 // be customized with the plugin in the future.
-func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment, bidTxs mapset.Set[common.Hash]) error {
+func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) error {
 	// TODO will remove after fix txpool perf issue
 	if interrupt != nil {
 		if signal := interrupt.Load(); signal != commitInterruptNone {
@@ -1132,25 +1116,6 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment, bid
 	pending := w.eth.TxPool().Pending(true)
 	packFromTxpoolTimer.UpdateSince(start)
 	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
-
-	if bidTxs != nil {
-		filterBidTxs := func(commonTxs map[common.Address][]*txpool.LazyTransaction) {
-			for acc, txs := range commonTxs {
-				for i := len(txs) - 1; i >= 0; i-- {
-					if bidTxs.Contains(txs[i].Hash) {
-						if i == len(txs)-1 {
-							delete(commonTxs, acc)
-						} else {
-							commonTxs[acc] = txs[i+1:]
-						}
-						break
-					}
-				}
-			}
-		}
-
-		filterBidTxs(pending)
-	}
 
 	// Split the pending transactions into locals and remotes.
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
@@ -1228,8 +1193,16 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		timer := time.AfterFunc(w.newpayloadTimeout, func() {
 			interrupt.Store(commitInterruptTimeout)
 		})
-
-		err := w.fillTransactions(interrupt, work, nil)
+		newWork := work.copy()
+		if w.config.Mev.Enabled {
+			go func() {
+				err := w.fillTransactionsAndBundles(interrupt, newWork)
+				if errors.Is(err, errBlockInterruptedByBundleCommit) {
+					log.Error("fillTransactionsAndBundles is interrupted", "err", err)
+				}
+			}()
+		}
+		err := w.fillTransactions(interrupt, work)
 		timer.Stop() // don't need timeout interruption any more
 		if errors.Is(err, errBlockInterruptedByTimeout) {
 			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
@@ -1238,11 +1211,13 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			log.Info("Block building got interrupted by payload resolution", "parentHash", genParams.parentHash)
 			isBuildBlockInterruptCounter.Inc(1)
 		}
+		if w.config.Mev.Enabled && newWork.profit.Cmp(work.profit) > 0 {
+			work = newWork
+		}
 	}
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
 		return &newPayloadResult{err: errInterruptedUpdate}
 	}
-
 	start = time.Now()
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)
 	if err != nil {
@@ -1267,10 +1242,16 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
 
 	log.Debug("build payload statedb metrics", "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
+	fees := big.NewInt(0)
+	if w.config.Mev.Enabled && w.chainConfig.IsGasless(block.Time()) {
+		fees = work.profit
+	} else {
+		fees = totalFees(block, work.receipts)
+	}
 
 	return &newPayloadResult{
 		block:    block,
-		fees:     totalFees(block, work.receipts),
+		fees:     fees,
 		sidecars: work.sidecars,
 		env:      work,
 	}
@@ -1330,7 +1311,6 @@ func (w *worker) commitWork(interrupt *atomic.Int32, timestamp int64) {
 		work.discard()
 		return
 	}
-	w.bidder.newWork(work)
 	// Submit the generated block for consensus sealing.
 	w.commit(work.copy(), w.fullTaskHook, true, start)
 
@@ -1347,7 +1327,7 @@ func (w *worker) commitWork(interrupt *atomic.Int32, timestamp int64) {
 // Note the assumption is held that the mutation is allowed to the passed env, do
 // the deep copy first.
 func (w *worker) commit(env *environment, interval func(), update bool, start time.Time) error {
-	if w.isRunning() && !w.bidder.enabled() {
+	if w.isRunning() {
 		if interval != nil {
 			interval()
 		}
@@ -1444,6 +1424,8 @@ func signalToErr(signal int32) error {
 		return errBlockInterruptedByTimeout
 	case commitInterruptResolve:
 		return errBlockInterruptedByResolve
+	case commitInterruptBundleCommit:
+		return errBlockInterruptedByBundleCommit
 	default:
 		panic(fmt.Errorf("undefined signal %d", signal))
 	}

@@ -308,12 +308,12 @@ func (p *TxPool) Add(txs []*types.Transaction, local bool, sync bool) []error {
 }
 
 // AddBundle enqueues a bundle into the pool if it is valid.
-func (p *TxPool) AddBundle(bundle *types.Bundle) error {
+func (p *TxPool) AddBundle(bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
 	// Try to find a sub pool that accepts the bundle
 	for _, subpool := range p.subpools {
 		if bundleSubpool, ok := subpool.(BundleSubpool); ok {
 			if bundleSubpool.FilterBundle(bundle) {
-				return bundleSubpool.AddBundle(bundle)
+				return bundleSubpool.AddBundle(bundle, originBundle)
 			}
 		}
 	}

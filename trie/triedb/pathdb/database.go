@@ -20,10 +20,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -40,11 +42,11 @@ const (
 	// defaultCleanSize is the default memory allowance of clean cache.
 	defaultCleanSize = 16 * 1024 * 1024
 
-	// maxBufferSize is the maximum memory allowance of node buffer.
+	// MaxBufferSize is the maximum memory allowance of node buffer.
 	// Too large nodebuffer will cause the system to pause for a long
 	// time when write happens. Also, the largest batch that pebble can
 	// support is 4GB, node will panic if batch size exceeds this limit.
-	maxBufferSize = 256 * 1024 * 1024
+	MaxBufferSize = 256 * 1024 * 1024
 
 	// DefaultBufferSize is the default memory allowance of node buffer
 	// that aggregates the writes from above until it's flushed into the
@@ -60,6 +62,13 @@ const (
 	// DefaultBatchRedundancyRate defines the batch size, compatible write
 	// size calculation is inaccurate
 	DefaultBatchRedundancyRate = 1.1
+)
+
+type JournalType int
+
+const (
+	JournalKVType JournalType = iota
+	JournalFileType
 )
 
 // layer is the interface implemented by all state layers which includes some
@@ -89,7 +98,7 @@ type layer interface {
 	// journal commits an entire diff hierarchy to disk into a single journal entry.
 	// This is meant to be used during shutdown to persist the layer without
 	// flattening everything down (bad for reorgs).
-	journal(w io.Writer) error
+	journal(w io.Writer, journalType JournalType) error
 }
 
 // Config contains the settings for database.
@@ -101,16 +110,17 @@ type Config struct {
 	ReadOnly             bool           // Flag whether the database is opened in read only mode.
 	ProposeBlockInterval uint64         // Propose block to L1 block interval.
 	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
+	JournalFilePath      string         // The journal file path
+	JournalFile          bool           // Whether to use journal file mode
 }
 
 // sanitize checks the provided user configurations and changes anything that's
 // unreasonable or unworkable.
 func (c *Config) sanitize() *Config {
 	conf := *c
-	if conf.DirtyCacheSize > maxBufferSize {
-		conf.CleanCacheSize = conf.DirtyCacheSize - maxBufferSize
-		log.Warn("Sanitizing invalid node buffer size", "provided", common.StorageSize(conf.DirtyCacheSize), "updated", common.StorageSize(maxBufferSize))
-		conf.DirtyCacheSize = maxBufferSize
+	if conf.DirtyCacheSize > MaxBufferSize {
+		log.Warn("Sanitizing invalid node buffer size", "provided", common.StorageSize(conf.DirtyCacheSize), "updated", common.StorageSize(MaxBufferSize))
+		conf.DirtyCacheSize = MaxBufferSize
 	}
 	return &conf
 }
@@ -148,6 +158,7 @@ type Database struct {
 	tree       *layerTree               // The group for all known layers
 	freezer    *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
 	lock       sync.RWMutex             // Lock to prevent mutations from happening at the same time
+	capLock    sync.Mutex
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -251,12 +262,20 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, block uint6
 	if err := db.tree.add(root, parentRoot, block, nodes, states); err != nil {
 		return err
 	}
-	// Keep 128 diff layers in the memory, persistent layer is 129th.
-	// - head layer is paired with HEAD state
-	// - head-1 layer is paired with HEAD-1 state
-	// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
-	// - head-128 layer(disk layer) is paired with HEAD-128 state
-	return db.tree.cap(root, maxDiffLayers)
+	db.capLock.Lock()
+	gopool.Submit(func() {
+		defer db.capLock.Unlock()
+		// Keep 128 diff layers in the memory, persistent layer is 129th.
+		// - head layer is paired with HEAD state
+		// - head-1 layer is paired with HEAD-1 state
+		// - head-127 layer(bottom-most diff layer) is paired with HEAD-127 state
+		// - head-128 layer(disk layer) is paired with HEAD-128 state
+		err := db.tree.cap(root, maxDiffLayers)
+		if err != nil {
+			log.Crit("failed to cap layer tree", "error", err)
+		}
+	})
+	return nil
 }
 
 // Commit traverses downwards the layer tree from a specified layer with the
@@ -265,7 +284,9 @@ func (db *Database) Update(root common.Hash, parentRoot common.Hash, block uint6
 func (db *Database) Commit(root common.Hash, report bool) error {
 	// Hold the lock to prevent concurrent mutations.
 	db.lock.Lock()
+	db.capLock.Lock()
 	defer db.lock.Unlock()
+	defer db.capLock.Unlock()
 
 	// Short circuit if the mutation is not allowed.
 	if err := db.modifyAllowed(); err != nil {
@@ -320,7 +341,7 @@ func (db *Database) Enable(root common.Hash) error {
 	// Drop the stale state journal in persistent database and
 	// reset the persistent state id back to zero.
 	batch := db.diskdb.NewBatch()
-	rawdb.DeleteTrieJournal(batch)
+	db.DeleteTrieJournal(batch)
 	rawdb.WritePersistentStateID(batch, 0)
 	if err := batch.Write(); err != nil {
 		return err
@@ -353,7 +374,9 @@ func (db *Database) Enable(root common.Hash) error {
 // canonical state and the corresponding trie histories are existent.
 func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error {
 	db.lock.Lock()
+	db.capLock.Lock()
 	defer db.lock.Unlock()
+	defer db.capLock.Unlock()
 
 	// Short circuit if rollback operation is not supported.
 	if err := db.modifyAllowed(); err != nil {
@@ -364,7 +387,7 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 	}
 	// Short circuit if the target state is not recoverable.
 	root = types.TrieRootHash(root)
-	if !db.Recoverable(root) {
+	if !db.recoverable(root) {
 		return errStateUnrecoverable
 	}
 	// Apply the state histories upon the disk layer in order.
@@ -386,7 +409,7 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		// disk layer won't be accessible from outside.
 		db.tree.reset(dl)
 	}
-	rawdb.DeleteTrieJournal(db.diskdb)
+	db.DeleteTrieJournal(db.diskdb)
 	_, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
 	if err != nil {
 		return err
@@ -395,8 +418,14 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 	return nil
 }
 
-// Recoverable returns the indicator if the specified state is recoverable.
 func (db *Database) Recoverable(root common.Hash) bool {
+	db.capLock.Lock()
+	defer db.capLock.Unlock()
+	return db.recoverable(root)
+}
+
+// Recoverable returns the indicator if the specified state is recoverable.
+func (db *Database) recoverable(root common.Hash) bool {
 	// Ensure the requested state is a known state.
 	root = types.TrieRootHash(root)
 	id := rawdb.ReadStateID(db.diskdb, root)
@@ -478,9 +507,9 @@ func (db *Database) SetBufferSize(size int) error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
-	if size > maxBufferSize {
-		log.Info("Capped node buffer size", "provided", common.StorageSize(size), "adjusted", common.StorageSize(maxBufferSize))
-		size = maxBufferSize
+	if size > MaxBufferSize {
+		log.Info("Capped node buffer size", "provided", common.StorageSize(size), "adjusted", common.StorageSize(MaxBufferSize))
+		size = MaxBufferSize
 	}
 	db.bufferSize = size
 	return db.tree.bottom().setBufferSize(db.bufferSize)
@@ -506,6 +535,48 @@ func (db *Database) modifyAllowed() error {
 	}
 	if db.waitSync {
 		return errDatabaseWaitSync
+	}
+	return nil
+}
+
+// DetermineJournalTypeForWriter is used when persisting the journal.
+// It determines JournalType based on the config passed in by the Config.
+func (db *Database) DetermineJournalTypeForWriter() JournalType {
+	if db.config.JournalFile {
+		return JournalFileType
+	} else {
+		return JournalKVType
+	}
+}
+
+// DetermineJournalTypeForReader is used when loading the journal.
+// It loads based on whether JournalKV or JournalFile currently exists.
+func (db *Database) DetermineJournalTypeForReader() JournalType {
+	if journal := rawdb.ReadTrieJournal(db.diskdb); len(journal) != 0 {
+		return JournalKVType
+	}
+
+	if fileInfo, stateErr := os.Stat(db.config.JournalFilePath); stateErr == nil && !fileInfo.IsDir() {
+		return JournalFileType
+	}
+
+	return JournalKVType
+}
+
+// DeleteTrieJournal deletes trie journal data.
+func (db *Database) DeleteTrieJournal(writer ethdb.KeyValueWriter) error {
+	// To prevent any remnants of old journals after converting from JournalKV to JournalFile
+	// or vice versa, all deletions must be completed.
+	rawdb.DeleteTrieJournal(writer)
+
+	// delete from journal file, may not exist
+	filePath := db.config.JournalFilePath
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		return nil
+	}
+	errRemove := os.Remove(filePath)
+	if errRemove != nil {
+		log.Crit("Failed to remove tries journal", "journal path", filePath, "err", errRemove)
 	}
 	return nil
 }

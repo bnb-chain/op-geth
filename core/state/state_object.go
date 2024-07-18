@@ -19,10 +19,12 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"io"
 	"math/big"
+	"sync"
 	"time"
+
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -291,6 +293,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	var (
 		storage map[common.Hash][]byte
 		origin  map[common.Hash][]byte
+		hasher  = crypto.NewKeccakState()
 	)
 	tr, err := s.getTrie()
 	if err != nil {
@@ -299,61 +302,84 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	}
 	// Insert all the pending storage updates into the trie
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))
+	dirtyStorage := make(map[common.Hash][]byte)
+
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
 			continue
 		}
-		prev := s.originStorage[key]
-		s.originStorage[key] = value
-
-		var encoded []byte // rlp-encoded value to be used by the snapshot
-		if (value == common.Hash{}) {
-			if err := tr.DeleteStorage(s.address, key[:]); err != nil {
-				s.db.setError(err)
-				return nil, err
-			}
-			s.db.StorageDeleted += 1
-		} else {
-			// Encoding []byte cannot fail, ok to ignore the error.
-			trimmed := common.TrimLeftZeroes(value[:])
-			encoded, _ = rlp.EncodeToBytes(trimmed)
-			if err := tr.UpdateStorage(s.address, key[:], trimmed); err != nil {
-				s.db.setError(err)
-				return nil, err
-			}
-			s.db.StorageUpdated += 1
+		var v []byte
+		if value != (common.Hash{}) {
+			value := value
+			v = common.TrimLeftZeroes(value[:])
 		}
-		// Cache the mutated storage slots until commit
-		if storage == nil {
-			if storage = s.db.storages[s.addrHash]; storage == nil {
-				storage = make(map[common.Hash][]byte)
-				s.db.storages[s.addrHash] = storage
-			}
-		}
-		khash := crypto.HashData(s.db.hasher, key[:])
-		storage[khash] = encoded // encoded will be nil if it's deleted
-
-		// Cache the original value of mutated storage slots
-		if origin == nil {
-			if origin = s.db.storagesOrigin[s.address]; origin == nil {
-				origin = make(map[common.Hash][]byte)
-				s.db.storagesOrigin[s.address] = origin
-			}
-		}
-		// Track the original value of slot only if it's mutated first time
-		if _, ok := origin[khash]; !ok {
-			if prev == (common.Hash{}) {
-				origin[khash] = nil // nil if it was not present previously
-			} else {
-				// Encoding []byte cannot fail, ok to ignore the error.
-				b, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(prev[:]))
-				origin[khash] = b
-			}
-		}
-		// Cache the items for preloading
-		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
+		dirtyStorage[key] = v
 	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for key, value := range dirtyStorage {
+			if len(value) == 0 {
+				if err := tr.DeleteStorage(s.address, key[:]); err != nil {
+					s.db.setError(err)
+				}
+				s.db.StorageDeleted += 1
+			} else {
+				if err := tr.UpdateStorage(s.address, key[:], value); err != nil {
+					s.db.setError(err)
+				}
+				s.db.StorageUpdated += 1
+			}
+			// Cache the items for preloading
+			usedStorage = append(usedStorage, common.CopyBytes(key[:]))
+		}
+	}()
+	// If state snapshotting is active, cache the data til commit
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		s.db.StorageMux.Lock()
+		// The snapshot storage map for the object
+		storage = s.db.storages[s.addrHash]
+		if storage == nil {
+			storage = make(map[common.Hash][]byte, len(dirtyStorage))
+			s.db.storages[s.addrHash] = storage
+		}
+		// Cache the original value of mutated storage slots
+		origin = s.db.storagesOrigin[s.address]
+		if origin == nil {
+			origin = make(map[common.Hash][]byte)
+			s.db.storagesOrigin[s.address] = origin
+		}
+		s.db.StorageMux.Unlock()
+		for key, value := range dirtyStorage {
+			khash := crypto.HashData(hasher, key[:])
+
+			// rlp-encoded value to be used by the snapshot
+			var encoded []byte
+			if len(value) != 0 {
+				encoded, _ = rlp.EncodeToBytes(value)
+			}
+			storage[khash] = encoded // encoded will be nil if it's deleted
+
+			// Track the original value of slot only if it's mutated first time
+			prev := s.originStorage[key]
+			s.originStorage[key] = common.BytesToHash(value) // fill back left zeroes by BytesToHash
+			if _, ok := origin[khash]; !ok {
+				if prev == (common.Hash{}) {
+					origin[khash] = nil // nil if it was not present previously
+				} else {
+					// Encoding []byte cannot fail, ok to ignore the error.
+					b, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(prev[:]))
+					origin[khash] = b
+				}
+			}
+		}
+	}()
+	wg.Wait()
+
 	if s.db.prefetcher != nil {
 		s.db.prefetcher.used(s.addrHash, s.data.Root, usedStorage)
 	}

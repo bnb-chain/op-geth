@@ -76,6 +76,9 @@ var (
 	snapshotAccountReadTimer = metrics.NewRegisteredTimer("chain/snapshot/account/reads", nil)
 	snapshotStorageReadTimer = metrics.NewRegisteredTimer("chain/snapshot/storage/reads", nil)
 	snapshotCommitTimer      = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
+	trieCommitTimer          = metrics.NewRegisteredTimer("chain/trie/commits", nil)
+	codeCommitTimer          = metrics.NewRegisteredTimer("chain/code/commits", nil)
+	blockCommitTimer         = metrics.NewRegisteredTimer("chain/block/commits", nil)
 
 	triedbCommitTimer = metrics.NewRegisteredTimer("chain/triedb/commits", nil)
 
@@ -162,6 +165,8 @@ type CacheConfig struct {
 	KeepProofBlockSpan   uint64                // Block span of keep proof
 	SnapshotNoBuild      bool                  // Whether the background generation is allowed
 	SnapshotWait         bool                  // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
+	JournalFilePath      string
+	JournalFile          bool
 
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 }
@@ -185,6 +190,8 @@ func (c *CacheConfig) triedbConfig(keepFunc pathdb.NotifyKeepFunc) *trie.Config 
 			DirtyCacheSize:       c.TrieDirtyLimit * 1024 * 1024,
 			ProposeBlockInterval: c.ProposeBlockInterval,
 			NotifyKeep:           keepFunc,
+			JournalFilePath:      c.JournalFilePath,
+			JournalFile:          c.JournalFile,
 		}
 	}
 	return config
@@ -1482,20 +1489,29 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	//
 	// Note all the components of block(td, hash->number map, header, body, receipts)
 	// should be written atomically. BlockBatch is used for containing all components.
-	start := time.Now()
-	blockBatch := bc.db.NewBatch()
-	rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
-	rawdb.WriteBlock(blockBatch, block)
-	rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
-	rawdb.WritePreimages(blockBatch, state.Preimages())
-	if err := blockBatch.Write(); err != nil {
-		log.Crit("Failed to write block into disk", "err", err)
-	}
-	blockWriteExternalTimer.UpdateSince(start)
-	log.Debug("blockWriteExternalTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", block.Hash())
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	defer wg.Wait()
+	go func() {
+		if metrics.EnabledExpensive {
+			defer func(start time.Time) { blockCommitTimer.Update(time.Since(start)) }(time.Now())
+		}
+		defer wg.Done()
+		start := time.Now()
+		blockBatch := bc.db.NewBatch()
+		rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
+		rawdb.WriteBlock(blockBatch, block)
+		rawdb.WriteReceipts(blockBatch, block.Hash(), block.NumberU64(), receipts)
+		rawdb.WritePreimages(blockBatch, state.Preimages())
+		if err := blockBatch.Write(); err != nil {
+			log.Crit("Failed to write block into disk", "err", err)
+		}
+		blockWriteExternalTimer.UpdateSince(start)
+		log.Debug("blockWriteExternalTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", block.Hash())
+	}()
 
 	// Commit all cached state changes into underlying memory database.
-	start = time.Now()
+	start := time.Now()
 	state.SetExpectedStateRoot(block.Root())
 	root, err := state.Commit(block.NumberU64(), bc.chainConfig.IsEIP158(block.Number()))
 	if err != nil {
@@ -1905,7 +1921,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
-			var followupInterrupt atomic.Bool
 			if !bc.cacheConfig.TrieCleanNoPrefetch {
 				if followup, err := it.peek(); followup != nil && err == nil {
 					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
@@ -1979,6 +1994,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
 		snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
 		triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
+		trieCommitTimer.Update(statedb.TrieCommits)
+		codeCommitTimer.Update(statedb.CodeCommits)
 
 		blockWriteTimer.UpdateSince(wstart)
 		blockInsertTimer.UpdateSince(start)
@@ -2714,4 +2731,31 @@ func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 
 func (bc *BlockChain) NoTries() bool {
 	return bc.stateCache.NoTries()
+}
+
+func createDelFn(bc *BlockChain) func(db ethdb.KeyValueWriter, hash common.Hash, num uint64) {
+	return func(db ethdb.KeyValueWriter, hash common.Hash, num uint64) {
+		// Ignore the error here since light client won't hit this path
+		frozen, _ := bc.db.Ancients()
+		if num+1 <= frozen {
+			log.Info("process data in freeze table")
+			// Truncate all relative data(header, total difficulty, body, receipt
+			// and canonical hash) from ancient store.
+			if _, err := bc.db.TruncateHead(num); err != nil {
+				log.Crit("Failed to truncate ancient data", "number", num, "err", err)
+			}
+			// Remove the hash <-> number mapping from the active store.
+			rawdb.DeleteHeaderNumber(db, hash)
+		} else {
+			// Remove relative body and receipts from the active store.
+			// The header, total difficulty and canonical hash will be
+			// removed in the hc.SetHead function.
+			rawdb.DeleteBody(db, hash, num)
+			rawdb.DeleteReceipts(db, hash, num)
+		}
+	}
+}
+
+func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
+	bc.hc.SetHead(headNumber, nil, createDelFn(bc))
 }

@@ -60,6 +60,13 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
+)
+
+const (
+	ChainDBNamespace = "eth/db/chaindata/"
+	JournalFileName  = "trie.journal"
+	ChainData        = "chaindata"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -134,10 +141,24 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 		config.TrieDirtyCache = 0
 	}
-	log.Info("Allocated trie memory caches", "clean", common.StorageSize(config.TrieCleanCache)*1024*1024, "dirty", common.StorageSize(config.TrieDirtyCache)*1024*1024)
-
+	// Optimize memory distribution by reallocating surplus allowance from the
+	// dirty cache to the clean cache.
+	if config.StateScheme == rawdb.PathScheme && config.TrieDirtyCache > pathdb.MaxBufferSize/1024/1024 {
+		log.Info("Capped dirty cache size", "provided", common.StorageSize(config.TrieDirtyCache)*1024*1024,
+			"adjusted", common.StorageSize(pathdb.MaxBufferSize))
+		log.Info("Clean cache size", "provided", common.StorageSize(config.TrieCleanCache)*1024*1024,
+			"adjusted", common.StorageSize(config.TrieCleanCache+config.TrieDirtyCache-pathdb.MaxBufferSize/1024/1024)*1024*1024)
+		config.TrieCleanCache += config.TrieDirtyCache - pathdb.MaxBufferSize/1024/1024
+		config.TrieDirtyCache = pathdb.MaxBufferSize / 1024 / 1024
+	}
+	log.Info("Allocated memory caches",
+		"state_scheme", config.StateScheme,
+		"trie_clean_cache", common.StorageSize(config.TrieCleanCache)*1024*1024,
+		"trie_dirty_cache", common.StorageSize(config.TrieDirtyCache)*1024*1024,
+		"snapshot_cache", common.StorageSize(config.SnapshotCache)*1024*1024)
 	// Assemble the Ethereum object
-	chainDb, err := stack.OpenDatabaseWithFreezer("chaindata", config.DatabaseCache, config.DatabaseHandles, config.DatabaseFreezer, "eth/db/chaindata/", false)
+	chainDb, err := stack.OpenDatabaseWithFreezer(ChainData, config.DatabaseCache, config.DatabaseHandles,
+		config.DatabaseFreezer, ChainDBNamespace, false)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +218,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion)
 		}
 	}
+
+	journalFilePath := fmt.Sprintf("%s/%s", stack.ResolvePath(ChainData), JournalFileName)
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording:   config.EnablePreimageRecording,
@@ -218,6 +241,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			ProposeBlockInterval: config.ProposeBlockInterval,
 			EnableProofKeeper:    config.EnableProofKeeper,
 			KeepProofBlockSpan:   config.KeepProofBlockSpan,
+			JournalFilePath:      journalFilePath,
+			JournalFile:          config.JournalFileEnabled,
 		}
 	)
 	// Override the chain config with provided settings.

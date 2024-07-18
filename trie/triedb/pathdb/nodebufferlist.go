@@ -270,12 +270,18 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	}
 
 	commitFunc := func(buffer *multiDifflayer) bool {
+		if nf.count <= nf.rsevMdNum {
+			log.Info("keep multiDiffLayer in node bufferList for getting withdrawal proof",
+				"reserved_multidiflayer", nf.rsevMdNum, "bufferList_count", nf.count)
+			return false
+		}
 		if err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes); err != nil {
 			log.Crit("failed to commit nodes to base node buffer", "error", err)
 		}
 		_ = nf.popBack()
 		return true
 	}
+
 	nf.traverseReverse(commitFunc)
 	persistID := nf.persistID + nf.base.layers
 	err := nf.base.flush(nf.db, nf.clean, persistID)
@@ -285,6 +291,7 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	nf.isFlushing.Store(false)
 	nf.base.reset()
 	nf.persistID = persistID
+
 	return nil
 }
 
@@ -727,7 +734,7 @@ func (w *proposedBlockReader) parentLayer() layer { return nil }
 func (w *proposedBlockReader) update(root common.Hash, id uint64, block uint64, nodes map[common.Hash]map[string]*trienode.Node, states *triestate.Set) *diffLayer {
 	return nil
 }
-func (w *proposedBlockReader) journal(io.Writer) error { return nil }
+func (w *proposedBlockReader) journal(io.Writer, JournalType) error { return nil }
 
 // multiDifflayer compresses several difflayers in one map. As an element of nodebufferlist
 // it is the smallest unit for storing trie nodes.

@@ -26,7 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -92,7 +91,6 @@ var DefaultMevConfig = MevConfig{
 type Backend interface {
 	BlockChain() *core.BlockChain
 	TxPool() *txpool.TxPool
-	AccountManager() *accounts.Manager
 }
 
 type BackendWithHistoricalState interface {
@@ -244,11 +242,6 @@ func (miner *Miner) Close() {
 func (miner *Miner) Mining() bool {
 	return miner.worker.isRunning()
 }
-
-// TODO no multi sequencer
-//func (miner *Miner) InTurn() bool {
-//	return miner.worker.inTurn()
-//}
 
 func (miner *Miner) Hashrate() uint64 {
 	if pow, ok := miner.engine.(consensus.PoW); ok {

@@ -771,22 +771,6 @@ func (b testBackend) HistoricalRPCService() *rpc.Client {
 func (b testBackend) Genesis() *types.Block {
 	panic("implement me")
 }
-func (b testBackend) MevRunning() bool { return false }
-func (b testBackend) MevParams() *types.MevParams {
-	return &types.MevParams{}
-}
-func (b testBackend) StartMev()                                                  {}
-func (b testBackend) StopMev()                                                   {}
-func (b testBackend) AddBuilder(builder common.Address, builderUrl string) error { return nil }
-func (b testBackend) RemoveBuilder(builder common.Address) error                 { return nil }
-func (b testBackend) SendBid(ctx context.Context, bid *types.BidArgs) (common.Hash, error) {
-	panic("implement me")
-}
-func (b testBackend) MinerInTurn() bool { return false }
-func (b testBackend) BestBidGasFee(parentHash common.Hash) *big.Int {
-	//TODO implement me
-	panic("implement me")
-}
 
 func TestEstimateGas(t *testing.T) {
 	t.Parallel()

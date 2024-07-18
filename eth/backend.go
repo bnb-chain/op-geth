@@ -262,14 +262,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.TxPool.Journal = stack.ResolvePath(config.TxPool.Journal)
 	}
 	legacyPool := legacypool.New(config.TxPool, eth.blockchain)
-	bundlePool := bundlepool.New(config.BundlePool, config.Miner.Mev)
 
 	txPools := []txpool.SubPool{legacyPool}
 	if !eth.BlockChain().Config().IsOptimism() {
 		blobPool := blobpool.New(config.BlobPool, eth.blockchain)
 		txPools = append(txPools, blobPool)
 	}
-	txPools = append(txPools, bundlePool)
+	bundlePool := &bundlepool.BundlePool{}
+	if config.Miner.Mev.Enabled || config.Miner.Mev.BuilderEnabled {
+		bundlePool = bundlepool.New(config.BundlePool, config.Miner.Mev)
+		txPools = append(txPools, bundlePool)
+	}
 	eth.txPool, err = txpool.New(new(big.Int).SetUint64(config.TxPool.PriceLimit), eth.blockchain, txPools)
 	if err != nil {
 		return nil, err
@@ -293,7 +296,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	eth.miner = miner.New(eth, &config.Miner, eth.blockchain.Config(), eth.EventMux(), eth.engine, eth.isLocalBlock)
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
-	bundlePool.SetBundleSimulator(eth.miner)
+	if config.Miner.Mev.Enabled || config.Miner.Mev.BuilderEnabled {
+		bundlePool.SetBundleSimulator(eth.miner)
+	}
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, config.RollupDisableTxPoolAdmission, eth, nil}
 	if eth.APIBackend.allowUnprotectedTxs {

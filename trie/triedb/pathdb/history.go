@@ -23,13 +23,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/exp/slices"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
 )
@@ -334,7 +334,6 @@ func (h *history) encode() ([]byte, []byte, []byte, []byte, []byte) {
 		accountIndexes = append(accountIndexes, accIndex.encode()...)
 	}
 
-	// nodesBytes, err := json.Marshal(h.nodes)
 	nodesBytes, err := rlp.EncodeToBytes(h.nodes)
 	if err != nil {
 		log.Error("Failed to encode trie nodes", "error", err)
@@ -496,7 +495,6 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 		}
 	}
 
-	// json.Unmarshal(trieNodes, &encoded)
 	if err := rlp.DecodeBytes(trieNodes, &encoded); err != nil {
 		log.Error("Failed to decode state history trie nodes", "error", err)
 		return err
@@ -544,8 +542,8 @@ func (h *history) Size() int {
 	return size
 }
 
-// readHistoryMetaBlockNumber reads and decodes the state history meta and returns block number.
-func readHistoryMetaBlockNumber(freezer *rawdb.ResettableFreezer, stateID uint64) (uint64, error) {
+// readBlockNumber reads and decodes the state history meta and returns block number.
+func readBlockNumber(freezer *rawdb.ResettableFreezer, stateID uint64) (uint64, error) {
 	blob := rawdb.ReadStateHistoryMeta(freezer, stateID)
 	if len(blob) == 0 {
 		return 0, fmt.Errorf("state history not found %d", stateID)
@@ -557,8 +555,8 @@ func readHistoryMetaBlockNumber(freezer *rawdb.ResettableFreezer, stateID uint64
 	return m.block, nil
 }
 
-// readAllHistoryMeta returns all block number to stateID map.
-func readAllHistoryMeta(freezer *rawdb.ResettableFreezer, startStateID, endStateID uint64) (map[uint64]uint64, error) {
+// readAllBlockNumbers returns all block number to stateID map.
+func readAllBlockNumbers(freezer *rawdb.ResettableFreezer, startStateID, endStateID uint64) (map[uint64]uint64, error) {
 	blockMap := make(map[uint64]uint64)
 	for i := startStateID; i <= endStateID; i++ {
 		blob := rawdb.ReadStateHistoryMeta(freezer, i)
@@ -670,7 +668,6 @@ func truncateFromHead(db ethdb.Batcher, freezer *rawdb.ResettableFreezer, nhead 
 	if ohead == nhead {
 		return 0, nil
 	}
-	log.Info("Print truncate head info", "nhead", nhead, "ohead", ohead, "otail", otail)
 	// Load the meta objects in range [nhead+1, ohead]
 	blobs, err := rawdb.ReadStateHistoryMetaList(freezer, nhead+1, ohead-nhead)
 	if err != nil {
@@ -687,12 +684,10 @@ func truncateFromHead(db ethdb.Batcher, freezer *rawdb.ResettableFreezer, nhead 
 	if err := batch.Write(); err != nil {
 		return 0, err
 	}
-	log.Info("u2unun", "nhead", nhead)
 	ohead, err = freezer.TruncateHead(nhead)
 	if err != nil {
 		return 0, err
 	}
-	log.Info("truncate from head", "ohead", ohead, "nhead", nhead)
 	return int(ohead - nhead), nil
 }
 

@@ -266,8 +266,8 @@ func (db *Database) loadLayers() layer {
 		dl      *diskLayer
 		stateID uint64
 	)
-	if errors.Is(err, errMissJournal) && db.config.EnableRecoverDiffLayers {
-		log.Info("Recover diff layers from ancient db")
+	if errors.Is(err, errMissJournal) && db.config.EnableRecoverNodeBufferList {
+		log.Info("Recover node buffer list from ancient db")
 		db.isRecoverDiffLayers = true
 		return nil
 	} else {
@@ -391,18 +391,7 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, journalTypeForRea
 	if err := journalBuf.Decode(&encoded); err != nil {
 		return nil, fmt.Errorf("failed to load diff nodes: %v", err)
 	}
-	nodes := make(map[common.Hash]map[string]*trienode.Node)
-	for _, entry := range encoded {
-		subset := make(map[string]*trienode.Node)
-		for _, n := range entry.Nodes {
-			if len(n.Blob) > 0 {
-				subset[string(n.Path)] = trienode.New(crypto.Keccak256Hash(n.Blob), n.Blob)
-			} else {
-				subset[string(n.Path)] = trienode.NewDeleted()
-			}
-		}
-		nodes[entry.Owner] = subset
-	}
+	nodes := flattenTrieNodes(encoded)
 	// Read state changes from journal
 	var (
 		jaccounts  journalAccounts
@@ -526,14 +515,7 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 		return err
 	}
 	// Write the accumulated trie nodes into buffer
-	nodes := make([]journalNodes, 0, len(dl.nodes))
-	for owner, subset := range dl.nodes {
-		entry := journalNodes{Owner: owner}
-		for path, node := range subset {
-			entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: node.Blob})
-		}
-		nodes = append(nodes, entry)
-	}
+	nodes := compressTrieNodes(dl.nodes)
 	if err := rlp.Encode(journalBuf, nodes); err != nil {
 		return err
 	}

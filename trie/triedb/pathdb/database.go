@@ -107,16 +107,16 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
-	TrieNodeBufferType      NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
-	StateHistory            uint64         // Number of recent blocks to maintain state history for
-	CleanCacheSize          int            // Maximum memory allowance (in bytes) for caching clean nodes
-	DirtyCacheSize          int            // Maximum memory allowance (in bytes) for caching dirty nodes
-	ReadOnly                bool           // Flag whether the database is opened in read only mode.
-	ProposeBlockInterval    uint64         // Propose block to L1 block interval.
-	NotifyKeep              NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
-	JournalFilePath         string         // The journal file path
-	JournalFile             bool           // Whether to use journal file mode
-	EnableRecoverDiffLayers bool           // Whether enable recover diff layers for node buffer list.
+	TrieNodeBufferType          NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
+	StateHistory                uint64         // Number of recent blocks to maintain state history for
+	CleanCacheSize              int            // Maximum memory allowance (in bytes) for caching clean nodes
+	DirtyCacheSize              int            // Maximum memory allowance (in bytes) for caching dirty nodes
+	ReadOnly                    bool           // Flag whether the database is opened in read only mode.
+	ProposeBlockInterval        uint64         // Propose block to L1 block interval.
+	NotifyKeep                  NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
+	JournalFilePath             string         // The journal file path
+	JournalFile                 bool           // Whether to use journal file mode
+	EnableRecoverNodeBufferList bool           // Whether enable recover node buffer list.
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -182,9 +182,13 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 		config:     config,
 		diskdb:     diskdb,
 	}
+	log.Info("pathdb", "config", db.bufferSize, "DirtyCacheSize", config.DirtyCacheSize)
 	// Construct the layer tree by resolving the in-disk singleton state
 	// and in-memory layer journal.
-	db.tree = newLayerTree(db.loadLayers())
+	l := db.loadLayers()
+	if l != nil {
+		db.tree = newLayerTree(l)
+	}
 
 	// Open the freezer for state history if the passed database contains an
 	// ancient store. Otherwise, all the relevant functionalities are disabled.
@@ -713,7 +717,6 @@ func (db *Database) recoverDiffLayers() error {
 	// }
 
 	dl = db.tree.bottom()
-	dl.recovery = false
 	log.Info("updated layer tree info", "length", db.tree.len(), "bottom stateID", dl.stateID(),
 		"bottom root", dl.rootHash().String())
 

@@ -287,7 +287,6 @@ func (f *Freezer) TruncateHead(items uint64) (uint64, error) {
 	f.writeLock.Lock()
 	defer f.writeLock.Unlock()
 
-	log.Info("This is truncate", "items", items)
 	oitems := f.frozen.Load()
 	if oitems <= items {
 		return oitems, nil
@@ -298,7 +297,6 @@ func (f *Freezer) TruncateHead(items uint64) (uint64, error) {
 		}
 	}
 	f.frozen.Store(items)
-	log.Info("freezer db", "oitems", oitems)
 	return oitems, nil
 }
 

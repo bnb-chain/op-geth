@@ -1285,7 +1285,13 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 				}
 			}
 		}
-		nonceMain := mainDB.GetNonce(addr)
+
+		/* can not use mainDB.GetNonce() because we do not want to record the stateObject */
+		var nonceMain uint64 = 0
+		mainObj := mainDB.getStateObjectNoUpdate(addr)
+		if mainObj != nil {
+			nonceMain = mainObj.Nonce()
+		}
 		if nonceSlot != nonceMain {
 			log.Debug("IsSlotDBReadsValid nonce read is invalid", "addr", addr,
 				"nonceSlot", nonceSlot, "nonceMain", nonceMain, "SlotIndex", slotDB.parallel.SlotIndex,
@@ -1304,7 +1310,12 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			}
 		}
 
-		balanceMain := mainDB.GetBalance(addr)
+		balanceMain := common.U2560
+		mainObj := mainDB.getStateObjectNoUpdate(addr)
+		if mainObj != nil {
+			balanceMain = mainObj.Balance()
+		}
+
 		if balanceSlot.Cmp(balanceMain) != 0 {
 			log.Debug("IsSlotDBReadsValid balance read is invalid", "addr", addr,
 				"balanceSlot", balanceSlot, "balanceMain", balanceMain, "SlotIndex", slotDB.parallel.SlotIndex,
@@ -1390,7 +1401,11 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 
 	// check code
 	for addr, codeSlot := range slotDB.parallel.codeReadsInSlot {
-		codeMain := mainDB.GetCode(addr)
+		var codeMain []byte = nil
+		object := mainDB.getStateObjectNoUpdate(addr)
+		if object != nil {
+			codeMain = object.Code()
+		}
 		if !bytes.Equal(codeSlot, codeMain) {
 			log.Debug("IsSlotDBReadsValid code read is invalid", "addr", addr,
 				"len codeSlot", len(codeSlot), "len codeMain", len(codeMain), "SlotIndex", slotDB.parallel.SlotIndex,
@@ -1400,7 +1415,11 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	}
 	// check codeHash
 	for addr, codeHashSlot := range slotDB.parallel.codeHashReadsInSlot {
-		codeHashMain := mainDB.GetCodeHash(addr)
+		codeHashMain := common.Hash{}
+		object := mainDB.getStateObjectNoUpdate(addr)
+		if object != nil {
+			codeHashMain = common.BytesToHash(object.CodeHash())
+		}
 		if !bytes.Equal(codeHashSlot.Bytes(), codeHashMain.Bytes()) {
 			log.Debug("IsSlotDBReadsValid codehash read is invalid", "addr", addr,
 				"codeHashSlot", codeHashSlot, "codeHashMain", codeHashMain, "SlotIndex", slotDB.parallel.SlotIndex,
@@ -1411,7 +1430,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	// addr state check
 	for addr, stateSlot := range slotDB.parallel.addrStateReadsInSlot {
 		stateMain := false // addr not exist
-		if mainDB.getStateObject(addr) != nil {
+		if mainDB.getStateObjectNoUpdate(addr) != nil {
 			stateMain = true // addr exist in main DB
 		}
 		if stateSlot != stateMain {
@@ -1424,7 +1443,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	}
 	// snapshot destructs check
 	for addr, destructRead := range slotDB.parallel.addrSnapDestructsReadsInSlot {
-		mainObj := mainDB.getStateObject(addr)
+		mainObj := mainDB.getStateObjectNoUpdate(addr)
 		if mainObj == nil {
 			log.Debug("IsSlotDBReadsValid snapshot destructs read invalid, address should exist",
 				"addr", addr, "destruct", destructRead,
@@ -1491,7 +1510,7 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 				delete(mainDB.accounts, obj.addrHash)      // Clear out any previously updated account data (may be recreated via a resurrect)
 				delete(mainDB.accountsOrigin, obj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
 				mainDB.AccountMux.Unlock()
-				
+
 				mainDB.StorageMux.Lock()
 				delete(mainDB.storages, obj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 				delete(mainDB.storagesOrigin, obj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
@@ -1573,6 +1592,7 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 				obj.finalise(true) // Prefetch slots in the background
 			} else {
 				obj.fixUpOriginAndResetPendingStorage()
+				obj.finalise(false)
 			}
 		}
 

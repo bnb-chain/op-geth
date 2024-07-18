@@ -76,6 +76,8 @@ func (s *StateObjectSyncMap) StoreStateObject(addr common.Address, stateObject *
 func (s *StateDB) loadStateObj(addr common.Address) (*stateObject, bool) {
 
 	if s.isParallel {
+		s.parallelStateAccessLock.Lock()
+		defer s.parallelStateAccessLock.Unlock()
 		ret, ok := s.parallel.stateObjects.LoadStateObject(addr)
 		return ret, ok
 	}
@@ -90,9 +92,9 @@ func (s *StateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 		// When a state object is stored into s.parallel.stateObjects,
 		// it belongs to base StateDB, it is confirmed and valid.
 		// TODO-dav: remove the lock/unlock?
-		stateObject.db.parallelStateAccessLock.Lock()
-		s.parallel.stateObjects.Store(addr, stateObject)
-		stateObject.db.parallelStateAccessLock.Unlock()
+		s.parallelStateAccessLock.Lock()
+		s.parallel.stateObjects.StoreStateObject(addr, stateObject)
+		s.parallelStateAccessLock.Unlock()
 	} else {
 		s.stateObjects[addr] = stateObject
 	}
@@ -816,6 +818,33 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	return nil
 }
 
+// getStateObjectNoUpdate is similar with getStateObject except that it does not
+// update stateObjects records.
+func (s *StateDB) getStateObjectNoUpdate(addr common.Address) *stateObject {
+	obj := s.getDeletedStateObjectNoUpdate(addr)
+	if obj != nil && !obj.deleted {
+		return obj
+	}
+	return nil
+}
+
+func (s *StateDB) getDeletedStateObjectNoUpdate(addr common.Address) *stateObject {
+	s.RecordRead(types.AccountStateKey(addr, types.AccountSelf), struct{}{})
+
+	// Prefer live objects if any is available
+	if obj, _ := s.getStateObjectFromStateObjects(addr); obj != nil {
+		return obj
+	}
+
+	data, ok := s.getStateObjectFromSnapshotOrTrie(addr)
+	if !ok {
+		return nil
+	}
+	// Insert into the live set
+	obj := newObject(s, s.isParallel, addr, data)
+	return obj
+}
+
 func (s *StateDB) GetStateObjectFromSnapshotOrTrie(addr common.Address) (data *types.StateAccount, ok bool) {
 	return s.getStateObjectFromSnapshotOrTrie(addr)
 }
@@ -878,11 +907,11 @@ func (s *StateDB) getStateObjectFromSnapshotOrTrie(addr common.Address) (data *t
 
 	// If snapshot unavailable or reading from it failed, load from the database
 	if data == nil {
+		s.trieParallelLock.Lock()
+		defer s.trieParallelLock.Unlock()
 		var trie Trie
 		if s.isParallel {
 			// hold lock for parallel
-			s.trieParallelLock.Lock()
-			defer s.trieParallelLock.Unlock()
 			if s.parallel.isSlotDB {
 				if s.parallel.baseStateDB == nil {
 					return nil, false

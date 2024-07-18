@@ -753,14 +753,18 @@ func (s *StateDB) updateStateObject(obj *stateObject) {
 		}
 		// Encode the account and update the account trie
 		addr := obj.Address()
+		s.trieParallelLock.Lock()
 		if err := s.trie.UpdateAccount(addr, &obj.data); err != nil {
 			s.setError(fmt.Errorf("updateStateObject (%x) error: %v", addr[:], err))
 		}
 		if obj.dirtyCode {
 			s.trie.UpdateContractCode(obj.Address(), common.BytesToHash(obj.CodeHash()), obj.code)
 		}
+		s.trieParallelLock.Unlock()
 	}
 
+	s.AccountMux.Lock()
+	defer s.AccountMux.Unlock()
 	// Cache the data until commit. Note, this update mechanism is not symmetric
 	// to the deletion, because whereas it is enough to track account updates
 	// at commit time, deletions need tracking at transaction boundary level to
@@ -1001,10 +1005,14 @@ func (s *StateDB) createObject(addr common.Address) (newobj *stateObject) {
 			prevAccountOrigin:      prevAccount,
 			prevStorageOrigin:      s.storagesOrigin[prev.address],
 		})
+		s.AccountMux.Lock()
 		delete(s.accounts, prev.addrHash)
-		delete(s.storages, prev.addrHash)
 		delete(s.accountsOrigin, prev.address)
+		s.AccountMux.Unlock()
+		s.StorageMux.Lock()
+		delete(s.storages, prev.addrHash)
 		delete(s.storagesOrigin, prev.address)
+		s.StorageMux.Unlock()
 	}
 
 	newobj.created = true
@@ -1125,10 +1133,15 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 	}
 	// Deep copy the state changes made in the scope of block
 	// along with their original values.
+	s.AccountMux.Lock()
 	state.accounts = copySet(s.accounts)
-	state.storages = copy2DSet(s.storages)
 	state.accountsOrigin = copySet(state.accountsOrigin)
+	s.AccountMux.Unlock()
+
+	s.StorageMux.Lock()
+	state.storages = copy2DSet(s.storages)
 	state.storagesOrigin = copy2DSet(state.storagesOrigin)
+	s.StorageMux.Unlock()
 
 	// Deep copy the logs occurred in the scope of block
 	for hash, logs := range s.logs {
@@ -1433,14 +1446,16 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 		// state.prefetcher = s.prefetcher
 	}
 
-	s.accountStorageParallelLock.RLock()
 	// Deep copy the state changes made in the scope of block
 	// along with their original values.
+	s.AccountMux.Lock()
 	state.accounts = copySet(s.accounts)
-	state.storages = copy2DSet(s.storages)
 	state.accountsOrigin = copySet(state.accountsOrigin)
+	s.AccountMux.Unlock()
+	s.StorageMux.Lock()
+	state.storages = copy2DSet(s.storages)
 	state.storagesOrigin = copy2DSet(state.storagesOrigin)
-	s.accountStorageParallelLock.RUnlock()
+	s.StorageMux.Unlock()
 
 	return state
 }
@@ -2593,13 +2608,18 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 				// remove the addr from snapAccounts&snapStorage only when object is deleted.
 				// "deleted" is not equal to "snapDestructs", since createObject() will add an addr for
 				//  snapDestructs to destroy previous object, while it will keep the addr in snapAccounts & snapAccounts
+				s.snapParallelLock.Lock()
 				delete(s.snapAccounts, addr)
 				delete(s.snapStorage, addr)
+				s.snapParallelLock.Unlock()
+				s.AccountMux.Lock()
 				delete(s.accounts, dirtyObj.addrHash)      // Clear out any previously updated account data (may be recreated via a resurrect)
-				delete(s.storages, dirtyObj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 				delete(s.accountsOrigin, dirtyObj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
+				s.AccountMux.Unlock()
+				s.StorageMux.Lock()
+				delete(s.storages, dirtyObj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 				delete(s.storagesOrigin, dirtyObj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
-				s.accountStorageParallelLock.Unlock()
+				s.StorageMux.Unlock()
 			}
 		} else {
 			// addr already in main DB, do merge: balance, KV, code, State(create, suicide)

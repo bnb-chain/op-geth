@@ -4,8 +4,8 @@ import (
 	"container/heap"
 	"context"
 	"errors"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/miner"
+	"github.com/ethereum/go-ethereum/rpc"
 	"math/big"
 	"sync"
 	"time"
@@ -84,7 +84,7 @@ type BundlePool struct {
 
 	simulator BundleSimulator
 
-	sequencerClients map[string]*ethclient.Client
+	sequencerClients map[string]*rpc.Client
 	deliverBundleCh  chan *types.SendBundleArgs
 	exitCh           chan struct{}
 }
@@ -122,7 +122,8 @@ func (p *BundlePool) deliverLoop() {
 				cli := cli
 				url := url
 				go func() {
-					_, err := cli.SendBundle(context.Background(), *bundle)
+					var hash common.Hash
+					err := cli.CallContext(context.Background(), &hash, "eth_sendBundle", *bundle)
 					if err != nil {
 						log.Error("failed to deliver bundle to sequencer", "url", url, "err", err)
 					}
@@ -136,10 +137,10 @@ func (p *BundlePool) deliverLoop() {
 }
 
 func (p *BundlePool) register(url string) error {
-	var sequencerClient *ethclient.Client
+	var sequencerClient *rpc.Client
 	if url != "" {
 		var err error
-		sequencerClient, err = ethclient.Dial(url)
+		sequencerClient, err = rpc.Dial(url)
 		if err != nil {
 			log.Error("failed to dial sequencer", "url", url, "err", err)
 			return err

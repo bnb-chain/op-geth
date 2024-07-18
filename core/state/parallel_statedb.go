@@ -1487,12 +1487,15 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 				// Note, we can't do this only at the end of a block because multiple
 				// transactions within the same block might self destruct and then
 				// resurrect an account; but the snapshotter needs both events.
-				mainDB.accountStorageParallelLock.Lock()
+				mainDB.AccountMux.Lock()
 				delete(mainDB.accounts, obj.addrHash)      // Clear out any previously updated account data (may be recreated via a resurrect)
-				delete(mainDB.storages, obj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 				delete(mainDB.accountsOrigin, obj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
+				mainDB.AccountMux.Unlock()
+				
+				mainDB.StorageMux.Lock()
+				delete(mainDB.storages, obj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 				delete(mainDB.storagesOrigin, obj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
-				mainDB.accountStorageParallelLock.Unlock()
+				mainDB.StorageMux.Unlock()
 			} else {
 				obj.finalise(true) // Prefetch slots in the background
 			}
@@ -1545,13 +1548,16 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 			// Note, we can't do this only at the end of a block because multiple
 			// transactions within the same block might self destruct and then
 			// resurrect an account; but the snapshotter needs both events.
-			mainDB.accountStorageParallelLock.Lock()
+			mainDB.AccountMux.Lock()
 			delete(mainDB.accounts, obj.addrHash)      // Clear out any previously updated account data (may be recreated via a resurrect)
-			delete(mainDB.storages, obj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 			delete(mainDB.accountsOrigin, obj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
+			mainDB.AccountMux.Unlock()
+			mainDB.StorageMux.Lock()
+			delete(mainDB.storages, obj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 			delete(mainDB.storagesOrigin, obj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
-			mainDB.accountStorageParallelLock.Unlock()
+			mainDB.StorageMux.Unlock()
 
+			// todo: The following record seems unnecessary.
 			if s.parallel.isSlotDB {
 				s.parallel.accountsDeletedRecord = append(s.parallel.accountsDeletedRecord, obj.addrHash)
 				s.parallel.storagesDeleteRecord = append(s.parallel.storagesDeleteRecord, obj.addrHash)
@@ -1652,7 +1658,7 @@ func (s *ParallelStateDB) IntermediateRootForSlotDB(deleteEmptyObjects bool, mai
 	if s.TxIndex() == 0 && len(mainDB.stateObjectsPending) > 0 {
 		usedAddrs = make([][]byte, 0, len(s.stateObjectsPending)+len(mainDB.stateObjectsPending))
 		for addr := range mainDB.stateObjectsPending {
-			if obj, _ := s.getStateObjectFromStateObjects(addr); obj.deleted {
+			if obj, _ := mainDB.getStateObjectFromStateObjects(addr); obj.deleted {
 				mainDB.deleteStateObject(obj)
 				mainDB.AccountDeleted += 1
 			} else {

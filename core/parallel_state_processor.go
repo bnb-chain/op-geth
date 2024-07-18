@@ -46,6 +46,7 @@ type ParallelStateProcessor struct {
 	inConfirmStage2       bool
 	targetStage2Count     int // when executed txNUM reach it, enter stage2 RT confirm
 	nextStage2TxIndex     int
+	disableStealTx        bool
 }
 
 func NewParallelStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine, parallelNum int) *ParallelStateProcessor {
@@ -174,6 +175,37 @@ func (p *ParallelStateProcessor) resetState(txNum int, statedb *state.StateDB) {
 	p.nextStage2TxIndex = 0
 }
 
+// doStaticDispatchV2 could dispatch by TxDAG metadata
+// txReqs must order by TxIndex
+// txDAG must convert to dependency relation
+// 1. The TxDAG generates parallel execution merge paths that will ignore cross slot tx dep;
+// 2. It will dispatch the most hungry slot for every isolate execution path;
+// 3. TODO(galaio) it need to schedule the slow dep tx path properly;
+// 4. TODO(galaio) it is unfriendly for cross slot deps, maybe we can delay dispatch when tx cross in slots, it may increase PEVM parallelism;
+func (p *ParallelStateProcessor) doStaticDispatchV2(txReqs []*ParallelTxRequest, txDAG types.TxDAG) {
+	// only support PlainTxDAG dispatch now.
+	if txDAG == nil || txDAG.Type() != types.PlainTxDAGType {
+		p.doStaticDispatch(txReqs)
+		return
+	}
+
+	// resolve isolate execution paths from TxDAG, it indicates the tx dispatch
+	paths := types.MergeTxDAGExecutionPaths(txDAG)
+	log.Info("doStaticDispatchV2 merge parallel execution paths", "slots", len(p.slotState), "paths", len(paths))
+
+	for _, path := range paths {
+		slotIndex := p.mostHungrySlot()
+		for _, index := range path {
+			txReqs[index].staticSlotIndex = slotIndex // txReq is better to be executed in this slot
+			slot := p.slotState[slotIndex]
+			slot.pendingTxReqList = append(slot.pendingTxReqList, txReqs[index])
+		}
+	}
+
+	// it's unnecessary to enable slot steal mechanism, opt the steal mechanism later;
+	p.disableStealTx = true
+}
+
 // Benefits of StaticDispatch:
 //
 //	** try best to make Txs with same From() in same slot
@@ -197,14 +229,7 @@ func (p *ParallelStateProcessor) doStaticDispatch(txReqs []*ParallelTxRequest) {
 
 		// not found, dispatch to most hungry slot
 		if slotIndex == -1 {
-			var workload = len(p.slotState[0].pendingTxReqList)
-			slotIndex = 0
-			for i, slot := range p.slotState { // can start from index 1
-				if len(slot.pendingTxReqList) < workload {
-					slotIndex = i
-					workload = len(slot.pendingTxReqList)
-				}
-			}
+			slotIndex = p.mostHungrySlot()
 		}
 		// update
 		fromSlotMap[txReq.msg.From] = slotIndex
@@ -216,6 +241,24 @@ func (p *ParallelStateProcessor) doStaticDispatch(txReqs []*ParallelTxRequest) {
 		txReq.staticSlotIndex = slotIndex // txReq is better to be executed in this slot
 		slot.pendingTxReqList = append(slot.pendingTxReqList, txReq)
 	}
+}
+
+func (p *ParallelStateProcessor) mostHungrySlot() int {
+	var (
+		workload  = len(p.slotState[0].pendingTxReqList)
+		slotIndex = 0
+	)
+	for i, slot := range p.slotState { // can start from index 1
+		if len(slot.pendingTxReqList) < workload {
+			slotIndex = i
+			workload = len(slot.pendingTxReqList)
+		}
+		// just return the first slot with 0 workload
+		if workload == 0 {
+			return slotIndex
+		}
+	}
+	return slotIndex
 }
 
 // do conflict detect
@@ -465,7 +508,7 @@ func (p *ParallelStateProcessor) runSlotLoop(slotIndex int, slotType int32) {
 			// fmt.Printf("Dav -- runInLoop, - loopbody tail - TxREQ: %d\n", txReq.txIndex)
 		}
 		// switched to the other slot.
-		if interrupted {
+		if interrupted || p.disableStealTx {
 			continue
 		}
 
@@ -688,8 +731,18 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		p.targetStage2Count = p.targetStage2Count - stage2AheadNum
 	}
 
+	var (
+		txDAG types.TxDAG
+		err   error
+	)
+	if len(block.TxDAG()) != 0 {
+		txDAG, err = types.DecodeTxDAG(block.TxDAG())
+		if err != nil {
+			return nil, nil, 0, err
+		}
+	}
 	// From now on, entering parallel execution.
-	p.doStaticDispatch(p.allTxReqs) // todo: put txReqs in unit?
+	p.doStaticDispatchV2(p.allTxReqs, txDAG) // todo: put txReqs in unit?
 
 	// after static dispatch, we notify the slot to work.
 	for _, slot := range p.slotState {

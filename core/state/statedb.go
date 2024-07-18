@@ -1031,6 +1031,15 @@ func (s *StateDB) CreateAccount(addr common.Address) {
 	newObj.setBalance(new(uint256.Int).Set(preBalance)) // new big.Int for newObj
 }
 
+// CopyWithMvStates will copy state with MVStates
+func (s *StateDB) CopyWithMvStates(doPrefetch bool) *StateDB {
+	state := s.copyInternal(doPrefetch)
+	if s.mvStates != nil {
+		state.mvStates = s.mvStates
+	}
+	return state
+}
+
 // Copy creates a deep, independent copy of the state.
 // Snapshots of the copied state cannot be applied to the copy.
 func (s *StateDB) Copy() *StateDB {
@@ -1148,11 +1157,6 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 	// know that they need to explicitly terminate an active copy).
 	if s.prefetcher != nil {
 		state.prefetcher = s.prefetcher.copy()
-	}
-
-	// parallel EVM related
-	if s.mvStates != nil {
-		state.mvStates = s.mvStates
 	}
 
 	return state
@@ -2371,9 +2375,15 @@ func (s *StateDB) FinaliseRWSet() error {
 	if s.mvStates == nil || s.rwSet == nil {
 		return nil
 	}
+	ver := types.StateVersion{
+		TxIndex: s.txIndex,
+	}
+	if ver != s.rwSet.Version() {
+		return errors.New("you finalize a wrong ver of RWSet")
+	}
+
 	// finalise stateObjectsDestruct
-	for addr, acc := range s.stateObjectsDestructDirty {
-		s.stateObjectsDestruct[addr] = acc
+	for addr := range s.stateObjectsDestructDirty {
 		s.RecordWrite(types.AccountStateKey(addr, types.AccountSuicide), struct{}{})
 	}
 	for addr := range s.journal.dirties {
@@ -2393,12 +2403,6 @@ func (s *StateDB) FinaliseRWSet() error {
 			// finalise account & storages
 			obj.finaliseRWSet()
 		}
-	}
-	ver := types.StateVersion{
-		TxIndex: s.txIndex,
-	}
-	if ver != s.rwSet.Version() {
-		return errors.New("you finalize a wrong ver of RWSet")
 	}
 
 	return s.mvStates.FulfillRWSet(s.rwSet, s.es)

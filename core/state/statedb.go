@@ -2604,7 +2604,6 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 			// fixme: should not delete, would cause unconfirmed DB incorrect?
 			// delete(slotDb.parallel.dirtiedStateObjectsInSlot, addr) // transfer ownership, fixme: shared read?
 			if dirtyObj.deleted {
-				s.accountStorageParallelLock.Lock()
 				// remove the addr from snapAccounts&snapStorage only when object is deleted.
 				// "deleted" is not equal to "snapDestructs", since createObject() will add an addr for
 				//  snapDestructs to destroy previous object, while it will keep the addr in snapAccounts & snapAccounts

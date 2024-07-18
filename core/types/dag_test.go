@@ -1,6 +1,7 @@
 package types
 
 import (
+	"github.com/cometbft/cometbft/libs/rand"
 	"testing"
 	"time"
 
@@ -172,6 +173,36 @@ func TestIsEqualRWVal(t *testing.T) {
 	}
 }
 
+func TestMergeTxDAGExecutionPaths_Simple(t *testing.T) {
+	paths := MergeTxDAGExecutionPaths(mockSimpleDAG())
+	require.Equal(t, [][]uint64{
+		{0, 3, 4},
+		{1, 2, 5, 6, 7},
+		{8, 9},
+	}, paths)
+}
+
+func TestMergeTxDAGExecutionPaths_Random(t *testing.T) {
+	dag := mockRandomDAG(10000)
+	paths := MergeTxDAGExecutionPaths(dag)
+	txMap := make(map[uint64]uint64, dag.TxCount())
+	for _, path := range paths {
+		for _, index := range path {
+			old, ok := txMap[index]
+			require.False(t, ok, index, path, old)
+			txMap[index] = path[0]
+		}
+	}
+	require.Equal(t, dag.TxCount(), len(txMap))
+}
+
+func BenchmarkMergeTxDAGExecutionPaths(b *testing.B) {
+	dag := mockRandomDAG(100000)
+	for i := 0; i < b.N; i++ {
+		MergeTxDAGExecutionPaths(dag)
+	}
+}
+
 func mockSimpleDAG() TxDAG {
 	dag := NewPlainTxDAG(10)
 	dag.TxDeps[0].TxIndexes = []uint64{}
@@ -184,6 +215,32 @@ func mockSimpleDAG() TxDAG {
 	dag.TxDeps[7].TxIndexes = []uint64{6}
 	dag.TxDeps[8].TxIndexes = []uint64{}
 	dag.TxDeps[9].TxIndexes = []uint64{8}
+	return dag
+}
+
+func mockRandomDAG(txLen int) TxDAG {
+	dag := NewPlainTxDAG(txLen)
+	for i := 0; i < txLen; i++ {
+		var deps []uint64
+		if i == 0 || rand.Bool() {
+			dag.TxDeps[i].TxIndexes = deps
+			continue
+		}
+		depCnt := rand.Int()%i + 1
+		for j := 0; j < depCnt; j++ {
+			var dep uint64
+			if j > 0 && deps[j-1]+1 == uint64(i) {
+				break
+			}
+			if j > 0 {
+				dep = uint64(rand.Int())%(uint64(i)-deps[j-1]-1) + deps[j-1] + 1
+			} else {
+				dep = uint64(rand.Int() % i)
+			}
+			deps = append(deps, dep)
+		}
+		dag.TxDeps[i].TxIndexes = deps
+	}
 	return dag
 }
 

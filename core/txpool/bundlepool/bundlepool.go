@@ -101,11 +101,11 @@ func New(config Config, mevConfig miner.MevConfig) *BundlePool {
 		deliverBundleCh: make(chan *types.SendBundleArgs),
 		exitCh:          make(chan struct{}),
 	}
-	if !pool.mevConfig.BuilderEnabled {
+	if !pool.mevConfig.SentryEnabled {
 		return pool
 	}
 	for _, v := range mevConfig.Sequencers {
-		pool.register(v.URL)
+		pool.register(v)
 	}
 	if len(pool.sequencerClients) == 0 {
 		log.Error("No valid sequencers")
@@ -182,7 +182,7 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 		return err
 	}
 
-	if p.mevConfig.BuilderEnabled {
+	if p.mevConfig.SentryEnabled {
 		p.deliverBundleCh <- originBundle
 	}
 

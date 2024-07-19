@@ -558,6 +558,28 @@ var (
 		Value:    ethconfig.Defaults.Miner.NewPayloadTimeout,
 		Category: flags.MinerCategory,
 	}
+	MevEnabledFlag = &cli.BoolFlag{
+		Name:     "mev.enable",
+		Usage:    "Enable mev",
+		Category: flags.MinerCategory,
+	}
+	SentryEnabledFlag = &cli.BoolFlag{
+		Name:     "sentry.enable",
+		Usage:    "Enable sentry",
+		Category: flags.MinerCategory,
+	}
+	SequencerUrl = &cli.StringFlag{
+		Name:     "sequencer.url",
+		Usage:    "Url of sequencer endpoint to use. Multiple urls are supported, separated by commas",
+		Value:    "http://127.0.0.1:8545",
+		Category: flags.MinerCategory,
+	}
+	MevGasPriceFloorFlag = &cli.Int64Flag{
+		Name:     "mev.pricefloor",
+		Usage:    "Minimum gas price for mev",
+		Value:    ethconfig.Defaults.Miner.Mev.MevGasPriceFloor,
+		Category: flags.MinerCategory,
+	}
 
 	// Account settings
 	UnlockedAccountFlag = &cli.StringFlag{
@@ -1717,6 +1739,25 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 	if ctx.IsSet(RollupComputePendingBlock.Name) {
 		cfg.RollupComputePendingBlock = ctx.Bool(RollupComputePendingBlock.Name)
+	}
+	if ctx.IsSet(MevEnabledFlag.Name) {
+		cfg.Mev.MevEnabled = ctx.Bool(MevEnabledFlag.Name)
+	}
+	if ctx.IsSet(SentryEnabledFlag.Name) {
+		cfg.Mev.SentryEnabled = ctx.Bool(SentryEnabledFlag.Name)
+	}
+	if ctx.IsSet(SequencerUrl.Name) {
+		url := ctx.String(SequencerUrl.Name)
+		if strings.Contains(url, ",") {
+			cfg.Mev.Sequencers = strings.Split(url, ",")
+		} else {
+			sequencers := make([]string, 0)
+			sequencers = append(sequencers, url)
+			cfg.Mev.Sequencers = sequencers
+		}
+	}
+	if ctx.IsSet(MevGasPriceFloorFlag.Name) {
+		cfg.Mev.MevGasPriceFloor = ctx.Int64(MevGasPriceFloorFlag.Name)
 	}
 }
 

@@ -2,6 +2,7 @@ package miner
 
 import (
 	"errors"
+	mapset "github.com/deckarep/golang-set/v2"
 	"math/big"
 	"sort"
 	"sync"
@@ -127,7 +128,7 @@ func (w *worker) commitBundles(
 		// Start executing the transaction
 		env.state.SetTxContext(tx.Hash(), env.tcount)
 
-		logs, err := w.commitTransaction(env, tx)
+		logs, err := w.commitBundleTransaction(env, tx, env.UnRevertible.Contains(tx.Hash()))
 		switch err {
 		case core.ErrGasLimitReached:
 			// Pop the current out-of-gas transaction without shifting in the next from the account
@@ -272,6 +273,7 @@ func (w *worker) mergeBundles(
 ) (types.Transactions, *types.SimulatedBundle, error) {
 	currentState := env.state.Copy()
 	gasPool := prepareGasPool(env.header.GasLimit)
+	env.UnRevertible = mapset.NewSet[common.Hash]()
 
 	includedTxs := types.Transactions{}
 	mergedBundle := types.SimulatedBundle{
@@ -310,7 +312,7 @@ func (w *worker) mergeBundles(
 
 		for _, tx := range includedTxs {
 			if !containsHash(bundle.OriginalBundle.RevertingTxHashes, tx.Hash()) {
-				env.UnRevertible = append(env.UnRevertible, tx.Hash())
+				env.UnRevertible.Add(tx.Hash())
 			}
 		}
 	}
@@ -377,7 +379,7 @@ func (w *worker) simulateBundle(
 
 	bundleGasPrice := new(big.Int).Div(bundleGasFees, new(big.Int).SetUint64(bundleGasUsed))
 
-	if bundleGasPrice.Cmp(big.NewInt(w.config.MevGasPriceFloor)) < 0 {
+	if bundleGasPrice.Cmp(big.NewInt(w.config.Mev.MevGasPriceFloor)) < 0 {
 		err := errBundlePriceTooLow
 		log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
 

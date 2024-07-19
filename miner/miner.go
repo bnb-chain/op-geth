@@ -69,21 +69,18 @@ var (
 
 var defaultCoinBaseAddress = common.HexToAddress("0x4200000000000000000000000000000000000011")
 
-type SequencerConfig struct {
-	URL string
-}
-
 type MevConfig struct {
-	Enabled    bool              // Whether to enable Mev or not
-	Sequencers []SequencerConfig // The list of builders
-
-	BuilderEnabled bool // Whether to enable bidder or not
+	MevEnabled       bool     // Whether to enable Mev or not
+	SentryEnabled    bool     // Whether to enable bidder or not
+	Sequencers       []string // The list of sequencers
+	MevGasPriceFloor int64
 }
 
 var DefaultMevConfig = MevConfig{
-	Enabled:        false,
-	Sequencers:     nil,
-	BuilderEnabled: false,
+	MevEnabled:       false,
+	Sequencers:       nil,
+	SentryEnabled:    false,
+	MevGasPriceFloor: 1,
 }
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -110,8 +107,7 @@ type Config struct {
 
 	RollupComputePendingBlock bool // Compute the pending block from tx-pool, instead of copying the latest-block
 
-	MevGasPriceFloor int64     `toml:",omitempty"`
-	Mev              MevConfig // Mev configuration
+	Mev MevConfig // Mev configuration
 }
 
 // DefaultConfig contains default settings for miner.

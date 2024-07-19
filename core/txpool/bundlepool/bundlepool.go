@@ -94,12 +94,13 @@ func New(config Config, mevConfig miner.MevConfig) *BundlePool {
 	config = (&config).sanitize()
 
 	pool := &BundlePool{
-		config:          config,
-		mevConfig:       mevConfig,
-		bundles:         make(map[common.Hash]*types.Bundle),
-		bundleHeap:      make(BundleHeap, 0),
-		deliverBundleCh: make(chan *types.SendBundleArgs),
-		exitCh:          make(chan struct{}),
+		config:           config,
+		mevConfig:        mevConfig,
+		bundles:          make(map[common.Hash]*types.Bundle),
+		bundleHeap:       make(BundleHeap, 0),
+		sequencerClients: make(map[string]*rpc.Client),
+		deliverBundleCh:  make(chan *types.SendBundleArgs),
+		exitCh:           make(chan struct{}),
 	}
 	if !pool.mevConfig.SentryEnabled {
 		return pool

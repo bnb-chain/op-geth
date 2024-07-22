@@ -250,7 +250,7 @@ func (st *StateTransition) buyGas() error {
 	mgval = mgval.Mul(mgval, st.msg.GasPrice)
 	var l1Cost *big.Int
 	if st.evm.Context.L1CostFunc != nil && !st.msg.SkipAccountChecks {
-		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 {
+		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.Time) {
 			l1Cost = big.NewInt(0)
 		} else {
 			l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time)

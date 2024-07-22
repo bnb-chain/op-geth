@@ -125,6 +125,7 @@ func (env *environment) copy() *environment {
 		coinbase: env.coinbase,
 		header:   types.CopyHeader(env.header),
 		receipts: copyReceipts(env.receipts),
+		profit:   big.NewInt(0),
 	}
 	if env.gasPool != nil {
 		gasPool := *env.gasPool
@@ -1229,26 +1230,40 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		timer := time.AfterFunc(w.newpayloadTimeout, func() {
 			interrupt.Store(commitInterruptTimeout)
 		})
-		newWork := work.copy()
 		if w.config.Mev.MevEnabled {
+			newWork := work.copy()
+			var wg sync.WaitGroup
+			wg.Add(1)
 			go func() {
+				defer wg.Done()
 				err := w.fillTransactionsAndBundles(interrupt, newWork)
 				if errors.Is(err, errBlockInterruptedByBundleCommit) {
 					log.Error("fillTransactionsAndBundles is interrupted", "err", err)
 				}
 			}()
-		}
-		err := w.fillTransactions(interrupt, work)
-		timer.Stop() // don't need timeout interruption any more
-		if errors.Is(err, errBlockInterruptedByTimeout) {
-			log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
-			isBuildBlockInterruptCounter.Inc(1)
-		} else if errors.Is(err, errBlockInterruptedByResolve) {
-			log.Info("Block building got interrupted by payload resolution", "parentHash", genParams.parentHash)
-			isBuildBlockInterruptCounter.Inc(1)
-		}
-		if w.config.Mev.MevEnabled && newWork.profit.Cmp(work.profit) > 0 {
-			work = newWork
+			err := w.fillTransactions(interrupt, work)
+			timer.Stop() // don't need timeout interruption any more
+			if errors.Is(err, errBlockInterruptedByTimeout) {
+				log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
+				isBuildBlockInterruptCounter.Inc(1)
+			} else if errors.Is(err, errBlockInterruptedByResolve) {
+				log.Info("Block building got interrupted by payload resolution", "parentHash", genParams.parentHash)
+				isBuildBlockInterruptCounter.Inc(1)
+			}
+			wg.Wait()
+			if newWork.profit.Cmp(work.profit) > 0 {
+				work = newWork
+			}
+		} else {
+			err := w.fillTransactions(interrupt, work)
+			timer.Stop() // don't need timeout interruption any more
+			if errors.Is(err, errBlockInterruptedByTimeout) {
+				log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
+				isBuildBlockInterruptCounter.Inc(1)
+			} else if errors.Is(err, errBlockInterruptedByResolve) {
+				log.Info("Block building got interrupted by payload resolution", "parentHash", genParams.parentHash)
+				isBuildBlockInterruptCounter.Inc(1)
+			}
 		}
 	}
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {

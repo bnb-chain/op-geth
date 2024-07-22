@@ -111,6 +111,7 @@ func New(config Config, mevConfig miner.MevConfig) *BundlePool {
 	if len(pool.sequencerClients) == 0 {
 		log.Error("No valid sequencers")
 	}
+	go pool.deliverLoop()
 
 	return pool
 }

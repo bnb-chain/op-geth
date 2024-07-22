@@ -62,14 +62,6 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 	// Split the pending transactions into locals and remotes.
 	localTxs, remoteTxs := make(map[common.Address][]*txpool.LazyTransaction), pending
 
-	// TODO will remove after fix txpool perf issue
-	// for _, account := range w.eth.TxPool().Locals() {
-	// 	if txs := remoteTxs[account]; len(txs) > 0 {
-	// 		delete(remoteTxs, account)
-	// 		localTxs[account] = txs
-	// 	}
-	// }
-
 	// Fill the block with all available pending transactions.
 	start = time.Now()
 	if len(localTxs) > 0 {

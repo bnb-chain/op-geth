@@ -62,9 +62,10 @@ func newChainFreezer(datadir string, namespace string, readonly, multiDatabase b
 		return nil, err
 	}
 	cf := chainFreezer{
-		Freezer: freezer,
-		quit:    make(chan struct{}),
-		trigger: make(chan chan struct{}),
+		Freezer:       freezer,
+		quit:          make(chan struct{}),
+		trigger:       make(chan chan struct{}),
+		multiDatabase: multiDatabase,
 	}
 	cf.threshold.Store(params.FullImmutabilityThreshold)
 	return &cf, nil

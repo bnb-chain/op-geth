@@ -833,6 +833,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient 
 			Cache:             cache,
 			Handles:           handles,
 			ReadOnly:          readonly,
+			MultiDataBase:     n.CheckIfMultiDataBase(),
 		})
 	}
 

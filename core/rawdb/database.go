@@ -321,9 +321,9 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 	// We are creating the freezerdb here because the validation logic for db and freezer below requires certain interfaces
 	// that need a database type. Therefore, we are pre-creating it for subsequent use.
 	freezerDb := &freezerdb{
-		ancientRoot:    ancient,
-		KeyValueStore:  db,
-		AncientStore:   frdb,
+		ancientRoot:   ancient,
+		KeyValueStore: db,
+		AncientStore:  frdb,
 	}
 	if err != nil {
 		printChainMetadata(freezerDb)

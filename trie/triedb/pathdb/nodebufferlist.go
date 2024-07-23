@@ -684,7 +684,6 @@ func (nf *nodebufferlist) traverseReverse(cb func(*multiDifflayer) bool) {
 // periodically in the background
 func (nf *nodebufferlist) diffToBase() {
 	commitFunc := func(buffer *multiDifflayer) bool {
-		log.Info("diffToBase 11111111")
 		if nf.base.size >= nf.base.limit {
 			log.Debug("base node buffer need write disk immediately")
 			return false
@@ -709,9 +708,7 @@ func (nf *nodebufferlist) diffToBase() {
 		}
 
 		nf.baseMux.Lock()
-		log.Info("diffToBase 2222")
 		err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes)
-		log.Info("diffToBase 3333")
 		nf.baseMux.Unlock()
 		if err != nil {
 			log.Error("failed to commit nodes to base node buffer", "error", err)

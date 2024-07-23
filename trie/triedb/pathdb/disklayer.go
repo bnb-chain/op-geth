@@ -411,6 +411,9 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 		if err := batch.Write(); err != nil {
 			log.Crit("Failed to write states", "err", err)
 		}
+		if nl, ok := dl.buffer.(*nodebufferlist); ok {
+			nl.persistID--
+		}
 	}
 	log.Info("print some info", "state id", dl.id-1)
 	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer), nil

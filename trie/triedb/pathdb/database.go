@@ -434,12 +434,6 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 	if err != nil {
 		return err
 	}
-	if nl, ok := db.tree.bottom().buffer.(*nodebufferlist); ok {
-		if nl.persistID != dl.stateID() {
-			log.Info("for revert", "nl.persistID", nl.persistID, "dl.stateID()", dl.stateID())
-			nl.persistID = dl.stateID()
-		}
-	}
 	log.Info("Recovered state", "root", root, "elapsed", common.PrettyDuration(time.Since(start)),
 		"truncate number", truncatedNumber)
 	return nil

@@ -382,6 +382,16 @@ func (nf *nodebufferlist) commit(root common.Hash, id uint64, block uint64, node
 // revert the changes made by the last state transition.
 func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error {
 	// hang user read/write and background write,
+	for {
+		if nf.isFlushing.Swap(true) {
+			time.Sleep(time.Duration(DefaultBackgroundFlushInterval) * time.Second)
+			log.Info("waiting base node buffer to be flushed to disk")
+			continue
+		} else {
+			break
+		}
+	}
+	defer nf.isFlushing.Store(false)
 	log.Info("nodebufferlist revert mux lock 1111")
 	nf.mux.Lock()
 	log.Info("nodebufferlist revert base mux lock 2222")
@@ -655,25 +665,6 @@ func (nf *nodebufferlist) traverseReverse(cb func(*multiDifflayer) bool) {
 // base node buffer, if up to limit size and flush to disk. It is called
 // periodically in the background
 func (nf *nodebufferlist) diffToBase() {
-	log.Info("nodebufferlist diffToBase mux lock 1111")
-	nf.mux.Lock()
-	log.Info("nodebufferlist diffToBase base mux lock 2222")
-	nf.baseMux.Lock()
-	log.Info("nodebufferlist diffToBase flush mux lock 3333")
-	nf.flushMux.Lock()
-	log.Info("nodebufferlist diffToBase 4444")
-	defer func() {
-		nf.mux.Unlock()
-		log.Info("nodebufferlist diffToBase mux unlock 5555")
-	}()
-	defer func() {
-		nf.baseMux.Unlock()
-		log.Info("nodebufferlist diffToBase base mux unlock 6666")
-	}()
-	defer func() {
-		nf.flushMux.Unlock()
-		log.Info("nodebufferlist diffToBase flush mux unlock 7777")
-	}()
 	commitFunc := func(buffer *multiDifflayer) bool {
 		log.Info("diffToBase 11111111")
 		if nf.base.size >= nf.base.limit {
@@ -699,14 +690,17 @@ func (nf *nodebufferlist) diffToBase() {
 				}})
 		}
 
+		nf.baseMux.Lock()
 		log.Info("diffToBase 2222")
 		err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes)
 		log.Info("diffToBase 3333")
+		nf.baseMux.Unlock()
 		if err != nil {
 			log.Error("failed to commit nodes to base node buffer", "error", err)
 			return false
 		}
 
+		nf.mux.Lock()
 		_ = nf.popBack()
 		nodeBufferListSizeGauge.Update(int64(nf.size))
 		nodeBufferListCountGauge.Update(int64(nf.count))
@@ -714,7 +708,7 @@ func (nf *nodebufferlist) diffToBase() {
 		if nf.layers > 0 {
 			nodeBufferListDifflayerAvgSize.Update(int64(nf.size / nf.layers))
 		}
-
+		nf.mux.Unlock()
 		baseNodeBufferSizeGauge.Update(int64(nf.base.size))
 		baseNodeBufferLayerGauge.Update(int64(nf.base.layers))
 		if nf.base.layers > 0 {

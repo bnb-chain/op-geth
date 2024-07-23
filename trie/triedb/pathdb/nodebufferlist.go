@@ -388,24 +388,24 @@ func (nf *nodebufferlist) commit(root common.Hash, id uint64, block uint64, node
 // revert the changes made by the last state transition.
 func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error {
 	// hang user read/write and background write,
-	log.Info("nodebufferlist revert mux lock 1111")
+	// log.Info("nodebufferlist revert mux lock 1111")
 	nf.mux.Lock()
-	log.Info("nodebufferlist revert base mux lock 2222")
+	// log.Info("nodebufferlist revert base mux lock 2222")
 	nf.baseMux.Lock()
-	log.Info("nodebufferlist revert flush mux lock 3333")
+	// log.Info("nodebufferlist revert flush mux lock 3333")
 	nf.flushMux.Lock()
-	log.Info("nodebufferlist revert 4444")
+	// log.Info("nodebufferlist revert 4444")
 	defer func() {
 		nf.mux.Unlock()
-		log.Info("nodebufferlist revert mux unlock 5555")
+		// log.Info("nodebufferlist revert mux unlock 5555")
 	}()
 	defer func() {
 		nf.baseMux.Unlock()
-		log.Info("nodebufferlist revert base mux unlock 6666")
+		// log.Info("nodebufferlist revert base mux unlock 6666")
 	}()
 	defer func() {
 		nf.flushMux.Unlock()
-		log.Info("nodebufferlist revert flush mux unlock 7777")
+		// log.Info("nodebufferlist revert flush mux unlock 7777")
 	}()
 
 	count := 0
@@ -419,9 +419,9 @@ func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]
 		return true
 	}
 	nf.traverseReverse(merge)
-	log.Info("nodebufferlist revert traverseReverse 8888")
+	// log.Info("nodebufferlist revert traverseReverse 8888")
 	nc := newMultiDifflayer(nf.limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
-	log.Info("nodebufferlist revert  new mdl 9999")
+	// log.Info("nodebufferlist revert  new mdl 9999")
 	nf.head = nc
 	nf.tail = nc
 	nf.size = 0

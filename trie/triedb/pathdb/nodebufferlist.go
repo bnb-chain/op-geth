@@ -225,9 +225,9 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 	log.Info("after diff to base", "base size", nbl.base.size)
 
 	persistentStateID = rawdb.ReadPersistentStateID(db)
-	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
-		"new persistentStateID", persistentStateID, "nbl layers", nbl.layers, "base layers", nbl.base.layers)
 	nbl.persistID = persistentStateID
+	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
+		"new persistentStateID", persistentStateID, "nbl layers", nbl.layers, "base layers", nbl.base.layers, "nbl.persistID", nbl.persistID)
 	return nbl
 }
 
@@ -388,16 +388,6 @@ func (nf *nodebufferlist) commit(root common.Hash, id uint64, block uint64, node
 // revert the changes made by the last state transition.
 func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error {
 	// hang user read/write and background write,
-	for {
-		if nf.isFlushing.Swap(true) {
-			time.Sleep(time.Duration(DefaultBackgroundFlushInterval) * time.Second)
-			log.Info("waiting base node buffer to be flushed to disk")
-			continue
-		} else {
-			break
-		}
-	}
-	defer nf.isFlushing.Store(false)
 	log.Info("nodebufferlist revert mux lock 1111")
 	nf.mux.Lock()
 	log.Info("nodebufferlist revert base mux lock 2222")
@@ -499,6 +489,7 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	nf.isFlushing.Store(false)
 	nf.base.reset()
 	nf.persistID = persistID
+	log.Info("nbl finish flushing", "nf.persistID", nf.persistID, "nf.base.layers", nf.base.layers, "persistID", persistID)
 
 	return nil
 }
@@ -766,7 +757,7 @@ func (nf *nodebufferlist) backgroundFlush() {
 	log.Info("backgroundFlush 4444")
 	nf.base.reset()
 	nf.persistID = persistID
-	log.Info("backgroundFlush 5555")
+	log.Info("backgroundFlush 5555", "nf.persistID", nf.persistID)
 	nf.baseMux.Unlock()
 	log.Info("backgroundFlush 6666")
 

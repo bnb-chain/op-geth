@@ -32,7 +32,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
@@ -751,15 +750,15 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 	return db, err
 }
 
-func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool, config *ethconfig.Config) (ethdb.Database, error) {
+func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool, databaseCache, databaseHandles int, databaseFreezer string) (ethdb.Database, error) {
 	var (
 		err                          error
 		stateDiskDb                  ethdb.Database
 		blockDb                      ethdb.Database
 		disableChainDbFreeze         = false
 		blockDbHandlesSize           int
-		chainDataHandles             = config.DatabaseHandles
-		chainDbCache                 = config.DatabaseCache
+		chainDataHandles             = databaseHandles
+		chainDbCache                 = databaseCache
 		stateDbCache, stateDbHandles int
 	)
 
@@ -770,19 +769,19 @@ func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool
 		// 1) Allocate a fixed percentage of memory for chainDb based on chainDbMemoryPercentage & chainDbHandlesPercentage.
 		// 2) Allocate a fixed size for blockDb based on blockDbCacheSize & blockDbHandlesSize.
 		// 3) Allocate the remaining resources to stateDb.
-		chainDbCache = int(float64(config.DatabaseCache) * chainDbMemoryPercentage / 100)
-		chainDataHandles = int(float64(config.DatabaseHandles) * chainDbHandlesPercentage / 100)
-		if config.DatabaseHandles/10 > blockDbHandlesMaxSize {
+		chainDbCache = int(float64(databaseCache) * chainDbMemoryPercentage / 100)
+		chainDataHandles = int(float64(databaseHandles) * chainDbHandlesPercentage / 100)
+		if databaseHandles/10 > blockDbHandlesMaxSize {
 			blockDbHandlesSize = blockDbHandlesMaxSize
 		} else {
 			blockDbHandlesSize = blockDbHandlesMinSize
 		}
-		stateDbCache = config.DatabaseCache - chainDbCache - blockDbCacheSize
-		stateDbHandles = config.DatabaseHandles - chainDataHandles - blockDbHandlesSize
+		stateDbCache = databaseCache - chainDbCache - blockDbCacheSize
+		stateDbHandles = databaseHandles - chainDataHandles - blockDbHandlesSize
 		disableChainDbFreeze = true
 	}
 
-	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, config.DatabaseFreezer, namespace, readonly, disableChainDbFreeze)
+	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, databaseFreezer, namespace, readonly, disableChainDbFreeze)
 	if err != nil {
 		return nil, err
 	}

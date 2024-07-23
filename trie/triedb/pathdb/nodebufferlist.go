@@ -552,10 +552,23 @@ func (nf *nodebufferlist) getAllNodes() map[common.Hash]map[string]*trienode.Nod
 
 // getLayers return the size of cached difflayers.
 func (nf *nodebufferlist) getLayers() uint64 {
+	for {
+		if nf.isFlushing.Swap(true) {
+			time.Sleep(time.Duration(DefaultBackgroundFlushInterval) * time.Second)
+			log.Info("waiting base node buffer to be flushed to disk")
+			continue
+		} else {
+			break
+		}
+	}
+	defer nf.isFlushing.Store(false)
+
 	nf.mux.RLock()
 	nf.baseMux.RLock()
+	nf.flushMux.Lock()
 	defer nf.mux.RUnlock()
 	defer nf.baseMux.RUnlock()
+	defer nf.flushMux.Unlock()
 
 	return nf.layers + nf.base.layers
 }

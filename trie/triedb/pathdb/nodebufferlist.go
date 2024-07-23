@@ -412,7 +412,10 @@ func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]
 		log.Info("nodebufferlist revert flush mux unlock 7777")
 	}()
 
+	count := 0
 	merge := func(buffer *multiDifflayer) bool {
+		count++
+		log.Info("print nbl revert count", "count", count)
 		if err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes); err != nil {
 			log.Crit("failed to commit nodes to base node buffer", "error", err)
 		}
@@ -428,6 +431,9 @@ func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]
 	nf.size = 0
 	nf.layers = 0
 	nf.count = 1
+	log.Info("print nbl revert base info", "base size", nf.base.size, "base layers", nf.base.layers,
+		"nodes length", len(nf.base.nodes), "limit", nf.base.limit, "id", nf.base.limit, "root", nf.base.root.String(),
+		"block", nf.base.block)
 	return nf.base.revert(nf.db, nodes)
 }
 

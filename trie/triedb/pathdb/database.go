@@ -426,6 +426,7 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		// done after each revert operation, otherwise the new
 		// disk layer won't be accessible from outside.
 		db.tree.reset(dl)
+		log.Info("print each disk layer state id", "state id", dl.stateID())
 	}
 	log.Info("after revert", "dl state id", dl.stateID())
 	_ = db.DeleteTrieJournal(db.diskdb)

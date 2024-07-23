@@ -266,9 +266,9 @@ func (db *Database) loadLayers() layer {
 		dl      *diskLayer
 		stateID uint64
 	)
-	if errors.Is(err, errMissJournal) && db.config.EnableRecoverNodeBufferList {
+	if errors.Is(err, errMissJournal) && db.config.EnableRecoverNodeBufferList && db.config.TrieNodeBufferType == NodeBufferList {
 		log.Info("Recover node buffer list from ancient db")
-		db.isRecoverDiffLayers = true
+		db.isRecoverNodeBufferList = true
 		return nil
 	} else {
 		// Return single layer with persistent state.

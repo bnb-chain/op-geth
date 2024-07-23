@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -191,10 +192,8 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 		log.Crit("Failed to read end block number", "error", err, "state_id", freezerLength)
 	}
 	blockIntervals := nbl.createBlockInterval(startBlock, endBlock)
-	log.Info("slice 11111", "blockIntervals", blockIntervals, "startBlock", startBlock, "endBlock", endBlock)
 	stateIntervals := nbl.createStateInterval(freezer, startStateID, freezerLength, blockIntervals)
-
-	log.Info("slice", "blockIntervals", blockIntervals, "stateIntervals", stateIntervals, "startBlock",
+	log.Info("block intervals info", "blockIntervals", blockIntervals, "stateIntervals", stateIntervals, "startBlock",
 		startBlock, "endBlock", endBlock)
 
 	nbl.linkMultiDiffLayers(startBlock, endBlock)
@@ -252,6 +251,13 @@ func (nf *nodebufferlist) readStateHistory(freezer *rawdb.ResettableFreezer, sta
 		log.Crit("Failed to read history from freezer db", "error", err)
 	}
 	return h
+}
+
+func checkError(err error) bool {
+	if strings.Contains(err.Error(), "state history not found") {
+		return true
+	}
+	return false
 }
 
 func (nf *nodebufferlist) createBlockInterval(startBlock, endBlock uint64) [][]uint64 {
@@ -485,6 +491,7 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 
 	nf.traverseReverse(commitFunc)
 	persistID := nf.persistID + nf.base.layers
+	log.Info("nbl flush info", "nf.persistID", nf.persistID, "nf.base.layers", nf.base.layers, "persistID", persistID)
 	err := nf.base.flush(nf.db, nf.clean, persistID)
 	if err != nil {
 		log.Crit("failed to flush base node buffer to disk", "error", err)
@@ -747,7 +754,7 @@ func (nf *nodebufferlist) backgroundFlush() {
 	nf.baseMux.RLock()
 	persistID := nf.persistID + nf.base.layers
 	nf.baseMux.RUnlock()
-	log.Info("backgroundFlush 1111")
+	log.Info("backgroundFlush 1111", "nf.persistID", nf.persistID, "nf.base.layers", nf.base.layers, "persistID", persistID)
 	err := nf.base.flush(nf.db, nf.clean, persistID)
 	log.Info("backgroundFlush 2222")
 	if err != nil {
@@ -1094,6 +1101,7 @@ func (mf *multiDifflayer) empty() bool {
 func (mf *multiDifflayer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error {
 	// Ensure the target state id is aligned with the internal counter.
 	head := rawdb.ReadPersistentStateID(db)
+	log.Info("mdl flush info", "head", head, "mf layers", mf.layers, "id", id)
 	if head+mf.layers != id {
 		return fmt.Errorf("buffer layers (%d) cannot be applied on top of persisted state id (%d) to reach requested state id (%d)", mf.layers, head, id)
 	}

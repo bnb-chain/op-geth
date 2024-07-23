@@ -459,11 +459,11 @@ func (r *decoder) readStorage(accIndex accountIndex) ([]common.Hash, map[common.
 // decode deserializes the account and storage data from the provided byte stream.
 func (h *history) decode(accountData, storageData, accountIndexes, storageIndexes, trieNodes []byte) error {
 	var (
-		accounts    = make(map[common.Address][]byte)
-		storages    = make(map[common.Address]map[common.Hash][]byte)
-		accountList []common.Address
-		storageList = make(map[common.Address][]common.Hash)
-		encoded     []journalNodes
+		accounts         = make(map[common.Address][]byte)
+		storages         = make(map[common.Address]map[common.Hash][]byte)
+		accountList      []common.Address
+		storageList      = make(map[common.Address][]common.Hash)
+		encodedTrieNodes []journalNodes
 
 		r = &decoder{
 			accountData:    accountData,
@@ -495,7 +495,7 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 		}
 	}
 
-	if err := rlp.DecodeBytes(trieNodes, &encoded); err != nil {
+	if err := rlp.DecodeBytes(trieNodes, &encodedTrieNodes); err != nil {
 		log.Error("Failed to decode state history trie nodes", "error", err)
 		return err
 	}
@@ -504,7 +504,7 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 	h.accountList = accountList
 	h.storages = storages
 	h.storageList = storageList
-	h.nodes = encoded
+	h.nodes = encodedTrieNodes
 	return nil
 }
 

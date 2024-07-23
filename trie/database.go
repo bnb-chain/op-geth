@@ -363,12 +363,3 @@ func (db *Database) IsVerkle() bool {
 func (db *Database) Config() *Config {
 	return db.config
 }
-
-func (db *Database) GetAllRooHash() [][]string {
-	pdb, ok := db.backend.(*pathdb.Database)
-	if !ok {
-		log.Error("Not supported")
-		return nil
-	}
-	return pdb.GetAllRooHash()
-}

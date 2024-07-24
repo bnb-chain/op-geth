@@ -230,12 +230,12 @@ func initGenesis(ctx *cli.Context) error {
 
 		// if the trie data dir has been set, new trie db with a new state database
 		if ctx.IsSet(utils.MultiDataBaseFlag.Name) {
-			statediskdb, dbErr := stack.OpenDatabaseWithFreezer(name+"/state", 0, 0, "", "", false, false)
+			statediskdb, dbErr := stack.OpenDatabaseWithFreezer(name+"/state", 0, 0, "", "", false, true)
 			if dbErr != nil {
 				utils.Fatalf("Failed to open separate trie database: %v", dbErr)
 			}
 			chaindb.SetStateStore(statediskdb)
-			blockdb, err := stack.OpenDatabaseWithFreezer(name+"/block", 0, 0, "", "", false, false)
+			blockdb, err := stack.OpenDatabaseWithFreezer(name+"/block", 0, 0, "", "", false, true)
 			if err != nil {
 				utils.Fatalf("Failed to open separate block database: %v", err)
 			}
@@ -283,9 +283,9 @@ func dumpGenesis(ctx *cli.Context) error {
 		}
 		// set the separate state & block database
 		if stack.CheckIfMultiDataBase() && err == nil {
-			stateDiskDb := utils.MakeStateDataBase(ctx, stack, true, false)
+			stateDiskDb := utils.MakeStateDataBase(ctx, stack, true)
 			db.SetStateStore(stateDiskDb)
-			blockDb := utils.MakeBlockDatabase(ctx, stack, true, false)
+			blockDb := utils.MakeBlockDatabase(ctx, stack, true)
 			db.SetBlockStore(blockDb)
 		}
 		genesis, err := core.ReadGenesis(db)

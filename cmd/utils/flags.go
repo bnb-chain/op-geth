@@ -2328,9 +2328,9 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", cache, handles, ctx.String(AncientFlag.Name), "", readonly, false)
 		// set the separate state database
 		if stack.CheckIfMultiDataBase() && err == nil {
-			stateDiskDb := MakeStateDataBase(ctx, stack, readonly, false)
+			stateDiskDb := MakeStateDataBase(ctx, stack, readonly)
 			chainDb.SetStateStore(stateDiskDb)
-			blockDb := MakeBlockDatabase(ctx, stack, readonly, false)
+			blockDb := MakeBlockDatabase(ctx, stack, readonly)
 			chainDb.SetBlockStore(blockDb)
 		}
 	}
@@ -2341,10 +2341,10 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 }
 
 // MakeStateDataBase open a separate state database using the flags passed to the client and will hard crash if it fails.
-func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
+func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.Database {
 	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
 	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) * 90 / 100
-	statediskdb, err := stack.OpenDatabaseWithFreezer("chaindata/state", cache, handles, "", "", readonly, disableFreeze)
+	statediskdb, err := stack.OpenDatabaseWithFreezer("chaindata/state", cache, handles, "", "", readonly, true)
 	if err != nil {
 		Fatalf("Failed to open separate trie database: %v", err)
 	}
@@ -2352,10 +2352,10 @@ func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly, disableFree
 }
 
 // MakeBlockDatabase open a separate block database using the flags passed to the client and will hard crash if it fails.
-func MakeBlockDatabase(ctx *cli.Context, stack *node.Node, readonly, disableFreeze bool) ethdb.Database {
+func MakeBlockDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.Database {
 	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
 	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) / 10
-	blockDb, err := stack.OpenDatabaseWithFreezer("chaindata/block", cache, handles, "", "", readonly, disableFreeze)
+	blockDb, err := stack.OpenDatabaseWithFreezer("chaindata/block", cache, handles, "", "", readonly, true)
 	if err != nil {
 		Fatalf("Failed to open separate block database: %v", err)
 	}

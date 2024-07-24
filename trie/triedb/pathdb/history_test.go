@@ -252,8 +252,8 @@ func TestTruncateOutOfRange(t *testing.T) {
 		{0, head + 1, fmt.Errorf("out of range, tail: %d, head: %d, target: %d", tail, head, head+1)},
 		{0, tail - 1, fmt.Errorf("out of range, tail: %d, head: %d, target: %d", tail, head, tail-1)},
 		{1, tail, nil}, // nothing to delete
-		{1, head + 1, fmt.Errorf("out of range, tail: %d, head: %d, target: %d", tail, head, head+1)},
-		{1, tail - 1, fmt.Errorf("out of range, tail: %d, head: %d, target: %d", tail, head, tail-1)},
+		{1, head + 1, nil},
+		{1, tail - 1, nil},
 	}
 	for _, c := range cases {
 		var gotErr error

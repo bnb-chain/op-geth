@@ -1950,7 +1950,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				if err != nil {
 					return it.index, err
 				}
-				log.Info("Insert chain", "block", block.NumberU64(), "txDAG", txDAG)
+				log.Info("Insert chain", "block", block.NumberU64(), "txDAG", txDAG.Type())
+			}
+			// TODO(galaio): need hardfork
+			if bc.chainConfig.Optimism != nil && len(block.Header().Extra) > 0 {
+				txDAG, err := types.DecodeTxDAG(block.Header().Extra)
+				if err != nil {
+					return it.index, err
+				}
+				log.Info("Insert chain", "block", block.NumberU64(), "txDAG", txDAG.Type())
 			}
 
 			// Enable prefetching to pull in trie node paths while processing transactions

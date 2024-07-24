@@ -151,16 +151,15 @@ type Database struct {
 	// readOnly is the flag whether the mutation is allowed to be applied.
 	// It will be set automatically when the database is journaled during
 	// the shutdown to reject all following unexpected mutations.
-	readOnly                bool                     // Flag if database is opened in read only mode
-	waitSync                bool                     // Flag if database is deactivated due to initial state sync
-	isRecoverNodeBufferList bool                     // Flag if recover node buffer list from ancient db
-	bufferSize              int                      // Memory allowance (in bytes) for caching dirty nodes
-	config                  *Config                  // Configuration for database
-	diskdb                  ethdb.Database           // Persistent storage for matured trie nodes
-	tree                    *layerTree               // The group for all known layers
-	freezer                 *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
-	lock                    sync.RWMutex             // Lock to prevent mutations from happening at the same time
-	capLock                 sync.Mutex
+	readOnly   bool                     // Flag if database is opened in read only mode
+	waitSync   bool                     // Flag if database is deactivated due to initial state sync
+	bufferSize int                      // Memory allowance (in bytes) for caching dirty nodes
+	config     *Config                  // Configuration for database
+	diskdb     ethdb.Database           // Persistent storage for matured trie nodes
+	tree       *layerTree               // The group for all known layers
+	freezer    *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
+	lock       sync.RWMutex             // Lock to prevent mutations from happening at the same time
+	capLock    sync.Mutex
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -178,12 +177,20 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 		config:     config,
 		diskdb:     diskdb,
 	}
+
+	// Open the freezer for state history if the passed database contains an
+	// ancient store. Otherwise, all the relevant functionalities are disabled.
+	if ancient, err := diskdb.AncientDatadir(); err == nil && ancient != "" && !db.readOnly {
+		freezer, err := rawdb.NewStateFreezer(ancient, false)
+		if err != nil {
+			log.Crit("Failed to open state history freezer", "err", err)
+		}
+		db.freezer = freezer
+	}
+
 	// Construct the layer tree by resolving the in-disk singleton state
 	// and in-memory layer journal.
-	l := db.loadLayers()
-	if l != nil {
-		db.tree = newLayerTree(l)
-	}
+	db.tree = newLayerTree(db.loadLayers())
 
 	// Open the freezer for state history if the passed database contains an
 	// ancient store. Otherwise, all the relevant functionalities are disabled.
@@ -191,48 +198,31 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 	// Because the freezer can only be opened once at the same time, this
 	// mechanism also ensures that at most one **non-readOnly** database
 	// is opened at the same time to prevent accidental mutation.
-	if ancient, err := diskdb.AncientDatadir(); err == nil && ancient != "" && !db.readOnly {
-		freezer, err := rawdb.NewStateFreezer(ancient, false)
-		if err != nil {
-			log.Crit("Failed to open state history freezer", "err", err)
-		}
-		db.freezer = freezer
-
-		if db.isRecoverNodeBufferList {
-			nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
-				db.config.ProposeBlockInterval, db.config.NotifyKeep, db.freezer, true)
-			root, stateID := nb.getHeadDiffLayer()
-			dl := newDiskLayer(root, stateID, db, nil, nb)
-			nb.setClean(dl.cleans)
-			db.tree = newLayerTree(dl)
-			db.isRecoverNodeBufferList = false
-			log.Info("Finish recovering node buffer list", "diskLayerID", db.tree.bottom().stateID())
+	if db.freezer != nil && !db.readOnly {
+		diskLayerID := db.tree.bottom().stateID()
+		if diskLayerID == 0 {
+			// Reset the entire state histories in case the trie database is
+			// not initialized yet, as these state histories are not expected.
+			frozen, err := db.freezer.Ancients()
+			if err != nil {
+				log.Crit("Failed to retrieve head of state history", "err", err)
+			}
+			if frozen != 0 {
+				err := db.freezer.Reset()
+				if err != nil {
+					log.Crit("Failed to reset state histories", "err", err)
+				}
+				log.Info("Truncated extraneous state history")
+			}
 		} else {
-			diskLayerID := db.tree.bottom().stateID()
-			if diskLayerID == 0 {
-				// Reset the entire state histories in case the trie database is
-				// not initialized yet, as these state histories are not expected.
-				frozen, err := db.freezer.Ancients()
-				if err != nil {
-					log.Crit("Failed to retrieve head of state history", "err", err)
-				}
-				if frozen != 0 {
-					err := db.freezer.Reset()
-					if err != nil {
-						log.Crit("Failed to reset state histories", "err", err)
-					}
-					log.Info("Truncated extraneous state history")
-				}
-			} else {
-				// Truncate the extra state histories above in freezer in case
-				// it's not aligned with the disk layer.
-				pruned, err := truncateFromHead(db.diskdb, freezer, diskLayerID)
-				if err != nil {
-					log.Crit("Failed to truncate extra state histories", "err", err)
-				}
-				if pruned != 0 {
-					log.Warn("Truncated extra state histories", "number", pruned)
-				}
+			// Truncate the extra state histories above in freezer in case
+			// it's not aligned with the disk layer.
+			pruned, err := truncateFromHead(db.diskdb, db.freezer, diskLayerID)
+			if err != nil {
+				log.Crit("Failed to truncate extra state histories", "err", err)
+			}
+			if pruned != 0 {
+				log.Warn("Truncated extra state histories", "number", pruned)
 			}
 		}
 	}

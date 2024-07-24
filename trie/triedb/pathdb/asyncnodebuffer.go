@@ -213,8 +213,8 @@ func (a *asyncnodebuffer) proposedBlockReader(blockRoot common.Hash) (layer, err
 	return nil, errors.New("async node buffer not support to get proposed block reader")
 }
 
-func (a *asyncnodebuffer) getHeadDiffLayer() (common.Hash, uint64) {
-	return common.Hash{}, 0
+func (a *asyncnodebuffer) getLatestStatus() (common.Hash, uint64, error) {
+	return common.Hash{}, 0, errors.New("unsupported method for async node buffer")
 }
 
 type nodecache struct {

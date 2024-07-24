@@ -82,8 +82,8 @@ type trienodebuffer interface {
 	// proposedBlockReader return the world state Reader of block that is proposed to L1.
 	proposedBlockReader(blockRoot common.Hash) (layer, error)
 
-	// getHeadDiffLayer returns head diff layer for disk layer
-	getHeadDiffLayer() (common.Hash, uint64)
+	// getLatestStatus returns latest status for disk layer
+	getLatestStatus() (common.Hash, uint64, error)
 }
 
 type NodeBufferType int32
@@ -415,7 +415,6 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 			nl.persistID--
 		}
 	}
-	log.Info("print some info", "state id", dl.id-1)
 	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer), nil
 }
 

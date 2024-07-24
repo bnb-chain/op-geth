@@ -306,11 +306,11 @@ func (nf *nodebufferlist) createStateInterval(freezer *rawdb.ResettableFreezer, 
 	return stateIntervals
 }
 
-func (nf *nodebufferlist) getHeadDiffLayer() (common.Hash, uint64) {
+func (nf *nodebufferlist) getLatestStatus() (common.Hash, uint64, error) {
 	head := nf.head
 	log.Info("last head diff layer info", "root", head.root, "id", head.id, "block", head.block,
 		"layer", head.layers, "size", head.size)
-	return head.root, head.id
+	return head.root, head.id, nil
 }
 
 // node retrieves the trie node with given node info.

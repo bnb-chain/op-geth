@@ -267,19 +267,23 @@ func (db *Database) loadLayers() layer {
 		stateID uint64
 	)
 	if errors.Is(err, errMissJournal) && db.config.EnableRecoverNodeBufferList && db.config.TrieNodeBufferType == NodeBufferList {
+		if db.freezer == nil {
+			log.Crit("Use unopened freezer db to recover node buffer list")
+		}
 		log.Info("Recover node buffer list from ancient db")
-		db.isRecoverNodeBufferList = true
-		return nil
+		nb = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
+			db.config.ProposeBlockInterval, db.config.NotifyKeep, db.freezer, true)
+		root, stateID, _ = nb.getLatestStatus()
+		log.Info("Finish recovering node buffer list", "latest root hash", root.String(), "latest state_id", stateID)
 	} else {
 		// Return single layer with persistent state.
 		stateID = rawdb.ReadPersistentStateID(db.diskdb)
 		nb = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
 			db.config.ProposeBlockInterval, db.config.NotifyKeep, nil, false)
-		dl = newDiskLayer(root, stateID, db, nil, nb)
-		nb.setClean(dl.cleans)
-		log.Info("load layers", "stateID", stateID)
 	}
 
+	dl = newDiskLayer(root, stateID, db, nil, nb)
+	nb.setClean(dl.cleans)
 	return dl
 }
 

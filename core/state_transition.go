@@ -255,7 +255,6 @@ func (st *StateTransition) buyGas() error {
 		} else {
 			l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time)
 		}
-		l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time)
 		if l1Cost != nil {
 			mgval = mgval.Add(mgval, l1Cost)
 		}

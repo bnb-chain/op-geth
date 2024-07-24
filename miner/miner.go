@@ -70,17 +70,17 @@ var (
 var defaultCoinBaseAddress = common.HexToAddress("0x4200000000000000000000000000000000000011")
 
 type MevConfig struct {
-	MevEnabled       bool     // Whether to enable Mev or not
-	SentryEnabled    bool     // Whether to enable bidder or not
-	Sequencers       []string // The list of sequencers
-	MevGasPriceFloor int64
+	MevMinerEnabled        bool     // Whether to enable Mev miner or not
+	MevSentryEnabled       bool     // Whether to enable Mev sentry or not
+	MevReceivers           []string // The list of Mev bundle receivers
+	MevBundleGasPriceFloor int64    // The minimal bundle gas Price
 }
 
 var DefaultMevConfig = MevConfig{
-	MevEnabled:       false,
-	Sequencers:       nil,
-	SentryEnabled:    false,
-	MevGasPriceFloor: 1,
+	MevMinerEnabled:        false,
+	MevSentryEnabled:       false,
+	MevReceivers:           nil,
+	MevBundleGasPriceFloor: 1,
 }
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -348,9 +348,10 @@ func (miner *Miner) SimulateBundle(bundle *types.Bundle) (*big.Int, error) {
 	}
 
 	env := &environment{
-		header: header,
-		state:  state.Copy(),
-		signer: types.MakeSigner(miner.worker.chainConfig, header.Number, header.Time),
+		header:  header,
+		state:   state.Copy(),
+		signer:  types.MakeSigner(miner.worker.chainConfig, header.Number, header.Time),
+		gasPool: prepareGasPool(header.GasLimit),
 	}
 
 	s, err := miner.worker.simulateBundles(env, []*types.Bundle{bundle})

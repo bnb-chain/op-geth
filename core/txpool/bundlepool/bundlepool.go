@@ -30,6 +30,9 @@ const (
 	bundleSlotSize = 128 * 1024 // 128KB
 
 	maxMinTimestampFromNow = int64(300) // 5 minutes
+
+	dialAttempts = 3
+	dialSleep    = 3 * time.Second
 )
 
 var (
@@ -84,9 +87,9 @@ type BundlePool struct {
 
 	simulator BundleSimulator
 
-	sequencerClients map[string]*rpc.Client
-	deliverBundleCh  chan *types.SendBundleArgs
-	exitCh           chan struct{}
+	bundleReceiverClients map[string]*rpc.Client
+	deliverBundleCh       chan *types.SendBundleArgs
+	exitCh                chan struct{}
 }
 
 func New(config Config, mevConfig miner.MevConfig) *BundlePool {
@@ -94,22 +97,22 @@ func New(config Config, mevConfig miner.MevConfig) *BundlePool {
 	config = (&config).sanitize()
 
 	pool := &BundlePool{
-		config:           config,
-		mevConfig:        mevConfig,
-		bundles:          make(map[common.Hash]*types.Bundle),
-		bundleHeap:       make(BundleHeap, 0),
-		sequencerClients: make(map[string]*rpc.Client),
-		deliverBundleCh:  make(chan *types.SendBundleArgs),
-		exitCh:           make(chan struct{}),
+		config:                config,
+		mevConfig:             mevConfig,
+		bundles:               make(map[common.Hash]*types.Bundle),
+		bundleHeap:            make(BundleHeap, 0),
+		bundleReceiverClients: make(map[string]*rpc.Client),
+		deliverBundleCh:       make(chan *types.SendBundleArgs),
+		exitCh:                make(chan struct{}),
 	}
-	if !pool.mevConfig.SentryEnabled {
+	if !pool.mevConfig.MevSentryEnabled {
 		return pool
 	}
-	for _, v := range mevConfig.Sequencers {
+	for _, v := range mevConfig.MevReceivers {
 		pool.register(v)
 	}
-	if len(pool.sequencerClients) == 0 {
-		log.Error("No valid sequencers")
+	if len(pool.bundleReceiverClients) == 0 {
+		log.Error("No valid bundleReceivers")
 	}
 	go pool.deliverLoop()
 
@@ -120,14 +123,14 @@ func (p *BundlePool) deliverLoop() {
 	for {
 		select {
 		case bundle := <-p.deliverBundleCh:
-			for url, cli := range p.sequencerClients {
+			for url, cli := range p.bundleReceiverClients {
 				cli := cli
 				url := url
 				go func() {
 					var hash common.Hash
 					err := cli.CallContext(context.Background(), &hash, "eth_sendBundle", *bundle)
 					if err != nil {
-						log.Error("failed to deliver bundle to sequencer", "url", url, "err", err)
+						log.Error("failed to deliver bundle to receiver", "url", url, "err", err)
 					}
 				}()
 			}
@@ -138,18 +141,24 @@ func (p *BundlePool) deliverLoop() {
 	}
 }
 
-func (p *BundlePool) register(url string) error {
-	var sequencerClient *rpc.Client
+func (p *BundlePool) register(url string) {
+	var receiverClient *rpc.Client
 	if url != "" {
 		var err error
-		sequencerClient, err = rpc.Dial(url)
-		if err != nil {
-			log.Error("failed to dial sequencer", "url", url, "err", err)
-			return err
+		for i := 1; i < dialAttempts+1; i++ {
+			receiverClient, err = rpc.Dial(url)
+			if err != nil {
+				log.Error("failed to dial bundle receiver", "attempts", i, "url", url, "err", err)
+				if i == dialAttempts {
+					return
+				}
+				time.Sleep(dialSleep)
+				continue
+			}
+			p.bundleReceiverClients[url] = receiverClient
+			return
 		}
-		p.sequencerClients[url] = sequencerClient
 	}
-	return nil
 }
 
 func (p *BundlePool) SetBundleSimulator(simulator BundleSimulator) {
@@ -184,10 +193,6 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 		return err
 	}
 
-	if p.mevConfig.SentryEnabled {
-		p.deliverBundleCh <- originBundle
-	}
-
 	if price.Cmp(p.minimalBundleGasPrice()) < 0 && p.slots+numSlots(bundle) > p.config.GlobalSlots {
 		return ErrBundleGasPriceLow
 	}
@@ -200,6 +205,11 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 	if _, ok := p.bundles[hash]; ok {
 		return ErrBundleAlreadyExist
 	}
+
+	if p.mevConfig.MevSentryEnabled {
+		p.deliverBundleCh <- originBundle
+	}
+
 	for p.slots+numSlots(bundle) > p.config.GlobalSlots {
 		p.drop()
 	}

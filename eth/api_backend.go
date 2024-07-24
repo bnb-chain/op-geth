@@ -330,7 +330,7 @@ func (b *EthAPIBackend) SendBundle(ctx context.Context, bundle *types.Bundle, or
 
 func (b *EthAPIBackend) BundlePrice() *big.Int {
 	bundles := b.eth.txPool.AllBundles()
-	gasFloor := big.NewInt(b.eth.config.Miner.Mev.MevGasPriceFloor)
+	gasFloor := big.NewInt(b.eth.config.Miner.Mev.MevBundleGasPriceFloor)
 
 	if len(bundles) == 0 {
 		return gasFloor

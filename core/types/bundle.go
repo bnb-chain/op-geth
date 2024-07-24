@@ -45,7 +45,6 @@ type SimulatedBundle struct {
 	BundleGasFees  *big.Int
 	BundleGasPrice *big.Int
 	BundleGasUsed  uint64
-	// EthSentToSystem *big.Int
 }
 
 func (bundle *Bundle) Size() uint64 {

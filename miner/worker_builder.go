@@ -153,7 +153,7 @@ func (w *worker) commitBundles(
 
 	if !w.isRunning() && len(coalescedLogs) > 0 {
 		// We don't push the pendingLogsEvent while we are mining. The reason is that
-		// when we are mining, the worker will regenerate a mining block every 3 seconds.
+		// when we are mining, the worker will regenerate a mining block every second.
 		// In order to avoid pushing the repeated pendingLog, we disable the pending log pushing.
 
 		// make a copy, the state caches the logs and these logs get "upgraded" from pending to mined
@@ -227,8 +227,7 @@ func (w *worker) simulateBundles(env *environment, bundles []*types.Bundle) ([]*
 		go func(idx int, bundle *types.Bundle, state *state.StateDB) {
 			defer wg.Done()
 
-			gasPool := prepareGasPool(env.header.GasLimit)
-			simmed, err := w.simulateBundle(env, bundle, state, gasPool, 0, true, true)
+			simmed, err := w.simulateBundle(env, bundle, state, env.gasPool, 0, true, true)
 			if err != nil {
 				log.Trace("Error computing gas for a simulateBundle", "error", err)
 				return
@@ -371,7 +370,7 @@ func (w *worker) simulateBundle(
 
 	bundleGasPrice := new(big.Int).Div(bundleGasFees, new(big.Int).SetUint64(bundleGasUsed))
 
-	if bundleGasPrice.Cmp(big.NewInt(w.config.Mev.MevGasPriceFloor)) < 0 {
+	if bundleGasPrice.Cmp(big.NewInt(w.config.Mev.MevBundleGasPriceFloor)) < 0 {
 		err := errBundlePriceTooLow
 		log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
 
@@ -402,6 +401,6 @@ func containsHash(arr []common.Hash, match common.Hash) bool {
 
 func prepareGasPool(gasLimit uint64) *core.GasPool {
 	gasPool := new(core.GasPool).AddGas(gasLimit)
-	// TODO consider op systemTxGas
+	gasPool.SubGas(params.SystemTxsGas)
 	return gasPool
 }

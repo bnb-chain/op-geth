@@ -550,8 +550,14 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// Note optimismConfig will not be nil if rules.IsOptimismBedrock is true
 	if optimismConfig := st.evm.ChainConfig().Optimism; optimismConfig != nil && rules.IsOptimismBedrock && !st.msg.IsDepositTx {
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee))
-		if cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); cost != nil {
-			st.state.AddBalance(params.OptimismL1FeeRecipient, cost)
+		var l1Cost *big.Int
+		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.Time) {
+			l1Cost = big.NewInt(0)
+		} else {
+			l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time)
+		}
+		if l1Cost != nil {
+			st.state.AddBalance(params.OptimismL1FeeRecipient, l1Cost)
 		}
 	}
 

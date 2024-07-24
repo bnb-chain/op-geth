@@ -3,6 +3,11 @@ package core
 import (
 	"errors"
 	"fmt"
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -11,10 +16,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
-	"runtime"
-	"sync"
-	"sync/atomic"
 )
 
 const (
@@ -189,6 +192,11 @@ func (p *ParallelStateProcessor) doStaticDispatchV2(txReqs []*ParallelTxRequest,
 		return
 	}
 
+	if metrics.EnabledExpensive {
+		defer func(start time.Time) {
+			txDAGDispatchTimer.Update(time.Since(start))
+		}(time.Now())
+	}
 	// resolve isolate execution paths from TxDAG, it indicates the tx dispatch
 	paths := types.MergeTxDAGExecutionPaths(txDAG)
 	log.Info("doStaticDispatchV2 merge parallel execution paths", "slots", len(p.slotState), "paths", len(paths))
@@ -735,14 +743,20 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		txDAG types.TxDAG
 		err   error
 	)
-	if len(block.TxDAG()) != 0 {
-		txDAG, err = types.DecodeTxDAG(block.TxDAG())
-		if err != nil {
-			return nil, nil, 0, err
+	if p.bc.enableTxDAG {
+		if len(block.TxDAG()) != 0 {
+			txDAG, err = types.DecodeTxDAG(block.TxDAG())
+			if err != nil {
+				return nil, nil, 0, err
+			}
+		}
+		// load cache txDAG from file
+		if txDAG == nil && len(p.bc.txDAGMapping) > 0 {
+			txDAG = p.bc.txDAGMapping[block.NumberU64()]
 		}
 	}
 	// TODO(galaio): need hardfork
-	if p.bc.chainConfig.Optimism != nil && len(block.Header().Extra) > 0 {
+	if p.bc.enableTxDAG && p.bc.chainConfig.Optimism != nil && len(block.Header().Extra) > 0 {
 		txDAG, err = types.DecodeTxDAG(block.Header().Extra)
 		if err != nil {
 			return nil, nil, 0, err

@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
+
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/exp/slices"
-	"strings"
-	"time"
 )
 
 // TxDAGType Used to extend TxDAG and customize a new DAG structure

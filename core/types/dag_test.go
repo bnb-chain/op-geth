@@ -1,9 +1,10 @@
 package types
 
 import (
-	"github.com/cometbft/cometbft/libs/rand"
 	"testing"
 	"time"
+
+	"github.com/cometbft/cometbft/libs/rand"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"

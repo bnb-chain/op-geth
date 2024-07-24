@@ -271,6 +271,7 @@ type StateDB struct {
 	TrieDBCommits        time.Duration
 	TrieCommits          time.Duration
 	CodeCommits          time.Duration
+	TxDAGGenerate        time.Duration
 
 	AccountUpdated int
 	StorageUpdated int
@@ -2419,6 +2420,11 @@ func (s *StateDB) FinaliseRWSet() error {
 	if s.mvStates == nil || s.rwSet == nil {
 		return nil
 	}
+	if metrics.EnabledExpensive {
+		defer func(start time.Time) {
+			s.TxDAGGenerate += time.Since(start)
+		}(time.Now())
+	}
 	ver := types.StateVersion{
 		TxIndex: s.txIndex,
 	}
@@ -2485,6 +2491,11 @@ func (s *StateDB) MVStates2TxDAG() (types.TxDAG, map[int]*types.ExeStat) {
 	}
 	if s.mvStates == nil {
 		return types.NewEmptyTxDAG(), nil
+	}
+	if metrics.EnabledExpensive {
+		defer func(start time.Time) {
+			s.TxDAGGenerate += time.Since(start)
+		}(time.Now())
 	}
 
 	return s.mvStates.ResolveTxDAG(), s.mvStates.Stats()

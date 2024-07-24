@@ -412,7 +412,9 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 			log.Crit("Failed to write states", "err", err)
 		}
 		if nl, ok := dl.buffer.(*nodebufferlist); ok {
-			nl.persistID--
+			if nl.persistID != 0 {
+				nl.persistID--
+			}
 		}
 	}
 	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer), nil

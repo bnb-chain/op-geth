@@ -1138,7 +1138,9 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	}
 
 	start := time.Now()
-	env.state.ResetMVStates(0)
+	if w.chain.TxDAGEnabled() {
+		env.state.ResetMVStates(0)
+	}
 	pending := w.eth.TxPool().Pending(true)
 	packFromTxpoolTimer.UpdateSince(start)
 	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
@@ -1268,7 +1270,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	}
 
 	// Because the TxDAG appends after sidecar, so we only enable after cancun
-	if w.chainConfig.IsCancun(block.Number(), block.Time()) && w.chainConfig.Optimism == nil {
+	if w.chain.TxDAGEnabled() && w.chainConfig.IsCancun(block.Number(), block.Time()) && w.chainConfig.Optimism == nil {
 		txDAG, _ := work.state.MVStates2TxDAG()
 		rawTxDAG, err := types.EncodeTxDAG(txDAG)
 		if err != nil {
@@ -1278,7 +1280,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	}
 
 	// TODO(galaio): need hardfork
-	if w.chainConfig.Optimism != nil {
+	if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
 		txDAG, _ := work.state.MVStates2TxDAG()
 		rawTxDAG, err := types.EncodeTxDAG(txDAG)
 		if err != nil {
@@ -1286,6 +1288,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		}
 		block.Header().Extra = rawTxDAG
 	}
+
 	assembleBlockTimer.UpdateSince(start)
 	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
@@ -1297,6 +1300,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	storageUpdateTimer.Update(work.state.StorageUpdates)             // Storage updates are complete(in FinalizeAndAssemble)
 	accountHashTimer.Update(work.state.AccountHashes)                // Account hashes are complete(in FinalizeAndAssemble)
 	storageHashTimer.Update(work.state.StorageHashes)                // Storage hashes are complete(in FinalizeAndAssemble)
+	txDAGGenerateTimer.Update(work.state.TxDAGGenerate)
 
 	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
 
@@ -1393,7 +1397,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		}
 
 		// Because the TxDAG appends after sidecar, so we only enable after cancun
-		if w.chainConfig.IsCancun(env.header.Number, env.header.Time) && w.chainConfig.Optimism == nil {
+		if w.chain.TxDAGEnabled() && w.chainConfig.IsCancun(env.header.Number, env.header.Time) && w.chainConfig.Optimism == nil {
 			for i := len(env.txs); i < len(block.Transactions()); i++ {
 				env.state.RecordSystemTxRWSet(i)
 			}
@@ -1406,7 +1410,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		}
 
 		// TODO(galaio): need hardfork
-		if w.chainConfig.Optimism != nil {
+		if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
 			txDAG, _ := env.state.MVStates2TxDAG()
 			rawTxDAG, err := types.EncodeTxDAG(txDAG)
 			if err != nil {

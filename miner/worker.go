@@ -1337,6 +1337,25 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		return &newPayloadResult{err: fmt.Errorf("empty block root")}
 	}
 
+	// Because the TxDAG appends after sidecar, so we only enable after cancun
+	if w.chainConfig.IsCancun(block.Number(), block.Time()) && w.chainConfig.Optimism == nil {
+		txDAG, _ := work.state.MVStates2TxDAG()
+		rawTxDAG, err := types.EncodeTxDAG(txDAG)
+		if err != nil {
+			return &newPayloadResult{err: err}
+		}
+		block = block.WithTxDAG(rawTxDAG)
+	}
+
+	// TODO(galaio): need hardfork
+	if w.chainConfig.Optimism != nil {
+		txDAG, _ := work.state.MVStates2TxDAG()
+		rawTxDAG, err := types.EncodeTxDAG(txDAG)
+		if err != nil {
+			return &newPayloadResult{err: err}
+		}
+		block.Header().Extra = rawTxDAG
+	}
 	assembleBlockTimer.UpdateSince(start)
 	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
@@ -1444,7 +1463,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		}
 
 		// Because the TxDAG appends after sidecar, so we only enable after cancun
-		if w.chainConfig.IsCancun(env.header.Number, env.header.Time) {
+		if w.chainConfig.IsCancun(env.header.Number, env.header.Time) && w.chainConfig.Optimism == nil {
 			for i := len(env.txs); i < len(block.Transactions()); i++ {
 				env.state.RecordSystemTxRWSet(i)
 			}
@@ -1454,6 +1473,16 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 				return err
 			}
 			block = block.WithTxDAG(rawTxDAG)
+		}
+
+		// TODO(galaio): need hardfork
+		if w.chainConfig.Optimism != nil {
+			txDAG, _ := env.state.MVStates2TxDAG()
+			rawTxDAG, err := types.EncodeTxDAG(txDAG)
+			if err != nil {
+				return err
+			}
+			block.Header().Extra = rawTxDAG
 		}
 
 		// If we're post merge, just ignore

@@ -580,6 +580,9 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 			}
 			rs[i].L1GasPrice = l1BaseFee
 			rs[i].L1Fee, rs[i].L1GasUsed = costFunc(txs[i].RollupCostData())
+			if txs[i].GasPrice().Cmp(big.NewInt(0)) == 0 && config.IsWright(time) {
+				rs[i].L1Fee = big.NewInt(0)
+			}
 			rs[i].FeeScalar = feeScalar
 		}
 	}

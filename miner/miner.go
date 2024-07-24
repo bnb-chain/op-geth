@@ -63,7 +63,8 @@ var (
 	snapshotAccountReadTimer = metrics.NewRegisteredTimer("miner/snapshot/account/reads", nil)
 	snapshotStorageReadTimer = metrics.NewRegisteredTimer("miner/snapshot/storage/reads", nil)
 
-	waitPayloadTimer = metrics.NewRegisteredTimer("miner/wait/payload", nil)
+	waitPayloadTimer   = metrics.NewRegisteredTimer("miner/wait/payload", nil)
+	txDAGGenerateTimer = metrics.NewRegisteredTimer("miner/txdag/gen", nil)
 
 	isBuildBlockInterruptCounter = metrics.NewRegisteredCounter("miner/build/interrupt", nil)
 )

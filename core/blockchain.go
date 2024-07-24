@@ -18,11 +18,16 @@
 package core
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,6 +96,9 @@ var (
 	stateCommitExternalTimer  = metrics.NewRegisteredTimer("chain/state/commit/external", nil)
 	triedbCommitExternalTimer = metrics.NewRegisteredTimer("chain/triedb/commit/external", nil)
 	innerExecutionTimer       = metrics.NewRegisteredTimer("chain/inner/execution", nil)
+
+	txDAGGenerateTimer = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+	txDAGDispatchTimer = metrics.NewRegisteredTimer("chain/block/txdag/dispatch", nil)
 
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
@@ -301,6 +309,9 @@ type BlockChain struct {
 	forker            *ForkChoice
 	vmConfig          vm.Config
 	parallelExecution bool
+	enableTxDAG       bool
+	txDAGWriteCh      chan TxDAGOutputItem
+	txDAGMapping      map[uint64]types.TxDAG
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -1944,16 +1955,16 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 
-			// TODO(galaio): use txDAG in some accelerate scenarios.
-			if len(block.TxDAG()) > 0 {
-				txDAG, err := types.DecodeTxDAG(block.TxDAG())
-				if err != nil {
-					return it.index, err
-				}
-				log.Info("Insert chain", "block", block.NumberU64(), "txDAG", txDAG.Type())
-			}
+			// TODO(galaio): use txDAG in some accelerate scenarios, like state pre-fetcher.
+			//if bc.enableTxDAG && len(block.TxDAG()) > 0 {
+			//	txDAG, err := types.DecodeTxDAG(block.TxDAG())
+			//	if err != nil {
+			//		return it.index, err
+			//	}
+			//	log.Info("Insert chain", "block", block.NumberU64(), "txDAG", txDAG)
+			//}
 			// TODO(galaio): need hardfork
-			if bc.chainConfig.Optimism != nil && len(block.Header().Extra) > 0 {
+			if bc.enableTxDAG && bc.chainConfig.Optimism != nil && len(block.Header().Extra) > 0 {
 				txDAG, err := types.DecodeTxDAG(block.Header().Extra)
 				if err != nil {
 					return it.index, err
@@ -2015,8 +2026,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		storageUpdateTimer.Update(statedb.StorageUpdates)             // Storage updates are complete(in validation)
 		accountHashTimer.Update(statedb.AccountHashes)                // Account hashes are complete(in validation)
 		storageHashTimer.Update(statedb.StorageHashes)                // Storage hashes are complete(in validation)
-		blockExecutionTimer.Update(ptime)                             // The time spent on block execution
-		blockValidationTimer.Update(vtime)                            // The time spent on block validation
+		txDAGGenerateTimer.Update(statedb.TxDAGGenerate)
+		blockExecutionTimer.Update(ptime)  // The time spent on block execution
+		blockValidationTimer.Update(vtime) // The time spent on block validation
 
 		innerExecutionTimer.Update(DebugInnerExecutionDuration)
 
@@ -2818,4 +2830,93 @@ func createDelFn(bc *BlockChain) func(db ethdb.KeyValueWriter, hash common.Hash,
 
 func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 	bc.hc.SetHead(headNumber, nil, createDelFn(bc))
+}
+
+func (bc *BlockChain) TxDAGEnabled() bool {
+	return bc.enableTxDAG
+}
+
+func (bc *BlockChain) EnableTxDAGGeneration(output string) {
+	bc.enableTxDAG = true
+	if len(output) == 0 {
+		return
+	}
+	// read TxDAG file, and cache in mem
+	var err error
+	bc.txDAGMapping, err = readTxDAGMappingFromFile(output)
+	if err != nil {
+		log.Error("read TxDAG err", err)
+	}
+
+	// write handler
+	bc.txDAGWriteCh = make(chan TxDAGOutputItem, 10000)
+	go func() {
+		writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+		if err != nil {
+			log.Error("OpenFile when open the txDAG output file", "file", output)
+			return
+		}
+		defer writeHandle.Close()
+		for {
+			select {
+			case <-bc.quit:
+				return
+			case item := <-bc.txDAGWriteCh:
+				if err := writeTxDAGToFile(writeHandle, item); err != nil {
+					log.Error("encode TxDAG err in OutputHandler", "err", err)
+					continue
+				}
+			}
+		}
+	}()
+}
+
+type TxDAGOutputItem struct {
+	blockNumber uint64
+	txDAG       types.TxDAG
+}
+
+func writeTxDAGToFile(writeHandle *os.File, item TxDAGOutputItem) error {
+	var buf bytes.Buffer
+	buf.WriteString(strconv.FormatUint(item.blockNumber, 10))
+	buf.WriteByte(',')
+	enc, err := types.EncodeTxDAG(item.txDAG)
+	if err != nil {
+		return err
+	}
+	buf.WriteString(hex.EncodeToString(enc))
+	buf.WriteByte('\n')
+	_, err = writeHandle.Write(buf.Bytes())
+	return err
+}
+
+func readTxDAGMappingFromFile(output string) (map[uint64]types.TxDAG, error) {
+	file, err := os.Open(output)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	mapping := make(map[uint64]types.TxDAG)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		tokens := strings.Split(scanner.Text(), ",")
+		if len(tokens) != 2 {
+			return nil, errors.New("txDAG output contain wrong size")
+		}
+		num, err := strconv.Atoi(tokens[0])
+		if err != nil {
+			return nil, err
+		}
+		enc, err := hex.DecodeString(tokens[1])
+		if err != nil {
+			return nil, err
+		}
+		txDAG, err := types.DecodeTxDAG(enc)
+		if err != nil {
+			return nil, err
+		}
+		mapping[uint64(num)] = txDAG
+	}
+	return mapping, nil
 }

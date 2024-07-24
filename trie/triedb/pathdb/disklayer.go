@@ -332,7 +332,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 		if _, ok := dl.buffer.(*nodebufferlist); ok {
 			persistentID := rawdb.ReadPersistentStateID(dl.db.diskdb)
 			if limit >= persistentID {
-				log.Info("No prune ancient under nodebufferlist, less than db config state history limit", "persistent_id", persistentID, "limit", limit)
+				log.Debug("No prune ancient under nodebufferlist, less than db config state history limit", "persistent_id", persistentID, "limit", limit)
 				return ndl, nil
 			}
 			targetOldest := persistentID - limit + 1

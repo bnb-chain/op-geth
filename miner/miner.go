@@ -70,15 +70,13 @@ var (
 var defaultCoinBaseAddress = common.HexToAddress("0x4200000000000000000000000000000000000011")
 
 type MevConfig struct {
-	MevMinerEnabled        bool     // Whether to enable Mev miner or not
-	MevSentryEnabled       bool     // Whether to enable Mev sentry or not
+	MevEnabled             bool     // Whether to enable Mev or not
 	MevReceivers           []string // The list of Mev bundle receivers
 	MevBundleGasPriceFloor int64    // The minimal bundle gas Price
 }
 
 var DefaultMevConfig = MevConfig{
-	MevMinerEnabled:        false,
-	MevSentryEnabled:       false,
+	MevEnabled:             false,
 	MevReceivers:           nil,
 	MevBundleGasPriceFloor: 1,
 }

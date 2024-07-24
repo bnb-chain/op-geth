@@ -294,7 +294,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		txPools = append(txPools, blobPool)
 	}
 	bundlePool := &bundlepool.BundlePool{}
-	if config.Miner.Mev.MevMinerEnabled || config.Miner.Mev.MevSentryEnabled {
+	if config.Miner.Mev.MevEnabled {
 		bundlePool = bundlepool.New(config.BundlePool, config.Miner.Mev)
 		txPools = append(txPools, bundlePool)
 	}
@@ -321,7 +321,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	eth.miner = miner.New(eth, &config.Miner, eth.blockchain.Config(), eth.EventMux(), eth.engine, eth.isLocalBlock)
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
-	if config.Miner.Mev.MevMinerEnabled || config.Miner.Mev.MevSentryEnabled {
+	if config.Miner.Mev.MevEnabled {
 		bundlePool.SetBundleSimulator(eth.miner)
 	}
 

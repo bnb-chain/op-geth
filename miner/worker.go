@@ -831,7 +831,7 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	}
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
-	if w.chainConfig.IsWright(env.header.Time) && w.config.Mev.MevMinerEnabled &&
+	if w.chainConfig.IsWright(env.header.Time) && w.config.Mev.MevEnabled &&
 		tx.Type() != types.DepositTxType {
 		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
 		env.profit.Add(env.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
@@ -852,7 +852,7 @@ func (w *worker) commitBundleTransaction(env *environment, tx *types.Transaction
 	}
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
-	if w.chainConfig.IsWright(env.header.Time) && w.config.Mev.MevMinerEnabled &&
+	if w.chainConfig.IsWright(env.header.Time) && w.config.Mev.MevEnabled &&
 		tx.Type() != types.DepositTxType {
 		gasUsed := new(big.Int).SetUint64(receipt.GasUsed)
 		env.profit.Add(env.profit, gasUsed.Mul(gasUsed, tx.GasPrice()))
@@ -1230,7 +1230,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		timer := time.AfterFunc(w.newpayloadTimeout, func() {
 			interrupt.Store(commitInterruptTimeout)
 		})
-		if w.config.Mev.MevMinerEnabled {
+		if w.config.Mev.MevEnabled {
 			newWork := work.copy()
 			var wg sync.WaitGroup
 			wg.Add(1)
@@ -1296,7 +1296,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 
 	log.Debug("build payload statedb metrics", "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
 	fees := big.NewInt(0)
-	if w.config.Mev.MevMinerEnabled && w.chainConfig.IsWright(block.Time()) {
+	if w.config.Mev.MevEnabled && w.chainConfig.IsWright(block.Time()) {
 		fees = work.profit
 	} else {
 		fees = totalFees(block, work.receipts)

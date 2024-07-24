@@ -566,14 +566,9 @@ var (
 		Value:    ethconfig.Defaults.Miner.NewPayloadTimeout,
 		Category: flags.MinerCategory,
 	}
-	MevMinerEnabledFlag = &cli.BoolFlag{
-		Name:     "mev.miner.enable",
-		Usage:    "Enable mev miner",
-		Category: flags.MEVCategory,
-	}
-	MevSentryEnabledFlag = &cli.BoolFlag{
-		Name:     "mev.sentry.enable",
-		Usage:    "Enable mev sentry",
+	MevEnabledFlag = &cli.BoolFlag{
+		Name:     "mev.enable",
+		Usage:    "Enable mev",
 		Category: flags.MEVCategory,
 	}
 	MevBundleReceiverUrlFlag = &cli.StringFlag{
@@ -1753,11 +1748,8 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.IsSet(RollupComputePendingBlock.Name) {
 		cfg.RollupComputePendingBlock = ctx.Bool(RollupComputePendingBlock.Name)
 	}
-	if ctx.IsSet(MevMinerEnabledFlag.Name) {
-		cfg.Mev.MevMinerEnabled = ctx.Bool(MevMinerEnabledFlag.Name)
-	}
-	if ctx.IsSet(MevSentryEnabledFlag.Name) {
-		cfg.Mev.MevSentryEnabled = ctx.Bool(MevSentryEnabledFlag.Name)
+	if ctx.IsSet(MevEnabledFlag.Name) {
+		cfg.Mev.MevEnabled = ctx.Bool(MevEnabledFlag.Name)
 	}
 	if ctx.IsSet(MevBundleReceiverUrlFlag.Name) {
 		url := ctx.String(MevBundleReceiverUrlFlag.Name)

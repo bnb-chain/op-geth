@@ -105,7 +105,7 @@ func New(config Config, mevConfig miner.MevConfig) *BundlePool {
 		deliverBundleCh:       make(chan *types.SendBundleArgs),
 		exitCh:                make(chan struct{}),
 	}
-	if !pool.mevConfig.MevSentryEnabled {
+	if pool.mevConfig.MevReceivers == nil {
 		return pool
 	}
 	for _, v := range mevConfig.MevReceivers {
@@ -156,6 +156,7 @@ func (p *BundlePool) register(url string) {
 				continue
 			}
 			p.bundleReceiverClients[url] = receiverClient
+			log.Info("success to dial bundle receiver", "url", url)
 			return
 		}
 	}
@@ -206,7 +207,7 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 		return ErrBundleAlreadyExist
 	}
 
-	if p.mevConfig.MevSentryEnabled {
+	if len(p.bundleReceiverClients) != 0 {
 		p.deliverBundleCh <- originBundle
 	}
 

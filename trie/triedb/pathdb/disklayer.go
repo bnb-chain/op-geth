@@ -331,14 +331,20 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	if overflow {
 		if _, ok := dl.buffer.(*nodebufferlist); ok {
 			persistentID := rawdb.ReadPersistentStateID(dl.db.diskdb)
-			if persistentID > limit {
-				oldest = persistentID - limit + 1
-				log.Info("Forcing prune ancient under nodebufferlist", "disk_persistent_state_id",
-					persistentID, "truncate_tail", oldest)
-			} else {
-				log.Info("No prune ancient under nodebufferlist, less than db config state history limit")
+			if limit >= persistentID {
+				log.Info("No prune ancient under nodebufferlist, less than db config state history limit", "persistent_id", persistentID, "limit", limit)
 				return ndl, nil
 			}
+			targetOldest := persistentID - limit + 1
+			realOldest, err := dl.db.freezer.Tail()
+			if err == nil && targetOldest <= realOldest {
+				log.Info("No prune ancient under nodebufferlist due to truncate oldest less than real oldest, which maybe happened in abnormal restart",
+					"tartget_oldest_id", targetOldest, "real_oldest_id", realOldest, "error", err)
+				return ndl, nil
+			}
+			oldest = targetOldest
+			log.Info("Forcing prune ancient under nodebufferlist", "disk_persistent_state_id",
+				persistentID, "truncate_tail", oldest)
 		}
 
 		pruned, err := truncateFromTail(ndl.db.diskdb, ndl.db.freezer, oldest-1)

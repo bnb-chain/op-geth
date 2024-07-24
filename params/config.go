@@ -32,7 +32,7 @@ var (
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBQANetGenesisHash   = common.HexToHash("0xe182e685b1ec05ca55f2374cb3a190d1ae8f3e196acb55a69efd61536fc3983f")
+	OPBNBQANetGenesisHash   = common.HexToHash("0xfd822cb9ed44eac6bb4c5413cc34b247d814ba4d162610f434a19d5ba68749fd")
 )
 
 const (
@@ -239,7 +239,7 @@ var (
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(2484),
+		ChainID:                       big.NewInt(7180),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
 		EIP155Block:                   big.NewInt(0),
@@ -270,6 +270,7 @@ var (
 		CancunTime:  newUint64(1714995000), // May-06-2024 11:30 AM +UTC
 		EcotoneTime: newUint64(1714995000), // May-06-2024 11:30 AM +UTC
 		HaberTime:   newUint64(1716361200), // May-22-2024 07:00 AM +UTC
+		WrightTime:  newUint64(1721815200), // July-24-2024 10:00 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

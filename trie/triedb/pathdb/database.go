@@ -402,7 +402,6 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		start = time.Now()
 		dl    = db.tree.bottom()
 	)
-	log.Info("before revert", "dl state id", dl.stateID())
 	for dl.rootHash() != root {
 		h, err := readHistory(db.freezer, dl.stateID())
 		if err != nil {
@@ -416,15 +415,13 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		// done after each revert operation, otherwise the new
 		// disk layer won't be accessible from outside.
 		db.tree.reset(dl)
-		log.Info("print each disk layer state id", "state id", dl.stateID())
 	}
-	log.Info("after revert", "dl state id", dl.stateID())
 	_ = db.DeleteTrieJournal(db.diskdb)
 	truncatedNumber, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
 	if err != nil {
 		return err
 	}
-	log.Info("Recovered state", "root", root, "elapsed", common.PrettyDuration(time.Since(start)),
+	log.Debug("Recovered state", "root", root, "elapsed", common.PrettyDuration(time.Since(start)),
 		"truncate number", truncatedNumber)
 	return nil
 }

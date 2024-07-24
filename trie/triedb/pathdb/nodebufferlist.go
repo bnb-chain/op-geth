@@ -158,6 +158,7 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 		dlInMd:          dlInMd,
 		limit:           limit,
 		base:            base,
+		persistID:       rawdb.ReadPersistentStateID(db),
 		stopCh:          make(chan struct{}),
 		waitStopCh:      make(chan struct{}),
 		forceKeepCh:     make(chan struct{}),
@@ -173,19 +174,17 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 		log.Crit("Failed to get freezer tail", "error", err)
 		return nil
 	}
-	persistentStateID := rawdb.ReadPersistentStateID(db)
-
-	log.Info("Print ancient db meta", "persistent state id", persistentStateID, "freezer length", freezerLength,
-		"freezer tail", tail, "waitingRecoverNum", freezerLength-persistentStateID)
+	log.Info("Ancient db meta info", "persistent_state_id", nbl.persistID, "freezer_length", freezerLength,
+		"freezer_tail", tail, "waiting_recover_num", freezerLength-nbl.persistID)
 
 	var (
 		wg           sync.WaitGroup
 		start        = time.Now()
-		startStateID = persistentStateID + 1
+		startStateID = nbl.persistID + 1
 	)
 	startBlock, err := readBlockNumber(freezer, startStateID)
 	if err != nil {
-		log.Crit("Failed to read start block number", "error", err, "state_id", persistentStateID+1)
+		log.Crit("Failed to read start block number", "error", err, "state_id", startStateID)
 	}
 	endBlock, err := readBlockNumber(freezer, freezerLength)
 	if err != nil {
@@ -218,16 +217,11 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 		nbl.size += current.size
 		nbl.layers += current.layers
 	}
-
-	log.Info("diff to base", "tail state id", nbl.tail.id, "head", nbl.head.id, "nbl layers", nbl.layers,
-		"base layers", nbl.base.layers)
 	nbl.diffToBase()
-	log.Info("after diff to base", "base size", nbl.base.size)
 
-	persistentStateID = rawdb.ReadPersistentStateID(db)
-	nbl.persistID = persistentStateID
 	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
-		"new persistentStateID", persistentStateID, "nbl layers", nbl.layers, "base layers", nbl.base.layers, "nbl.persistID", nbl.persistID)
+		"base_size", nbl.base.size, "tail_state_id", nbl.tail.id, "head_state_id", nbl.head.id,
+		"nbl_layers", nbl.layers, "base_layers", nbl.base.layers)
 	return nbl
 }
 
@@ -308,7 +302,7 @@ func (nf *nodebufferlist) createStateInterval(freezer *rawdb.ResettableFreezer, 
 
 func (nf *nodebufferlist) getLatestStatus() (common.Hash, uint64, error) {
 	head := nf.head
-	log.Info("last head diff layer info", "root", head.root, "id", head.id, "block", head.block,
+	log.Info("last head multi diff layer info", "root", head.root, "id", head.id, "block", head.block,
 		"layer", head.layers, "size", head.size)
 	return head.root, head.id, nil
 }
@@ -388,30 +382,14 @@ func (nf *nodebufferlist) commit(root common.Hash, id uint64, block uint64, node
 // revert the changes made by the last state transition.
 func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error {
 	// hang user read/write and background write,
-	// log.Info("nodebufferlist revert mux lock 1111")
 	nf.mux.Lock()
-	// log.Info("nodebufferlist revert base mux lock 2222")
 	nf.baseMux.Lock()
-	// log.Info("nodebufferlist revert flush mux lock 3333")
 	nf.flushMux.Lock()
-	// log.Info("nodebufferlist revert 4444")
-	defer func() {
-		nf.mux.Unlock()
-		// log.Info("nodebufferlist revert mux unlock 5555")
-	}()
-	defer func() {
-		nf.baseMux.Unlock()
-		// log.Info("nodebufferlist revert base mux unlock 6666")
-	}()
-	defer func() {
-		nf.flushMux.Unlock()
-		// log.Info("nodebufferlist revert flush mux unlock 7777")
-	}()
+	defer nf.mux.Unlock()
+	defer nf.baseMux.Unlock()
+	defer nf.flushMux.Unlock()
 
-	count := 0
 	merge := func(buffer *multiDifflayer) bool {
-		count++
-		log.Info("print nbl revert count", "count", count)
 		if err := nf.base.commit(buffer.root, buffer.id, buffer.block, buffer.layers, buffer.nodes); err != nil {
 			log.Crit("failed to commit nodes to base node buffer", "error", err)
 		}
@@ -419,17 +397,12 @@ func (nf *nodebufferlist) revert(db ethdb.KeyValueReader, nodes map[common.Hash]
 		return true
 	}
 	nf.traverseReverse(merge)
-	// log.Info("nodebufferlist revert traverseReverse 8888")
 	nc := newMultiDifflayer(nf.limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
-	// log.Info("nodebufferlist revert  new mdl 9999")
 	nf.head = nc
 	nf.tail = nc
 	nf.size = 0
 	nf.layers = 0
 	nf.count = 1
-	log.Info("print nbl revert base info", "base size", nf.base.size, "base layers", nf.base.layers,
-		"nodes length", len(nf.base.nodes), "limit", nf.base.limit, "id", nf.base.limit, "root", nf.base.root.String(),
-		"block", nf.base.block)
 	return nf.base.revert(nf.db, nodes)
 }
 
@@ -481,7 +454,6 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 
 	nf.traverseReverse(commitFunc)
 	persistID := nf.persistID + nf.base.layers
-	log.Info("nbl flush info", "nf.persistID", nf.persistID, "nf.base.layers", nf.base.layers, "persistID", persistID)
 	err := nf.base.flush(nf.db, nf.clean, persistID)
 	if err != nil {
 		log.Crit("failed to flush base node buffer to disk", "error", err)
@@ -489,7 +461,6 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 	nf.isFlushing.Store(false)
 	nf.base.reset()
 	nf.persistID = persistID
-	log.Info("nbl finish flushing", "nf.persistID", nf.persistID, "nf.base.layers", nf.base.layers, "persistID", persistID)
 
 	return nil
 }
@@ -743,21 +714,15 @@ func (nf *nodebufferlist) backgroundFlush() {
 	nf.baseMux.RLock()
 	persistID := nf.persistID + nf.base.layers
 	nf.baseMux.RUnlock()
-	log.Info("backgroundFlush 1111", "nf.persistID", nf.persistID, "nf.base.layers", nf.base.layers, "persistID", persistID)
 	err := nf.base.flush(nf.db, nf.clean, persistID)
-	log.Info("backgroundFlush 2222")
 	if err != nil {
 		log.Error("failed to flush base node buffer to disk", "error", err)
 		return
 	}
-	log.Info("backgroundFlush 3333")
 	nf.baseMux.Lock()
-	log.Info("backgroundFlush 4444")
 	nf.base.reset()
 	nf.persistID = persistID
-	log.Info("backgroundFlush 5555", "nf.persistID", nf.persistID)
 	nf.baseMux.Unlock()
-	log.Info("backgroundFlush 6666")
 
 	baseNodeBufferSizeGauge.Update(int64(nf.base.size))
 	baseNodeBufferLayerGauge.Update(int64(nf.base.layers))
@@ -1090,7 +1055,6 @@ func (mf *multiDifflayer) empty() bool {
 func (mf *multiDifflayer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error {
 	// Ensure the target state id is aligned with the internal counter.
 	head := rawdb.ReadPersistentStateID(db)
-	log.Info("mdl flush info", "head", head, "mf layers", mf.layers, "id", id)
 	if head+mf.layers != id {
 		return fmt.Errorf("buffer layers (%d) cannot be applied on top of persisted state id (%d) to reach requested state id (%d)", mf.layers, head, id)
 	}

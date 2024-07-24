@@ -538,6 +538,14 @@ func (h *history) Size() int {
 	for _, slots := range h.storageList {
 		size += len(slots) * common.HashLength
 	}
+	// calculate size of journalNodes
+	for _, jn := range h.nodes {
+		size += common.AddressLength
+		for _, n := range jn.Nodes {
+			size += len(n.Path)
+			size += len(n.Blob)
+		}
+	}
 
 	return size
 }
@@ -660,7 +668,6 @@ func truncateFromHead(db ethdb.Batcher, freezer *rawdb.ResettableFreezer, nhead 
 	if err != nil {
 		return 0, err
 	}
-	log.Info("truncateFromHead", "freezer.Ancients", ohead, "freezer.Tail", otail, "nhead", nhead)
 	// Ensure that the truncation target falls within the specified range.
 	if ohead < nhead || nhead < otail {
 		return 0, fmt.Errorf("out of range, tail: %d, head: %d, target: %d", otail, ohead, nhead)
@@ -689,7 +696,6 @@ func truncateFromHead(db ethdb.Batcher, freezer *rawdb.ResettableFreezer, nhead 
 	if err != nil {
 		return 0, err
 	}
-	log.Info("after TruncateHead", "nhead", nhead, "ohead", ohead)
 	return int(ohead - nhead), nil
 }
 

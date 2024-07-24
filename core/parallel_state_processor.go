@@ -741,6 +741,14 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 			return nil, nil, 0, err
 		}
 	}
+	// TODO(galaio): need hardfork
+	if p.bc.chainConfig.Optimism != nil && len(block.Header().Extra) > 0 {
+		txDAG, err = types.DecodeTxDAG(block.Header().Extra)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		log.Info("dispatch chain with", "block", block.NumberU64(), "txDAG", txDAG.Type())
+	}
 	// From now on, entering parallel execution.
 	p.doStaticDispatchV2(p.allTxReqs, txDAG) // todo: put txReqs in unit?
 

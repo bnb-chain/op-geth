@@ -171,6 +171,8 @@ var (
 		utils.RollupSuperchainUpgradesFlag,
 		utils.ParallelTxFlag,
 		utils.ParallelTxNumFlag,
+		utils.ParallelTxDAGFlag,
+		utils.ParallelTxDAGFileFlag,
 		configFileFlag,
 		utils.LogDebugFlag,
 		utils.LogBacktraceAtFlag,

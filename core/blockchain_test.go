@@ -22,9 +22,12 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -4716,4 +4719,33 @@ func TestEIP3651(t *testing.T) {
 	if actual.Cmp(expected) != 0 {
 		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
 	}
+}
+
+func TestTxDAGFile_ReadWrite(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "test.csv")
+	except := map[uint64]types.TxDAG{
+		0: types.NewEmptyTxDAG(),
+		1: makeEmptyPlainTxDAG(1),
+		2: makeEmptyPlainTxDAG(2),
+	}
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+	require.NoError(t, err)
+	for num, dag := range except {
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
+	}
+	writeFile.Close()
+
+	actual, err := readTxDAGMappingFromFile(path)
+	require.NoError(t, err)
+	for num, dag := range except {
+		require.Equal(t, dag, actual[num])
+	}
+}
+
+func makeEmptyPlainTxDAG(cnt int) *types.PlainTxDAG {
+	dag := types.NewPlainTxDAG(cnt)
+	for i := range dag.TxDeps {
+		dag.TxDeps[i].TxIndexes = make([]uint64, 0)
+	}
+	return dag
 }

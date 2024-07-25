@@ -195,7 +195,7 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 	log.Info("block intervals info", "blockIntervals", blockIntervals, "stateIntervals", stateIntervals, "startBlock",
 		startBlock, "endBlock", endBlock)
 
-	nbl.linkMultiDiffLayers(startBlock, endBlock)
+	nbl.linkMultiDiffLayers(len(blockIntervals))
 	for current, i := nbl.head, 0; current != nil; current, i = current.next, i+1 {
 		wg.Add(1)
 		go func(index int, slice []uint64, mdl *multiDifflayer) {
@@ -226,13 +226,12 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 }
 
 // linkMultiDiffLayers links specified amount of multiDiffLayers for recovering
-func (nf *nodebufferlist) linkMultiDiffLayers(startBlock, endBlock uint64) {
-	length := len(nf.createBlockInterval(startBlock, endBlock))
-	for i := 0; i < length; i++ {
+func (nf *nodebufferlist) linkMultiDiffLayers(blockIntervalLength int) {
+	for i := 0; i < blockIntervalLength; i++ {
 		mdl := newMultiDifflayer(nf.limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
 		nf.pushFront(mdl)
 	}
-	nf.count = uint64(length)
+	nf.count = uint64(blockIntervalLength)
 }
 
 func (nf *nodebufferlist) readStateHistory(freezer *rawdb.ResettableFreezer, stateID uint64) *history {

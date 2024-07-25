@@ -197,16 +197,3 @@ func (set *MergedNodeSet) Flatten() map[common.Hash]map[string]*Node {
 	}
 	return nodes
 }
-
-// CompressTrieNodes returns merged node set.
-func CompressTrieNodes(nodes map[common.Hash]map[string]*Node) *MergedNodeSet {
-	mergedNodeSet := NewMergedNodeSet()
-	for owner, n := range nodes {
-		nodeSet := &NodeSet{
-			Owner: owner,
-			Nodes: n,
-		}
-		mergedNodeSet.Merge(nodeSet)
-	}
-	return mergedNodeSet
-}

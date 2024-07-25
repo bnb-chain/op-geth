@@ -348,7 +348,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 				return ndl, nil
 			}
 			oldest = targetOldest
-			log.Info("Forcing prune ancient under nodebufferlist", "disk_persistent_state_id",
+			log.Debug("Forcing prune ancient under nodebufferlist", "disk_persistent_state_id",
 				persistentID, "truncate_tail", oldest)
 		}
 

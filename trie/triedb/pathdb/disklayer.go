@@ -125,7 +125,7 @@ func NewTrieNodeBuffer(
 	keepFunc NotifyKeepFunc,
 	freezer *rawdb.ResettableFreezer,
 	recovery bool,
-) trienodebuffer {
+) (trienodebuffer, error) {
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {
 	case NodeBufferList:

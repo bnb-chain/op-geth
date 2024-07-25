@@ -43,7 +43,7 @@ type nodebuffer struct {
 }
 
 // newNodeBuffer initializes the node buffer with the provided nodes.
-func newNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *nodebuffer {
+func newNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) (*nodebuffer, error) {
 	if nodes == nil {
 		nodes = make(map[common.Hash]map[string]*trienode.Node)
 	}
@@ -60,7 +60,7 @@ func newNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, l
 		nodes:  nodes,
 		size:   size,
 		limit:  uint64(limit),
-	}
+	}, nil
 }
 
 // node retrieves the trie node with given node info.

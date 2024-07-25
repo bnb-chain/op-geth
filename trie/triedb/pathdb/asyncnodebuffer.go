@@ -30,7 +30,7 @@ type asyncnodebuffer struct {
 }
 
 // newAsyncNodeBuffer initializes the async node buffer with the provided nodes.
-func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *asyncnodebuffer {
+func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) (*asyncnodebuffer, error) {
 	if nodes == nil {
 		nodes = make(map[common.Hash]map[string]*trienode.Node)
 	}
@@ -45,7 +45,7 @@ func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.No
 	return &asyncnodebuffer{
 		current:    newNodeCache(uint64(limit), size, nodes, layers),
 		background: newNodeCache(uint64(limit), 0, make(map[common.Hash]map[string]*trienode.Node), 0),
-	}
+	}, nil
 }
 
 // node retrieves the trie node with given node info.

@@ -87,7 +87,7 @@ func newNodeBufferList(
 	keepFunc NotifyKeepFunc,
 	freezer *rawdb.ResettableFreezer,
 	recovery bool,
-) *nodebufferlist {
+) (*nodebufferlist, error) {
 	var (
 		rsevMdNum uint64
 		dlInMd    uint64
@@ -116,9 +116,16 @@ func newNodeBufferList(
 	}
 	base := newMultiDifflayer(limit, size, common.Hash{}, nodes, layers)
 
-	var nf *nodebufferlist
+	var (
+		nf  *nodebufferlist
+		err error
+	)
 	if recovery {
-		nf = newNodeBufferListForRecovery(db, freezer, base, limit, wpBlocks, rsevMdNum, dlInMd)
+		nf, err = newNodeBufferListForRecovery(db, freezer, base, limit, wpBlocks, rsevMdNum, dlInMd)
+		if err != nil {
+			log.Error("Failed to new node buffer list for recovery", "error", err)
+			return nil, err
+		}
 	} else {
 		ele := newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
 		nf = &nodebufferlist{
@@ -145,12 +152,12 @@ func newNodeBufferList(
 	log.Info("new node buffer list", "proposed block interval", nf.wpBlocks,
 		"reserve multi difflayers", nf.rsevMdNum, "difflayers in multidifflayer", nf.dlInMd,
 		"limit", common.StorageSize(limit), "layers", layers, "persist id", nf.persistID, "base_size", size)
-	return nf
+	return nf, nil
 }
 
 // newNodeBufferListForRecovery initializes the node buffer list for recovering diff layers
 func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFreezer, base *multiDifflayer,
-	limit, wpBlocks, rsevMdNum, dlInMd uint64) *nodebufferlist {
+	limit, wpBlocks, rsevMdNum, dlInMd uint64) (*nodebufferlist, error) {
 	nbl := &nodebufferlist{
 		db:              db,
 		wpBlocks:        wpBlocks,
@@ -166,13 +173,13 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 	}
 	freezerLength, err := freezer.Ancients()
 	if err != nil {
-		log.Crit("Failed to get freezer ancients", "error", err)
-		return nil
+		log.Error("Failed to get freezer ancients", "error", err)
+		return nil, err
 	}
 	tail, err := freezer.Tail()
 	if err != nil {
-		log.Crit("Failed to get freezer tail", "error", err)
-		return nil
+		log.Error("Failed to get freezer tail", "error", err)
+		return nil, err
 	}
 	log.Info("Ancient db meta info", "persistent_state_id", nbl.persistID, "freezer_length", freezerLength,
 		"freezer_tail", tail, "waiting_recover_num", freezerLength-nbl.persistID)
@@ -184,34 +191,49 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 	)
 	startBlock, err := readBlockNumber(freezer, startStateID)
 	if err != nil {
-		log.Crit("Failed to read start block number", "error", err, "state_id", startStateID)
+		log.Error("Failed to read start block number", "error", err, "state_id", startStateID)
+		return nil, err
 	}
 	endBlock, err := readBlockNumber(freezer, freezerLength)
 	if err != nil {
-		log.Crit("Failed to read end block number", "error", err, "state_id", freezerLength)
+		log.Error("Failed to read end block number", "error", err, "state_id", freezerLength)
+		return nil, err
 	}
 	blockIntervals := nbl.createBlockInterval(startBlock, endBlock)
-	stateIntervals := nbl.createStateInterval(freezer, startStateID, freezerLength, blockIntervals)
+	stateIntervals, err := nbl.createStateInterval(freezer, startStateID, freezerLength, blockIntervals)
+	if err != nil {
+		return nil, err
+	}
 	log.Info("block intervals info", "blockIntervals", blockIntervals, "stateIntervals", stateIntervals, "startBlock",
 		startBlock, "endBlock", endBlock)
 
 	nbl.linkMultiDiffLayers(len(blockIntervals))
+	errChan := make(chan error, 1)
 	for current, i := nbl.head, 0; current != nil; current, i = current.next, i+1 {
 		wg.Add(1)
 		go func(index int, slice []uint64, mdl *multiDifflayer) {
 			defer wg.Done()
 			for j := slice[0]; j <= slice[1]; j++ {
-				h := nbl.readStateHistory(freezer, j)
+				h, err := nbl.readStateHistory(freezer, j)
+				if err != nil {
+					errChan <- err
+				}
 				if h == nil {
 					return
 				}
 				if err = mdl.commit(h.meta.root, j, h.meta.block, 1, flattenTrieNodes(h.nodes)); err != nil {
-					log.Crit("Failed to commit trie nodes to multi diff layer", "error", err)
+					log.Error("Failed to commit trie nodes to multi diff layer", "error", err)
+					errChan <- err
 				}
 			}
 		}(i, stateIntervals[i], current)
 	}
 	wg.Wait()
+	close(errChan)
+	if err = <-errChan; err != nil {
+		log.Error("Returned error from goroutine", "error", err)
+		return nil, err
+	}
 
 	for current, i := nbl.head, 0; current != nil; current, i = current.next, i+1 {
 		nbl.size += current.size
@@ -222,7 +244,7 @@ func newNodeBufferListForRecovery(db ethdb.Database, freezer *rawdb.ResettableFr
 	log.Info("Succeed to add diff layer", "elapsed", common.PrettyDuration(time.Since(start)),
 		"base_size", nbl.base.size, "tail_state_id", nbl.tail.id, "head_state_id", nbl.head.id,
 		"nbl_layers", nbl.layers, "base_layers", nbl.base.layers)
-	return nbl
+	return nbl, nil
 }
 
 // linkMultiDiffLayers links specified amount of multiDiffLayers for recovering
@@ -234,16 +256,17 @@ func (nf *nodebufferlist) linkMultiDiffLayers(blockIntervalLength int) {
 	nf.count = uint64(blockIntervalLength)
 }
 
-func (nf *nodebufferlist) readStateHistory(freezer *rawdb.ResettableFreezer, stateID uint64) *history {
+func (nf *nodebufferlist) readStateHistory(freezer *rawdb.ResettableFreezer, stateID uint64) (*history, error) {
 	h, err := readHistory(freezer, stateID)
 	if err != nil {
 		if checkError(err) {
 			log.Info("No more state history in ancient db", "state_id", stateID)
-			return nil
+			return nil, nil
 		}
-		log.Crit("Failed to read history from freezer db", "error", err)
+		log.Error("Failed to read history from freezer db", "error", err)
+		return nil, err
 	}
-	return h
+	return h, nil
 }
 
 func checkError(err error) bool {
@@ -277,7 +300,7 @@ func (nf *nodebufferlist) createBlockInterval(startBlock, endBlock uint64) [][]u
 
 // startStateID: persistentStateID+1, endStateID: freezerLength
 func (nf *nodebufferlist) createStateInterval(freezer *rawdb.ResettableFreezer, startStateID, endStateID uint64,
-	blockIntervals [][]uint64) [][]uint64 {
+	blockIntervals [][]uint64) ([][]uint64, error) {
 	blockMap, err := readAllBlockNumbers(freezer, startStateID, endStateID)
 	if err != nil {
 		log.Crit("Failed to read all history meta", "error", err)
@@ -287,16 +310,18 @@ func (nf *nodebufferlist) createStateInterval(freezer *rawdb.ResettableFreezer, 
 	for _, blockList := range blockIntervals {
 		firstStateID, ok := blockMap[blockList[0]]
 		if !ok {
-			log.Crit("Corresponding state id is not found 000", "block", blockList[0])
+			log.Error("Corresponding state id is not found", "block", blockList[0])
+			return nil, fmt.Errorf("block %d is not found", blockList[0])
 		}
 
 		secondStateID, ok := blockMap[blockList[1]]
 		if !ok {
-			log.Crit("Corresponding state id is not found 111", "block", blockList[1])
+			log.Error("Corresponding state id is not found", "block", blockList[1])
+			return nil, fmt.Errorf("block %d is not found", blockList[1])
 		}
 		stateIntervals = append(stateIntervals, []uint64{firstStateID, secondStateID})
 	}
-	return stateIntervals
+	return stateIntervals, nil
 }
 
 func (nf *nodebufferlist) getLatestStatus() (common.Hash, uint64, error) {

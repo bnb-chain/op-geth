@@ -34,7 +34,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		EnableProofKeeper                       bool                   `toml:",omitempty"`
 		KeepProofBlockSpan                      uint64                 `toml:",omitempty"`
 		JournalFileEnabled                      bool                   `toml:",omitempty"`
-		EnableRecoverNodeBufferList             bool                   `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               int                    `toml:",omitempty"`
 		LightIngress                            int                    `toml:",omitempty"`
@@ -94,7 +93,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.EnableProofKeeper = c.EnableProofKeeper
 	enc.KeepProofBlockSpan = c.KeepProofBlockSpan
 	enc.JournalFileEnabled = c.JournalFileEnabled
-	enc.EnableRecoverNodeBufferList = c.EnableRecoverNodeBufferList
 	enc.RequiredBlocks = c.RequiredBlocks
 	enc.LightServ = c.LightServ
 	enc.LightIngress = c.LightIngress
@@ -158,7 +156,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		EnableProofKeeper                       *bool                  `toml:",omitempty"`
 		KeepProofBlockSpan                      *uint64                `toml:",omitempty"`
 		JournalFileEnabled                      *bool                  `toml:",omitempty"`
-		EnableRecoverNodeBufferList             *bool                  `toml:",omitempty"`
 		RequiredBlocks                          map[uint64]common.Hash `toml:"-"`
 		LightServ                               *int                   `toml:",omitempty"`
 		LightIngress                            *int                   `toml:",omitempty"`
@@ -252,9 +249,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.JournalFileEnabled != nil {
 		c.JournalFileEnabled = *dec.JournalFileEnabled
-	}
-	if dec.EnableRecoverNodeBufferList != nil {
-		c.EnableRecoverNodeBufferList = *dec.EnableRecoverNodeBufferList
 	}
 	if dec.RequiredBlocks != nil {
 		c.RequiredBlocks = dec.RequiredBlocks

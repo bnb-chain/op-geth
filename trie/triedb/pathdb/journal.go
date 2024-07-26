@@ -266,8 +266,7 @@ func (db *Database) loadLayers() layer {
 		dl      *diskLayer
 		stateID = rawdb.ReadPersistentStateID(db.diskdb)
 	)
-	if (errors.Is(err, errMissJournal) || errors.Is(err, errUnmatchedJournal)) && db.config.EnableRecoverNodeBufferList &&
-		db.config.TrieNodeBufferType == NodeBufferList {
+	if (errors.Is(err, errMissJournal) || errors.Is(err, errUnmatchedJournal)) && db.config.TrieNodeBufferType == NodeBufferList {
 		start := time.Now()
 		if db.freezer == nil {
 			log.Crit("Use unopened freezer db to recover node buffer list")

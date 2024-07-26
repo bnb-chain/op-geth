@@ -283,7 +283,6 @@ func (nf *nodebufferlist) createBlockInterval(startBlock, endBlock uint64) [][]u
 	return intervalBoundaries
 }
 
-// startStateID: persistentStateID+1, endStateID: freezerLength
 func (nf *nodebufferlist) createStateInterval(freezer *rawdb.ResettableFreezer, startStateID, endStateID uint64,
 	blockIntervals [][]uint64) ([][]uint64, error) {
 	blockMap, err := readAllBlockNumbers(freezer, startStateID, endStateID)

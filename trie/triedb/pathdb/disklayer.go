@@ -398,13 +398,11 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 	// needs to be reverted is not yet flushed and cached in node
 	// buffer, otherwise, manipulate persistent state directly.
 	if !dl.buffer.empty() {
-		log.Info("dl buffer is not empty")
 		err := dl.buffer.revert(dl.db.diskdb, nodes)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		log.Info("dl buffer is empty")
 		batch := dl.db.diskdb.NewBatch()
 		writeNodes(batch, nodes, dl.cleans)
 		rawdb.WritePersistentStateID(batch, dl.id-1)

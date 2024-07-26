@@ -463,7 +463,7 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 		storages         = make(map[common.Address]map[common.Hash][]byte)
 		accountList      []common.Address
 		storageList      = make(map[common.Address][]common.Hash)
-		encodedTrieNodes []journalNodes
+		decodedTrieNodes []journalNodes
 
 		r = &decoder{
 			accountData:    accountData,
@@ -495,7 +495,7 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 		}
 	}
 
-	if err := rlp.DecodeBytes(trieNodes, &encodedTrieNodes); err != nil {
+	if err := rlp.DecodeBytes(trieNodes, &decodedTrieNodes); err != nil {
 		log.Error("Failed to decode state history trie nodes", "error", err)
 		return err
 	}
@@ -504,7 +504,7 @@ func (h *history) decode(accountData, storageData, accountIndexes, storageIndexe
 	h.accountList = accountList
 	h.storages = storages
 	h.storageList = storageList
-	h.nodes = encodedTrieNodes
+	h.nodes = decodedTrieNodes
 	return nil
 }
 
@@ -577,7 +577,6 @@ func readAllBlockNumbers(freezer *rawdb.ResettableFreezer, startStateID, endStat
 		}
 		blockMap[m.block] = i
 	}
-	log.Info("state id", "startStateID", startStateID, "endStateID", endStateID, "length", len(blockMap))
 	return blockMap, nil
 }
 

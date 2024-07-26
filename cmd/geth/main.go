@@ -101,7 +101,7 @@ var (
 		utils.EnableProofKeeperFlag,
 		utils.KeepProofBlockSpanFlag,
 		utils.JournalFileFlag,
-		utils.EnableRecoverNodeBufferList,
+		utils.EnableRecoverNodeBufferListFlag,
 		utils.LightServeFlag,    // deprecated
 		utils.LightIngressFlag,  // deprecated
 		utils.LightEgressFlag,   // deprecated

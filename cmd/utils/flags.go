@@ -346,7 +346,7 @@ var (
 		Value:    false,
 		Category: flags.StateCategory,
 	}
-	EnableRecoverNodeBufferList = &cli.BoolFlag{
+	EnableRecoverNodeBufferListFlag = &cli.BoolFlag{
 		Name:     "pathdb.recovernodebufferlist",
 		Usage:    "Enable recovering node buffer list",
 		Value:    false,
@@ -1893,7 +1893,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.IsSet(JournalFileFlag.Name) {
 		cfg.JournalFileEnabled = true
 	}
-	if ctx.IsSet(EnableRecoverNodeBufferList.Name) {
+	if ctx.IsSet(EnableRecoverNodeBufferListFlag.Name) {
 		cfg.EnableRecoverNodeBufferList = true
 	}
 

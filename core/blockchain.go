@@ -716,7 +716,7 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	// Retrieve the last pivot block to short circuit rollbacks beyond it and the
 	// current freezer limit to start nuking id underflown
 	pivot := rawdb.ReadLastPivotNumber(bc.db)
-	frozen, _ := bc.db.Ancients()
+	frozen, _ := bc.db.BlockStore().Ancients()
 
 	updateFn := func(db ethdb.KeyValueWriter, header *types.Header) (*types.Header, bool) {
 		// Rewind the blockchain, ensuring we don't end up with a stateless head
@@ -1288,6 +1288,39 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			return 0, err
 		}
 		size += writeSize
+
+		// Write tx indices if any condition is satisfied:
+		// * If user requires to reserve all tx indices(txlookuplimit=0)
+		// * If all ancient tx indices are required to be reserved(txlookuplimit is even higher than ancientlimit)
+		// * If block number is large enough to be regarded as a recent block
+		// It means blocks below the ancientLimit-txlookupLimit won't be indexed.
+		//
+		// But if the `TxIndexTail` is not nil, e.g. Geth is initialized with
+		// an external ancient database, during the setup, blockchain will start
+		// a background routine to re-indexed all indices in [ancients - txlookupLimit, ancients)
+		// range. In this case, all tx indices of newly imported blocks should be
+		// generated.
+		batch := bc.db.NewBatch()
+		for i, block := range blockChain {
+			if bc.txLookupLimit == 0 || ancientLimit <= bc.txLookupLimit || block.NumberU64() >= ancientLimit-bc.txLookupLimit {
+				rawdb.WriteTxLookupEntriesByBlock(batch, block)
+			} else if rawdb.ReadTxIndexTail(bc.db) != nil {
+				rawdb.WriteTxLookupEntriesByBlock(batch, block)
+			}
+			stats.processed++
+
+			if batch.ValueSize() > ethdb.IdealBatchSize || i == len(blockChain)-1 {
+				size += int64(batch.ValueSize())
+				if err = batch.Write(); err != nil {
+					snapBlock := bc.CurrentSnapBlock().Number.Uint64()
+					if _, err := bc.db.BlockStore().TruncateHead(snapBlock + 1); err != nil {
+						log.Error("Can't truncate ancient store after failed insert", "err", err)
+					}
+					return 0, err
+				}
+				batch.Reset()
+			}
+		}
 
 		// Sync the ancient store explicitly to ensure all data has been flushed to disk.
 		if err := bc.db.BlockStore().Sync(); err != nil {
@@ -2645,12 +2678,12 @@ func (bc *BlockChain) NoTries() bool {
 func createDelFn(bc *BlockChain) func(db ethdb.KeyValueWriter, hash common.Hash, num uint64) {
 	return func(db ethdb.KeyValueWriter, hash common.Hash, num uint64) {
 		// Ignore the error here since light client won't hit this path
-		frozen, _ := bc.db.Ancients()
+		frozen, _ := bc.db.BlockStore().Ancients()
 		if num+1 <= frozen {
 			log.Info("process data in freeze table")
 			// Truncate all relative data(header, total difficulty, body, receipt
 			// and canonical hash) from ancient store.
-			if _, err := bc.db.TruncateHead(num); err != nil {
+			if _, err := bc.db.BlockStore().TruncateHead(num); err != nil {
 				log.Crit("Failed to truncate ancient data", "number", num, "err", err)
 			}
 			// Remove the hash <-> number mapping from the active store.

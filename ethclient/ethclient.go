@@ -667,6 +667,16 @@ func toCallArg(msg ethereum.CallMsg) interface{} {
 	return arg
 }
 
+// SimulateGaslessBundle simulates a gasless bundle
+func (ec *Client) SimulateGaslessBundle(ctx context.Context, args types.SimulateGaslessBundleArgs) (*types.SimulateGaslessBundleResp, error) {
+	var bundle types.SimulateGaslessBundleResp
+	err := ec.c.CallContext(ctx, &bundle, "eth_simulateGaslessBundle", args)
+	if err != nil {
+		return nil, err
+	}
+	return &bundle, nil
+}
+
 // SendBundle sends a bundle
 func (ec *Client) SendBundle(ctx context.Context, args types.SendBundleArgs) (common.Hash, error) {
 	var hash common.Hash
@@ -678,10 +688,13 @@ func (ec *Client) SendBundle(ctx context.Context, args types.SendBundleArgs) (co
 }
 
 // BundlePrice returns the price of a bundle
-func (ec *Client) BundlePrice(ctx context.Context) *big.Int {
+func (ec *Client) BundlePrice(ctx context.Context) (*big.Int, error) {
 	var price *big.Int
-	_ = ec.c.CallContext(ctx, &price, "eth_bundlePrice")
-	return price
+	err := ec.c.CallContext(ctx, &price, "eth_bundlePrice")
+	if err != nil {
+		return nil, err
+	}
+	return price, nil
 }
 
 // rpcProgress is a copy of SyncProgress with hex-encoded fields.

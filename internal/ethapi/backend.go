@@ -77,6 +77,7 @@ type Backend interface {
 
 	// Transaction pool API
 	SendTx(ctx context.Context, signedTx *types.Transaction) error
+	SimulateGaslessBundle(bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error)
 	SendBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error
 	BundlePrice() *big.Int
 	GetTransaction(ctx context.Context, txHash common.Hash) (*types.Transaction, common.Hash, uint64, uint64, error)

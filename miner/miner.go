@@ -301,6 +301,40 @@ func (miner *Miner) BuildPayload(args *BuildPayloadArgs) (*Payload, error) {
 }
 
 func (miner *Miner) SimulateBundle(bundle *types.Bundle) (*big.Int, error) {
+
+	env, err := miner.prepareSimulationEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	s, err := miner.worker.simulateBundles(env, []*types.Bundle{bundle})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(s) == 0 {
+		return nil, errors.New("no valid sim result")
+	}
+
+	return s[0].BundleGasPrice, nil
+}
+
+func (miner *Miner) SimulateGaslessBundle(bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+
+	env, err := miner.prepareSimulationEnv()
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := miner.worker.simulateGaslessBundle(env, bundle)
+	if err != nil {
+		return nil, err
+	}
+
+	return resp, nil
+}
+
+func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	parent := miner.eth.BlockChain().CurrentBlock()
 	timestamp := int64(parent.Time + 1)
 
@@ -351,15 +385,5 @@ func (miner *Miner) SimulateBundle(bundle *types.Bundle) (*big.Int, error) {
 		signer:  types.MakeSigner(miner.worker.chainConfig, header.Number, header.Time),
 		gasPool: prepareGasPool(header.GasLimit),
 	}
-
-	s, err := miner.worker.simulateBundles(env, []*types.Bundle{bundle})
-	if err != nil {
-		return nil, err
-	}
-
-	if len(s) == 0 {
-		return nil, errors.New("no valid sim result")
-	}
-
-	return s[0].BundleGasPrice, nil
+	return env, nil
 }

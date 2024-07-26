@@ -3,6 +3,7 @@ package ethapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -25,6 +26,29 @@ func (s *PrivateTxBundleAPI) BundlePrice(ctx context.Context) *big.Int {
 	return s.b.BundlePrice()
 }
 
+// SimulateGaslessBundle simulates the execution of a list of transactions with order
+func (s *PrivateTxBundleAPI) SimulateGaslessBundle(_ context.Context, args types.SimulateGaslessBundleArgs) (*types.SimulateGaslessBundleResp, error) {
+	if len(args.Txs) == 0 {
+		return nil, newBundleError(errors.New("bundle missing txs"))
+	}
+
+	var txs types.Transactions
+
+	for _, encodedTx := range args.Txs {
+		tx := new(types.Transaction)
+		if err := tx.UnmarshalBinary(encodedTx); err != nil {
+			return nil, err
+		}
+		txs = append(txs, tx)
+	}
+
+	bundle := &types.Bundle{
+		Txs: txs,
+	}
+
+	return s.b.SimulateGaslessBundle(bundle)
+}
+
 // SendBundle will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce and ensuring validity
 func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBundleArgs) (common.Hash, error) {
@@ -40,7 +64,7 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBund
 	}
 
 	if args.MaxBlockNumber != 0 && args.MaxBlockNumber > currentHeader.Number.Uint64()+types.MaxBundleAliveBlock {
-		return common.Hash{}, newBundleError(errors.New("the maxBlockNumber should not be lager than currentBlockNum + 300"))
+		return common.Hash{}, newBundleError(errors.New(fmt.Sprintf("the maxBlockNumber should not be lager than currentBlockNum + %d", types.MaxBundleAliveBlock)))
 	}
 
 	if args.MaxTimestamp != nil && args.MinTimestamp != nil && *args.MaxTimestamp != 0 && *args.MinTimestamp != 0 {
@@ -55,7 +79,7 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBund
 
 	if (args.MaxTimestamp != nil && *args.MaxTimestamp > currentHeader.Time+types.MaxBundleAliveTime) ||
 		(args.MinTimestamp != nil && *args.MinTimestamp > currentHeader.Time+types.MaxBundleAliveTime) {
-		return common.Hash{}, newBundleError(errors.New("the minTimestamp/maxTimestamp should not be later than currentBlockTimestamp + 5 minutes"))
+		return common.Hash{}, newBundleError(errors.New(fmt.Sprintf("the minTimestamp/maxTimestamp should not be later than currentBlockTimestamp + %d seconds", types.MaxBundleAliveTime)))
 	}
 
 	var txs types.Transactions

@@ -4,7 +4,7 @@ import (
 	"errors"
 	mapset "github.com/deckarep/golang-set/v2"
 	"math/big"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -96,13 +96,12 @@ func (w *worker) commitBundles(
 	for _, tx := range txs {
 		if interrupt != nil {
 			if signal := interrupt.Load(); signal != commitInterruptNone {
-				return signalToErr(signal)
+				return errors.New("failed bundle commit due to payload timeout or resolve")
 			}
 		}
 		// If we don't have enough gas for any further transactions then we're done.
 		if env.gasPool.Gas() < params.TxGas {
-			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas)
-			break
+			return errors.New("not enough gas for further transactions")
 		}
 		if tx == nil {
 			return errors.New("unexpected nil transaction in bundle")
@@ -178,10 +177,9 @@ func (w *worker) generateOrderedBundles(
 	bundles []*types.Bundle,
 ) (types.Transactions, *types.SimulatedBundle, error) {
 	// sort bundles according to gas price computed when received
-	sort.SliceStable(bundles, func(i, j int) bool {
-		priceI, priceJ := bundles[i].Price, bundles[j].Price
-
-		return priceI.Cmp(priceJ) >= 0
+	slices.SortStableFunc(bundles, func(i, j *types.Bundle) int {
+		priceI, priceJ := i.Price, j.Price
+		return priceI.Cmp(priceJ)
 	})
 
 	// recompute bundle gas price based on the same state and current env
@@ -192,10 +190,9 @@ func (w *worker) generateOrderedBundles(
 	}
 
 	// sort bundles according to fresh gas price
-	sort.SliceStable(simulatedBundles, func(i, j int) bool {
-		priceI, priceJ := simulatedBundles[i].BundleGasPrice, simulatedBundles[j].BundleGasPrice
-
-		return priceI.Cmp(priceJ) >= 0
+	slices.SortStableFunc(simulatedBundles, func(i, j *types.SimulatedBundle) int {
+		priceI, priceJ := i.BundleGasPrice, j.BundleGasPrice
+		return priceI.Cmp(priceJ)
 	})
 
 	// merge bundles based on iterative state
@@ -360,15 +357,27 @@ func (w *worker) simulateBundle(
 
 			return nil, err
 		}
+		if !w.eth.TxPool().Has(tx.Hash()) {
+			bundleGasUsed += receipt.GasUsed
 
-		bundleGasUsed += receipt.GasUsed
-
-		txGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
-		txGasFees := new(big.Int).Mul(txGasUsed, tx.GasPrice())
-		bundleGasFees.Add(bundleGasFees, txGasFees)
+			txGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
+			effectiveTip, er := tx.EffectiveGasTip(env.header.BaseFee)
+			if er != nil {
+				return nil, er
+			}
+			if env.header.BaseFee != nil {
+				log.Info("simulate bundle: header base fee", "value", env.header.BaseFee.String())
+				effectiveTip.Add(effectiveTip, env.header.BaseFee)
+			}
+			txGasFees := new(big.Int).Mul(txGasUsed, effectiveTip)
+			bundleGasFees.Add(bundleGasFees, txGasFees)
+		}
 	}
-
-	bundleGasPrice := new(big.Int).Div(bundleGasFees, new(big.Int).SetUint64(bundleGasUsed))
+	// if all txs in the bundle are from txpool, we accept the bundle without checking gas price
+	bundleGasPrice := big.NewInt(0)
+	if bundleGasUsed != 0 {
+		bundleGasPrice = new(big.Int).Div(bundleGasFees, new(big.Int).SetUint64(bundleGasUsed))
+	}
 
 	if bundleGasPrice.Cmp(big.NewInt(w.config.Mev.MevBundleGasPriceFloor)) < 0 {
 		err := errBundlePriceTooLow
@@ -387,6 +396,43 @@ func (w *worker) simulateBundle(
 		BundleGasFees:  bundleGasFees,
 		BundleGasPrice: bundleGasPrice,
 		BundleGasUsed:  bundleGasUsed,
+	}, nil
+}
+
+func (w *worker) simulateGaslessBundle(env *environment, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+	result := make([]types.GaslessTxSimResult, 0)
+
+	txIdx := 0
+	for _, tx := range bundle.Txs {
+		env.state.SetTxContext(tx.Hash(), txIdx)
+
+		var (
+			snap  = env.state.Snapshot()
+			gp    = env.gasPool.Gas()
+			valid = true
+		)
+
+		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &w.coinbase, env.gasPool, env.state, env.header, tx,
+			&env.header.GasUsed, *w.chain.GetVMConfig())
+		if err != nil {
+			env.state.RevertToSnapshot(snap)
+			env.gasPool.SetGas(gp)
+			valid = false
+			log.Warn("fail to simulate gasless bundle, skipped", "txHash", tx.Hash(), "err", err)
+		} else {
+			txIdx++
+		}
+
+		result = append(result, types.GaslessTxSimResult{
+			Hash:    tx.Hash(),
+			GasUsed: receipt.GasUsed,
+			Valid:   valid,
+		})
+	}
+
+	return &types.SimulateGaslessBundleResp{
+		Results:          result,
+		BasedBlockNumber: env.header.Number.Int64(),
 	}, nil
 }
 

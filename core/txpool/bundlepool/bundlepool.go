@@ -88,8 +88,6 @@ type BundlePool struct {
 	simulator BundleSimulator
 
 	bundleReceiverClients map[string]*rpc.Client
-	deliverBundleCh       chan *types.SendBundleArgs
-	exitCh                chan struct{}
 }
 
 func New(config Config, mevConfig miner.MevConfig) *BundlePool {
@@ -102,8 +100,6 @@ func New(config Config, mevConfig miner.MevConfig) *BundlePool {
 		bundles:               make(map[common.Hash]*types.Bundle),
 		bundleHeap:            make(BundleHeap, 0),
 		bundleReceiverClients: make(map[string]*rpc.Client),
-		deliverBundleCh:       make(chan *types.SendBundleArgs),
-		exitCh:                make(chan struct{}),
 	}
 	if pool.mevConfig.MevReceivers == nil {
 		return pool
@@ -114,31 +110,8 @@ func New(config Config, mevConfig miner.MevConfig) *BundlePool {
 	if len(pool.bundleReceiverClients) == 0 {
 		log.Error("No valid bundleReceivers")
 	}
-	go pool.deliverLoop()
 
 	return pool
-}
-
-func (p *BundlePool) deliverLoop() {
-	for {
-		select {
-		case bundle := <-p.deliverBundleCh:
-			for url, cli := range p.bundleReceiverClients {
-				cli := cli
-				url := url
-				go func() {
-					var hash common.Hash
-					err := cli.CallContext(context.Background(), &hash, "eth_sendBundle", *bundle)
-					if err != nil {
-						log.Error("failed to deliver bundle to receiver", "url", url, "err", err)
-					}
-				}()
-			}
-		case <-p.exitCh:
-			log.Warn("the deliverBundleCh is closed")
-			return
-		}
-	}
 }
 
 func (p *BundlePool) register(url string) {
@@ -207,8 +180,16 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 		return ErrBundleAlreadyExist
 	}
 
-	if len(p.bundleReceiverClients) != 0 {
-		p.deliverBundleCh <- originBundle
+	for url, cli := range p.bundleReceiverClients {
+		cli := cli
+		url := url
+		go func() {
+			var hash common.Hash
+			err := cli.CallContext(context.Background(), &hash, "eth_sendBundle", *originBundle)
+			if err != nil {
+				log.Error("failed to deliver bundle to receiver", "url", url, "err", err)
+			}
+		}()
 	}
 
 	for p.slots+numSlots(bundle) > p.config.GlobalSlots {

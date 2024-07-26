@@ -801,6 +801,8 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 				accountTries.Add(size)
 			case IsStorageTrieNode(key):
 				storageTries.Add(size)
+			case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
+				preimages.Add(size)
 			default:
 				var accounted bool
 				for _, meta := range [][]byte{
@@ -895,7 +897,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		{"Light client", "Bloom trie nodes", bloomTrieNodes.Size(), bloomTrieNodes.Count()},
 	}
 	// Inspect all registered append-only file store then.
-	ancients, err := inspectFreezers(db.BlockStore())
+	ancients, err := inspectFreezers(db)
 	if err != nil {
 		return err
 	}
@@ -911,27 +913,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		total += ancient.size()
 	}
 
-	// inspect ancient state in separate trie db if exist
-	if trieIter != nil {
-		stateAncients, err := inspectFreezers(db.StateStore())
-		if err != nil {
-			return err
-		}
-		for _, ancient := range stateAncients {
-			for _, table := range ancient.sizes {
-				if ancient.name == "chain" {
-					break
-				}
-				stats = append(stats, []string{
-					fmt.Sprintf("Ancient store (%s)", strings.Title(ancient.name)),
-					strings.Title(table.name),
-					table.size.String(),
-					fmt.Sprintf("%d", ancient.count()),
-				})
-			}
-			total += ancient.size()
-		}
-	}
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Database", "Category", "Size", "Items"})
 	table.SetFooter([]string{"", "Total", total.String(), " "})

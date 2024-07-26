@@ -548,7 +548,6 @@ func (nf *nodebufferlist) getLayers() uint64 {
 	defer nf.baseMux.RUnlock()
 	defer nf.flushMux.Unlock()
 
-	log.Info("nodebufferlist getLayers", "nf.layers", nf.layers, "nf.base.layers", nf.base.layers)
 	return nf.layers + nf.base.layers
 }
 

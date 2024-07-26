@@ -833,7 +833,7 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	env.receipts = append(env.receipts, receipt)
 	if w.config.Mev.MevEnabled {
 		effectiveTip, _ := tx.EffectiveGasTip(env.header.BaseFee)
-		if env.header.BaseFee != nil {
+		if !w.chainConfig.IsWright(env.header.Time) && env.header.BaseFee != nil {
 			effectiveTip.Add(effectiveTip, env.header.BaseFee)
 		}
 		env.profit.Add(env.profit, new(big.Int).Mul(new(big.Int).SetUint64(receipt.GasUsed), effectiveTip))
@@ -856,7 +856,7 @@ func (w *worker) commitBundleTransaction(env *environment, tx *types.Transaction
 	env.receipts = append(env.receipts, receipt)
 	if w.config.Mev.MevEnabled {
 		effectiveTip, _ := tx.EffectiveGasTip(env.header.BaseFee)
-		if env.header.BaseFee != nil {
+		if !w.chainConfig.IsWright(env.header.Time) && env.header.BaseFee != nil {
 			effectiveTip.Add(effectiveTip, env.header.BaseFee)
 		}
 		env.profit.Add(env.profit, new(big.Int).Mul(new(big.Int).SetUint64(receipt.GasUsed), effectiveTip))
@@ -1299,9 +1299,15 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
 
 	log.Debug("build payload statedb metrics", "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
+	fees := big.NewInt(0)
+	if w.config.Mev.MevEnabled && w.chainConfig.IsWright(block.Time()) {
+		fees = work.profit
+	} else {
+		fees = totalFees(block, work.receipts)
+	}
 	return &newPayloadResult{
 		block:    block,
-		fees:     totalFees(block, work.receipts),
+		fees:     fees,
 		sidecars: work.sidecars,
 		env:      work,
 	}

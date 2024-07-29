@@ -105,9 +105,10 @@ type ParallelTxRequest struct {
 	usedGas         *uint64
 	curTxChan       chan int
 	systemAddrRedo  bool
-	runnable        int32 // 0: not runnable, 1: runnable
+	runnable        int32 // 0: not runnable, executing, 1: runnable, on hold, can be scheduled
 	executedNum     atomic.Int32
 	retryNum        int32
+	conflictIndex   atomic.Int32
 }
 
 // to create and start the execution slot goroutines
@@ -302,9 +303,16 @@ func (p *ParallelStateProcessor) switchSlot(slotIndex int) {
 }
 
 func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxRequest) *ParallelTxResult {
+	mIndex := p.mergedTxIndex.Load()
+	conflictIndex := txReq.conflictIndex.Load()
+	if mIndex <= conflictIndex {
+		// The conflicted TX has not been finished executing, skip execution.
+		// the transaction failed at check(nonce or balance), actually it has not been executed yet.
+		atomic.CompareAndSwapInt32(&txReq.runnable, 0, 1)
+		return nil
+	}
 	execNum := txReq.executedNum.Add(1)
-	slotDB := state.NewSlotDB(txReq.baseStateDB, txReq.txIndex, int(p.mergedTxIndex.Load()), p.unconfirmedDBs)
-
+	slotDB := state.NewSlotDB(txReq.baseStateDB, txReq.txIndex, int(mIndex), p.unconfirmedDBs)
 	blockContext := NewEVMBlockContext(txReq.block.Header(), p.bc, nil, p.config, slotDB) // can share blockContext within a block for efficiency
 	txContext := NewEVMTxContext(txReq.msg)
 	vmenv := vm.NewEVM(blockContext, txContext, slotDB, p.config, txReq.vmConfig)
@@ -341,6 +349,21 @@ func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxR
 		p.unconfirmedDBs.Store(txReq.txIndex, slotDB)
 	} else {
 		// the transaction failed at check(nonce or balance), actually it has not been executed yet.
+		// the error here can be both expected and unexpected
+		// expected - the execution is correct and the error is normal result
+		// unexpected -  the execution is incorrectly accessed the state because of parallelization.
+		// In both case, rerun with next version of stateDB, it is a waste and buggy to rerun with same
+		// version of stateDB.
+		// Therefore, treat it as conflict and rerun, leave the result to conflict check.
+		// Load conflict as it maybe updated by conflict checker or other execution slots.
+		// use old mIndex so that we can try the new one that is updated by other thread of merging
+		// during execution.
+		conflictIndex = txReq.conflictIndex.Load()
+		if conflictIndex < mIndex {
+			if txReq.conflictIndex.CompareAndSwap(conflictIndex, mIndex) {
+				log.Debug("Update conflictIndex in execution because of error, new conflictIndex: %d", conflictIndex)
+			}
+		}
 		atomic.CompareAndSwapInt32(&txReq.runnable, 0, 1)
 		// the error could be caused by unconfirmed balance reference,
 		// the balance could insufficient to pay its gas limit, which cause it preCheck.buyGas() failed
@@ -397,6 +420,14 @@ func (p *ParallelStateProcessor) toConfirmTxIndex(targetTxIndex int, isStage2 bo
 		valid := p.toConfirmTxIndexResult(targetResult, isStage2)
 		if !valid {
 			staticSlotIndex := targetResult.txReq.staticSlotIndex // it is better to run the TxReq in its static dispatch slot
+			conflictBase := targetResult.slotDB.BaseTxIndex()
+			conflictIndex := targetResult.txReq.conflictIndex.Load()
+			if conflictIndex < int32(conflictBase) {
+				if targetResult.txReq.conflictIndex.CompareAndSwap(conflictIndex, int32(conflictBase)) {
+					// updated successfully
+					log.Debug("Update conflict index", "conflictIndex", conflictIndex, "conflictBase", conflictBase)
+				}
+			}
 			if isStage2 {
 				atomic.CompareAndSwapInt32(&targetResult.txReq.runnable, 0, 1) // needs redo
 				p.debugConflictRedoNum++
@@ -406,30 +437,32 @@ func (p *ParallelStateProcessor) toConfirmTxIndex(targetTxIndex int, isStage2 bo
 			}
 
 			if len(p.pendingConfirmResults[targetTxIndex]) == 0 { // this is the last result to check, and it is not valid
-				blockTxCount := targetResult.txReq.block.Transactions().Len()
 				// This means that the tx has been executed more than blockTxCount times, so it exits with the error.
 				// TODO-dav: p.mergedTxIndex+2 may be more reasonable? - this is buggy for expected exit
-				if targetResult.txReq.txIndex == int(p.mergedTxIndex.Load())+1 {
-					// txReq is the next to merge
-					if atomic.LoadInt32(&targetResult.txReq.retryNum) <= int32(blockTxCount)+3000 {
-						atomic.AddInt32(&targetResult.txReq.retryNum, 1)
-						// conflict retry
-					} else {
-						// retry many times and still conflict, either the tx is expected to be wrong, or something wrong.
-						if targetResult.err != nil {
-							if true { // TODO: delete the printf
-								fmt.Printf("!!!!!!!!!!! Parallel execution exited with error!!!!!, txIndex:%d, err: %v\n", targetResult.txReq.txIndex, targetResult.err)
-							}
-							return targetResult
+				if targetResult.txReq.txIndex == int(p.mergedTxIndex.Load())+1 &&
+					targetResult.slotDB.BaseTxIndex() == int(p.mergedTxIndex.Load()) {
+					/*
+						// txReq is the next to merge
+						if atomic.LoadInt32(&targetResult.txReq.retryNum) <= int32(blockTxCount)+3000 {
+							atomic.AddInt32(&targetResult.txReq.retryNum, 1)
+							// conflict retry
 						} else {
-							// abnormal exit with conflict error, need check the parallel algorithm
-							targetResult.err = ErrParallelUnexpectedConflict
-							if true {
-								fmt.Printf("!!!!!!!!!!! Parallel execution exited unexpected conflict!!!!!, txIndex:%d\n", targetResult.txReq.txIndex)
-							}
-							return targetResult
+					*/
+					// retry many times and still conflict, either the tx is expected to be wrong, or something wrong.
+					if targetResult.err != nil {
+						if false { // TODO: delete the printf
+							fmt.Printf("!!!!!!!!!!! Parallel execution exited with error!!!!!, txIndex:%d, err: %v\n", targetResult.txReq.txIndex, targetResult.err)
 						}
+						return targetResult
+					} else {
+						// abnormal exit with conflict error, need check the parallel algorithm
+						targetResult.err = ErrParallelUnexpectedConflict
+						if false {
+							fmt.Printf("!!!!!!!!!!! Parallel execution exited unexpected conflict!!!!!, txIndex:%d\n", targetResult.txReq.txIndex)
+						}
+						return targetResult
 					}
+					//}
 				}
 				atomic.CompareAndSwapInt32(&targetResult.txReq.runnable, 0, 1) // needs redo
 				p.debugConflictRedoNum++
@@ -508,11 +541,13 @@ func (p *ParallelStateProcessor) runSlotLoop(slotIndex int, slotType int32) {
 			}
 			if !atomic.CompareAndSwapInt32(&txReq.runnable, 1, 0) {
 				// not swapped: txReq.runnable == 0
-				//fmt.Printf("Dav -- runInLoop, - not runnable - TxREQ: %d\n", txReq.txIndex)
 				continue
 			}
-			// fmt.Printf("Dav -- runInLoop, - executeInSlot - TxREQ: %d\n", txReq.txIndex)
-			p.txResultChan <- p.executeInSlot(slotIndex, txReq)
+			res := p.executeInSlot(slotIndex, txReq)
+			if res == nil {
+				continue
+			}
+			p.txResultChan <- res
 			// fmt.Printf("Dav -- runInLoop, - loopbody tail - TxREQ: %d\n", txReq.txIndex)
 		}
 		// switched to the other slot.
@@ -531,7 +566,6 @@ func (p *ParallelStateProcessor) runSlotLoop(slotIndex int, slotType int32) {
 			if atomic.LoadInt32(&curSlot.activatedType) != slotType {
 				interrupted = true
 				// fmt.Printf("Dav -- stealLoop, - activatedType - TxREQ: %d\n", stealTxReq.txIndex)
-
 				break
 			}
 
@@ -542,7 +576,11 @@ func (p *ParallelStateProcessor) runSlotLoop(slotIndex int, slotType int32) {
 				continue
 			}
 			// fmt.Printf("Dav -- stealLoop, - executeInSlot - TxREQ: %d\n", stealTxReq.txIndex)
-			p.txResultChan <- p.executeInSlot(slotIndex, stealTxReq)
+			res := p.executeInSlot(slotIndex, stealTxReq)
+			if res == nil {
+				continue
+			}
+			p.txResultChan <- res
 			// fmt.Printf("Dav -- stealLoop, - loopbody tail - TxREQ: %d\n", stealTxReq.txIndex)
 		}
 	}
@@ -625,14 +663,19 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 
 	var root []byte
 	header := result.txReq.block.Header()
-	if p.config.IsByzantium(header.Number) {
-		result.slotDB.FinaliseForParallel(true, statedb)
-	} else {
-		root = result.slotDB.IntermediateRootForSlotDB(p.config.IsEIP158(header.Number), statedb).Bytes()
-	}
-	result.receipt.PostState = root
+
+	isByzantium := p.config.IsByzantium(header.Number)
+	isEIP158 := p.config.IsEIP158(header.Number)
+	result.slotDB.FinaliseForParallel(isByzantium || isEIP158, statedb)
+
 	// merge slotDB into mainDB
 	statedb.MergeSlotDB(result.slotDB, result.receipt, resultTxIndex)
+
+	// Do IntermediateRoot after mergeSlotDB.
+	if !isByzantium {
+		root = statedb.IntermediateRoot(isEIP158).Bytes()
+	}
+	result.receipt.PostState = root
 
 	if resultTxIndex != int(p.mergedTxIndex.Load())+1 {
 		log.Error("ProcessParallel tx result out of order", "resultTxIndex", resultTxIndex,
@@ -729,6 +772,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 			retryNum:        0,
 		}
 		txReq.executedNum.Store(0)
+		txReq.conflictIndex.Store(-2)
 		p.allTxReqs = append(p.allTxReqs, txReq)
 	}
 	// set up stage2 enter criteria

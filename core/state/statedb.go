@@ -18,6 +18,7 @@
 package state
 
 import (
+	"bytes"
 	"fmt"
 	"runtime"
 	"sort"
@@ -51,6 +52,116 @@ type revision struct {
 	journalIndex int
 }
 
+var emptyAddr = common.Address{}
+
+type StateKeys map[common.Hash]struct{}
+
+type StateObjectSyncMap struct {
+	sync.Map
+}
+
+func (s *StateObjectSyncMap) LoadStateObject(addr common.Address) (*stateObject, bool) {
+	so, ok := s.Load(addr)
+	if !ok {
+		return nil, ok
+	}
+	return so.(*stateObject), ok
+}
+
+func (s *StateObjectSyncMap) StoreStateObject(addr common.Address, stateObject *stateObject) {
+	s.Store(addr, stateObject)
+}
+
+// loadStateObj is the entry for loading state object from stateObjects in StateDB or stateObjects in parallel
+func (s *StateDB) loadStateObj(addr common.Address) (*stateObject, bool) {
+
+	if s.isParallel {
+		ret, ok := s.parallel.stateObjects.LoadStateObject(addr)
+		return ret, ok
+	}
+
+	obj, ok := s.stateObjects[addr]
+	return obj, ok
+}
+
+// storeStateObj is the entry for storing state object to stateObjects in StateDB or stateObjects in parallel
+func (s *StateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
+	if s.isParallel {
+		// When a state object is stored into s.parallel.stateObjects,
+		// it belongs to base StateDB, it is confirmed and valid.
+		// TODO-dav: remove the lock/unlock?
+		stateObject.db.storeParallelLock.Lock()
+		s.parallel.stateObjects.Store(addr, stateObject)
+		stateObject.db.storeParallelLock.Unlock()
+	} else {
+		s.stateObjects[addr] = stateObject
+	}
+}
+
+// deleteStateObj is the entry for deleting state object to stateObjects in StateDB or stateObjects in parallel
+func (s *StateDB) deleteStateObj(addr common.Address) {
+	if s.isParallel {
+		s.parallel.stateObjects.Delete(addr)
+	} else {
+		delete(s.stateObjects, addr)
+	}
+}
+
+// ParallelState is for parallel mode only
+type ParallelState struct {
+	isSlotDB  bool // denotes StateDB is used in slot, we will try to remove it
+	SlotIndex int  // for debug, to be removed
+	// stateObjects holds the state objects in the base slot db
+	// the reason for using stateObjects instead of stateObjects on the outside is
+	// we need a thread safe map to hold state objects since there are many slots will read
+	// state objects from it;
+	// And we will merge all the changes made by the concurrent slot into it.
+	stateObjects *StateObjectSyncMap
+
+	baseStateDB               *StateDB // for parallel mode, there will be a base StateDB in dispatcher routine.
+	baseTxIndex               int      // slotDB is created base on this tx index.
+	dirtiedStateObjectsInSlot map[common.Address]*stateObject
+	unconfirmedDBs            *sync.Map /*map[int]*ParallelStateDB*/ // do unconfirmed reference in same slot.
+
+	// we will record the read detail for conflict check and
+	// the changed addr or key for object merge, the changed detail can be achieved from the dirty object
+	nonceChangesInSlot   map[common.Address]struct{}
+	nonceReadsInSlot     map[common.Address]uint64
+	balanceChangesInSlot map[common.Address]struct{}     // the address's balance has been changed
+	balanceReadsInSlot   map[common.Address]*uint256.Int // the address's balance has been read and used.
+	// codeSize can be derived based on code, but codeHash can not be directly derived based on code
+	// - codeSize is 0 for address not exist or empty code
+	// - codeHash is `common.Hash{}` for address not exist, emptyCodeHash(`Keccak256Hash(nil)`) for empty code,
+	// so we use codeReadsInSlot & codeHashReadsInSlot to keep code and codeHash, codeSize is derived from code
+	codeReadsInSlot     map[common.Address][]byte // empty if address not exist or no code in this address
+	codeHashReadsInSlot map[common.Address]common.Hash
+	codeChangesInSlot   map[common.Address]struct{}
+	kvReadsInSlot       map[common.Address]Storage
+	kvChangesInSlot     map[common.Address]StateKeys // value will be kept in dirtiedStateObjectsInSlot
+	// Actions such as SetCode, Suicide will change address's state.
+	// Later call like Exist(), Empty(), HasSuicided() depend on the address's state.
+	addrStateReadsInSlot   map[common.Address]bool // true: exist, false: not exist or deleted
+	addrStateChangesInSlot map[common.Address]bool // true: created, false: deleted
+
+	addrSnapDestructsReadsInSlot map[common.Address]bool
+
+	accountsDeletedRecord      []common.Hash
+	storagesDeleteRecord       []common.Hash
+	accountsOriginDeleteRecord []common.Address
+	storagesOriginDeleteRecord []common.Address
+
+	// Transaction will pay gas fee to system address.
+	// Parallel execution will clear system address's balance at first, in order to maintain transaction's
+	// gas fee value. Normal transaction will access system address twice, otherwise it means the transaction
+	// needs real system address's balance, the transaction will be marked redo with keepSystemAddressBalance = true
+	// systemAddress            common.Address
+	// systemAddressOpsCount    int
+	// keepSystemAddressBalance bool
+
+	// we may need to redo for some specific reasons, like we read the wrong state and need to panic in sequential mode in SubRefund
+	needsRedo bool
+}
+
 // StateDB structs within the ethereum protocol are used to store anything
 // within the merkle trie. StateDBs take care of caching and storing
 // nested states. It's the general query interface to retrieve:
@@ -70,6 +181,13 @@ type StateDB struct {
 	hasher     crypto.KeccakState
 	snaps      *snapshot.Tree    // Nil if snapshot is not available
 	snap       snapshot.Snapshot // Nil if snapshot is not available
+
+	storeParallelLock sync.RWMutex
+	snapParallelLock  sync.RWMutex // for parallel mode, for main StateDB, slot will read snapshot, while processor will write.
+	trieParallelLock  sync.Mutex   // for parallel mode, for getting states/objects from trie, to handle trie tracer.
+	snapDestructs     map[common.Address]struct{}
+	snapAccounts      map[common.Address][]byte
+	snapStorage       map[common.Address]map[string][]byte
 
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
@@ -149,13 +267,20 @@ type StateDB struct {
 	AccountDeleted int
 	StorageDeleted int
 
+	isParallel bool
+	parallel   ParallelState // to keep all the parallel execution elements
 	// Testing hooks
 	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
+}
+
+func (s *StateDB) GetStateObjectFromUnconfirmedDB(addr common.Address) (*stateObject, bool) {
+	return nil, false
 }
 
 // New creates a new state from a given trie.
 func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) {
 	tr, err := db.OpenTrie(root)
+
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +303,11 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		accessList:           newAccessList(),
 		transientStorage:     newTransientStorage(),
 		hasher:               crypto.NewKeccakState(),
+
+		parallel: ParallelState{
+			SlotIndex: -1,
+		},
+		txIndex: -1,
 	}
 	if sdb.snaps != nil {
 		sdb.snap = sdb.snaps.Snapshot(root)
@@ -213,6 +343,18 @@ func NewStateDBByTrie(tr Trie, db Database, snaps *snapshot.Tree) (*StateDB, err
 	}
 	_, sdb.noTrie = tr.(*trie.EmptyTrie)
 	return sdb, nil
+}
+
+func (s *StateDB) IsParallel() bool {
+	return s.isParallel
+}
+
+func (s *StateDB) getBaseStateDB() *StateDB {
+	return s
+}
+
+func (s *StateDB) getStateObjectFromStateObjects(addr common.Address) (*stateObject, bool) {
+	return s.loadStateObj(addr)
 }
 
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the
@@ -264,7 +406,6 @@ func (s *StateDB) Error() error {
 
 func (s *StateDB) AddLog(log *types.Log) {
 	s.journal.append(addLogChange{txhash: s.thash})
-
 	log.TxHash = s.thash
 	log.TxIndex = uint(s.txIndex)
 	log.Index = s.logSize
@@ -336,6 +477,7 @@ func (s *StateDB) Empty(addr common.Address) bool {
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
+
 func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
@@ -346,20 +488,19 @@ func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
 
 // GetNonce retrieves the nonce from the given address or 0 if object not found
 func (s *StateDB) GetNonce(addr common.Address) uint64 {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.Nonce()
+	object := s.getStateObject(addr)
+	if object != nil {
+		return object.Nonce()
 	}
-
 	return 0
 }
 
 // GetStorageRoot retrieves the storage root from the given address or empty
 // if object not found.
 func (s *StateDB) GetStorageRoot(addr common.Address) common.Hash {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.Root()
+	object := s.getStateObject(addr)
+	if object != nil {
+		return object.Root()
 	}
 	return common.Hash{}
 }
@@ -369,22 +510,31 @@ func (s *StateDB) TxIndex() int {
 	return s.txIndex
 }
 
+// BaseTxIndex returns the tx index that slot db based.
+func (s *StateDB) BaseTxIndex() int {
+	return s.parallel.baseTxIndex
+}
+
 func (s *StateDB) GetCode(addr common.Address) []byte {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.Code()
+	object := s.getStateObject(addr)
+	if object != nil {
+		return object.Code()
 	}
 	return nil
 }
 
 func (s *StateDB) GetCodeSize(addr common.Address) int {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.CodeSize()
+	object := s.getStateObject(addr)
+	if object != nil {
+		return object.CodeSize()
 	}
 	return 0
 }
 
+// GetCodeHash return:
+//   - common.Hash{}: the address does not exist
+//   - emptyCodeHash: the address exist, but code is empty
+//   - others:        the address exist, and code is not empty
 func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
@@ -395,18 +545,18 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 
 // GetState retrieves a value from the given account's storage trie.
 func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.GetState(hash)
+	object := s.getStateObject(addr)
+	if object != nil {
+		return object.GetState(hash)
 	}
 	return common.Hash{}
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 func (s *StateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.GetCommittedState(hash)
+	object := s.getStateObject(addr)
+	if object != nil {
+		return object.GetCommittedState(hash)
 	}
 	return common.Hash{}
 }
@@ -417,9 +567,9 @@ func (s *StateDB) Database() Database {
 }
 
 func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
-	stateObject := s.getStateObject(addr)
-	if stateObject != nil {
-		return stateObject.selfDestructed
+	object := s.getStateObject(addr)
+	if object != nil {
+		return object.selfDestructed
 	}
 	return false
 }
@@ -466,6 +616,7 @@ func (s *StateDB) SetCode(addr common.Address, code []byte) {
 }
 
 func (s *StateDB) SetState(addr common.Address, key, value common.Hash) {
+
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
@@ -485,6 +636,7 @@ func (s *StateDB) SetStorage(addr common.Address, storage map[common.Hash]common
 	// TODO(rjl493456442) this function should only be supported by 'unwritable'
 	// state and all mutations made should all be discarded afterwards.
 	if _, ok := s.stateObjectsDestruct[addr]; !ok {
+		fmt.Printf("Dav -- setStorage - stateObjectsDestruct[%s] = nil\n", addr)
 		s.stateObjectsDestruct[addr] = nil
 	}
 	stateObject := s.getOrNewStateObject(addr)
@@ -513,12 +665,11 @@ func (s *StateDB) SelfDestruct(addr common.Address) {
 }
 
 func (s *StateDB) Selfdestruct6780(addr common.Address) {
-	stateObject := s.getStateObject(addr)
-	if stateObject == nil {
+	object := s.getStateObject(addr)
+	if object == nil {
 		return
 	}
-
-	if stateObject.created {
+	if object.created {
 		s.SelfDestruct(addr)
 	}
 }
@@ -601,6 +752,7 @@ func (s *StateDB) deleteStateObject(obj *stateObject) {
 	}
 	// Delete the account from the trie
 	addr := obj.Address()
+
 	if err := s.trie.DeleteAccount(addr); err != nil {
 		s.setError(fmt.Errorf("deleteStateObject (%x) error: %v", addr[:], err))
 	}
@@ -610,23 +762,50 @@ func (s *StateDB) deleteStateObject(obj *stateObject) {
 // the object is not found or was deleted in this execution context. If you need
 // to differentiate between non-existent/just-deleted, use getDeletedStateObject.
 func (s *StateDB) getStateObject(addr common.Address) *stateObject {
-	if obj := s.getDeletedStateObject(addr); obj != nil && !obj.deleted {
+	obj := s.getDeletedStateObject(addr)
+	if obj != nil && !obj.deleted {
 		return obj
 	}
 	return nil
 }
 
-// getDeletedStateObject is similar to getStateObject, but instead of returning
-// nil for a deleted state object, it returns the actual object with the deleted
-// flag set. This is needed by the state journal to revert to the correct s-
-// destructed object instead of wiping all knowledge about the state object.
-func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
-	// Prefer live objects if any is available
-	if obj := s.stateObjects[addr]; obj != nil {
-		return obj
+func (s *StateDB) GetStateObjectFromSnapshotOrTrie(addr common.Address) (data *types.StateAccount, ok bool) {
+	return s.getStateObjectFromSnapshotOrTrie(addr)
+}
+
+func (s *StateDB) SnapHasAccount(addr common.Address) (exist bool) {
+	if s.snap == nil {
+		fmt.Printf("Dav -- Test Snap have account snap is nil\n")
+		return false
 	}
+
+	acc, _ := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
+	fmt.Printf("Dav -- Test Snap have account, root %s, have? %v\n", s.snap.Root(), acc != nil)
+	return acc != nil
+}
+
+func (s *StateDB) TriHasAccount(addr common.Address) (exist bool) {
+	if s.trie == nil {
+		return false
+	}
+
+	acc, _ := s.trie.GetAccount(addr)
+	return acc != nil
+}
+
+func (s *StateDB) GetTrie() Trie {
+	if s.trie == nil {
+		return nil
+	}
+	return s.trie
+}
+
+func (s *StateDB) SetTrie(trie Trie) {
+	s.trie = trie
+}
+
+func (s *StateDB) getStateObjectFromSnapshotOrTrie(addr common.Address) (data *types.StateAccount, ok bool) {
 	// If no live objects are available, attempt to use snapshots
-	var data *types.StateAccount
 	if s.snap != nil {
 		start := time.Now()
 		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
@@ -635,7 +814,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		}
 		if err == nil {
 			if acc == nil {
-				return nil
+				return nil, false
 			}
 			data = &types.StateAccount{
 				Nonce:    acc.Nonce,
@@ -644,53 +823,117 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 				Root:     common.BytesToHash(acc.Root),
 			}
 			if len(data.CodeHash) == 0 {
-				data.CodeHash = types.EmptyCodeHash.Bytes()
+				data.CodeHash = emptyCodeHash
 			}
 			if data.Root == (common.Hash{}) {
 				data.Root = types.EmptyRootHash
 			}
 		}
 	}
+
 	// If snapshot unavailable or reading from it failed, load from the database
 	if data == nil {
+		var trie Trie
+		if s.isParallel {
+			// hold lock for parallel
+			s.trieParallelLock.Lock()
+			defer s.trieParallelLock.Unlock()
+			if s.parallel.isSlotDB {
+				if s.parallel.baseStateDB == nil {
+					return nil, false
+				} else {
+					tr, err := s.parallel.baseStateDB.db.OpenTrie(s.originalRoot)
+					if err != nil {
+						log.Error("Can not openTrie for parallel SlotDB\n")
+						return nil, false
+					}
+					trie = tr
+				}
+			} else {
+				trie = s.trie
+			}
+		} else {
+			trie = s.trie
+		}
+
 		start := time.Now()
 		var err error
-		data, err = s.trie.GetAccount(addr)
+		data, err = trie.GetAccount(addr)
 		if metrics.EnabledExpensive {
 			s.AccountReads += time.Since(start)
 		}
 		if err != nil {
 			s.setError(fmt.Errorf("getDeleteStateObject (%x) error: %w", addr.Bytes(), err))
-			return nil
+			return nil, false
 		}
 		if data == nil {
-			return nil
+			return nil, false
 		}
 	}
+
+	return data, true
+}
+
+// getDeletedStateObject is similar to getStateObject, but instead of returning
+// nil for a deleted state object, it returns the actual object with the deleted
+// flag set. This is needed by the state journal to revert to the correct s-
+// destructed object instead of wiping all knowledge about the state object.
+func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
+	// Prefer live objects if any is available
+	if obj, _ := s.getStateObjectFromStateObjects(addr); obj != nil {
+		return obj
+	}
+
+	data, ok := s.getStateObjectFromSnapshotOrTrie(addr)
+	if !ok {
+		return nil
+	}
 	// Insert into the live set
-	obj := newObject(s, addr, data)
-	s.setStateObject(obj)
+	obj := newObject(s, s.isParallel, addr, data)
+	s.storeStateObj(addr, obj)
 	return obj
 }
 
 func (s *StateDB) setStateObject(object *stateObject) {
-	s.stateObjects[object.Address()] = object
+	if s.isParallel {
+		// When a state object is stored into s.parallel.stateObjects,
+		// it belongs to base StateDB, it is confirmed and valid.
+		s.storeParallelLock.Lock()
+		s.parallel.stateObjects.Store(object.address, object)
+		s.storeParallelLock.Unlock()
+	} else {
+		s.stateObjects[object.Address()] = object
+	}
+
 }
 
 // getOrNewStateObject retrieves a state object or create a new state object if nil.
 func (s *StateDB) getOrNewStateObject(addr common.Address) *stateObject {
 	stateObject := s.getStateObject(addr)
 	if stateObject == nil {
-		stateObject, _ = s.createObject(addr)
+		stateObject = s.createObject(addr)
 	}
 	return stateObject
 }
 
 // createObject creates a new state object. If there is an existing account with
 // the given address, it is overwritten and returned as the second return value.
-func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) {
-	prev = s.getDeletedStateObject(addr) // Note, prev might have been deleted, we need that!
-	newobj = newObject(s, addr, nil)
+// prev is used for CreateAccount to get its balance
+// Parallel mode:
+// if prev in dirty:  revert is ok
+// if prev in unconfirmed DB:  addr state read record, revert should not put it back
+// if prev in main DB:  addr state read record, revert should not put it back
+// if pre no exist:  addr state read record,
+
+// `prev` is used to handle revert, to recover with the `prev` object
+// In Parallel mode, we only need to recover to `prev` in SlotDB,
+//
+//	a.if it is not in SlotDB, `revert` will remove it from the SlotDB
+//	b.if it is existed in SlotDB, `revert` will recover to the `prev` in SlotDB
+//	c.as `snapDestructs` it is the same
+func (s *StateDB) createObject(addr common.Address) (newobj *stateObject) {
+	prev := s.getDeletedStateObject(addr) // Note, prev might have been deleted, we need that!
+	newobj = newObject(s, s.isParallel, addr, nil)
 	if prev == nil {
 		s.journal.append(createObjectChange{account: &addr})
 	} else {
@@ -698,6 +941,8 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 		// account and storage data should be cleared as well. Note, it must
 		// be done here, otherwise the destruction event of "original account"
 		// will be lost.
+		s.snapParallelLock.Lock() // fixme: with new dispatch policy, the ending Tx could running, while the block have processed.
+
 		_, prevdestruct := s.stateObjectsDestruct[prev.address]
 		if !prevdestruct {
 			s.stateObjectsDestruct[prev.address] = prev.origin
@@ -720,12 +965,19 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 		delete(s.storages, prev.addrHash)
 		delete(s.accountsOrigin, prev.address)
 		delete(s.storagesOrigin, prev.address)
+
+		if s.parallel.isSlotDB {
+			s.parallel.accountsDeletedRecord = append(s.parallel.accountsDeletedRecord, prev.addrHash)
+			s.parallel.storagesDeleteRecord = append(s.parallel.storagesDeleteRecord, prev.addrHash)
+			s.parallel.accountsOriginDeleteRecord = append(s.parallel.accountsOriginDeleteRecord, prev.address)
+			s.parallel.storagesOriginDeleteRecord = append(s.parallel.storagesOriginDeleteRecord, prev.address)
+		}
+		s.snapParallelLock.Unlock()
 	}
+
+	newobj.created = true
 	s.setStateObject(newobj)
-	if prev != nil && !prev.deleted {
-		return newobj, prev
-	}
-	return newobj, nil
+	return newobj
 }
 
 // CreateAccount explicitly creates a state object. If a state object with the address
@@ -739,15 +991,26 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (s *StateDB) CreateAccount(addr common.Address) {
-	newObj, prev := s.createObject(addr)
-	if prev != nil {
-		newObj.setBalance(prev.data.Balance)
-	}
+	// no matter it is got from dirty, unconfirmed or main DB
+	// if addr not exist, preBalance will be common.Big0, it is same as new(big.Int) which
+	// is the value newObject(),
+	preBalance := s.GetBalance(addr)
+	newObj := s.createObject(addr)
+	newObj.setBalance(new(uint256.Int).Set(preBalance)) // new big.Int for newObj
 }
 
 // Copy creates a deep, independent copy of the state.
 // Snapshots of the copied state cannot be applied to the copy.
 func (s *StateDB) Copy() *StateDB {
+	return s.copyInternal(false)
+}
+
+// CopyDoPrefetch It is mainly for state prefetcher to do trie prefetch right now.
+func (s *StateDB) CopyDoPrefetch() *StateDB {
+	return s.copyInternal(true)
+}
+
+func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 	// Copy all the basic fields, initialize the memory ones
 	state := &StateDB{
 		db:                   s.db,
@@ -774,6 +1037,8 @@ func (s *StateDB) Copy() *StateDB {
 		// miner to operate trie-backed only.
 		snaps: s.snaps,
 		snap:  s.snap,
+
+		parallel: ParallelState{},
 	}
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
@@ -781,11 +1046,11 @@ func (s *StateDB) Copy() *StateDB {
 		// and in the Finalise-method, there is a case where an object is in the journal but not
 		// in the stateObjects: OOG after touch on ripeMD prior to Byzantium. Thus, we need to check for
 		// nil
-		if object, exist := s.stateObjects[addr]; exist {
+		if object, exist := s.getStateObjectFromStateObjects(addr); exist {
 			// Even though the original object is dirty, we are not copying the journal,
 			// so we need to make sure that any side-effect the journal would have caused
 			// during a commit (or similar op) is already applied to the copy.
-			state.stateObjects[addr] = object.deepCopy(state)
+			state.storeStateObj(addr, object.deepCopy(state))
 
 			state.stateObjectsDirty[addr] = struct{}{}   // Mark the copy dirty to force internal (code/state) commits
 			state.stateObjectsPending[addr] = struct{}{} // Mark the copy pending to force external (account) commits
@@ -796,19 +1061,22 @@ func (s *StateDB) Copy() *StateDB {
 	// is empty. Thus, here we iterate over stateObjects, to enable copies
 	// of copies.
 	for addr := range s.stateObjectsPending {
-		if _, exist := state.stateObjects[addr]; !exist {
-			state.stateObjects[addr] = s.stateObjects[addr].deepCopy(state)
+		if _, exist := state.getStateObjectFromStateObjects(addr); !exist {
+			object, _ := s.getStateObjectFromStateObjects(addr)
+			state.storeStateObj(addr, object.deepCopy(state))
 		}
 		state.stateObjectsPending[addr] = struct{}{}
 	}
 	for addr := range s.stateObjectsDirty {
-		if _, exist := state.stateObjects[addr]; !exist {
-			state.stateObjects[addr] = s.stateObjects[addr].deepCopy(state)
+		if _, exist := state.getStateObjectFromStateObjects(addr); !exist {
+			object, _ := s.getStateObjectFromStateObjects(addr)
+			state.storeStateObj(addr, object.deepCopy(state))
 		}
 		state.stateObjectsDirty[addr] = struct{}{}
 	}
 	// Deep copy the destruction markers.
 	for addr, value := range s.stateObjectsDestruct {
+		// fmt.Printf("Dav -- copyInternal - stateObjectsDestruct[%s] = (%p) : %v \n", addr, value, value)
 		state.stateObjectsDestruct[addr] = value
 	}
 	// Deep copy the state changes made in the scope of block
@@ -849,6 +1117,280 @@ func (s *StateDB) Copy() *StateDB {
 	return state
 }
 
+var journalPool = sync.Pool{
+	New: func() interface{} {
+		return &journal{
+			dirties: make(map[common.Address]int, defaultNumOfSlots),
+			entries: make([]journalEntry, 0, defaultNumOfSlots),
+		}
+	},
+}
+
+var addressToStructPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]struct{}, defaultNumOfSlots) },
+}
+
+var addressToStateKeysPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]StateKeys, defaultNumOfSlots) },
+}
+
+var addressToStoragePool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]Storage, defaultNumOfSlots) },
+}
+
+var addressToStateObjectsPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]*stateObject, defaultNumOfSlots) },
+}
+
+var balancePool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]*uint256.Int, defaultNumOfSlots) },
+}
+
+var addressToHashPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]common.Hash, defaultNumOfSlots) },
+}
+
+var addressToBytesPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address][]byte, defaultNumOfSlots) },
+}
+
+var addressToBoolPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]bool, defaultNumOfSlots) },
+}
+
+var addressToUintPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]uint64, defaultNumOfSlots) },
+}
+
+var snapStoragePool = sync.Pool{
+	New: func() interface{} { return make(map[common.Address]map[string][]byte, defaultNumOfSlots) },
+}
+
+var snapStorageValuePool = sync.Pool{
+	New: func() interface{} { return make(map[string][]byte, defaultNumOfSlots) },
+}
+
+var logsPool = sync.Pool{
+	New: func() interface{} { return make(map[common.Hash][]*types.Log, defaultNumOfSlots) },
+}
+
+func (s *StateDB) PutSyncPool() {
+	for key := range s.parallel.codeReadsInSlot {
+		delete(s.parallel.codeReadsInSlot, key)
+	}
+	addressToBytesPool.Put(s.parallel.codeReadsInSlot)
+
+	for key := range s.parallel.codeHashReadsInSlot {
+		delete(s.parallel.codeHashReadsInSlot, key)
+	}
+	addressToHashPool.Put(s.parallel.codeHashReadsInSlot)
+
+	for key := range s.parallel.codeChangesInSlot {
+		delete(s.parallel.codeChangesInSlot, key)
+	}
+	addressToStructPool.Put(s.parallel.codeChangesInSlot)
+
+	for key := range s.parallel.kvChangesInSlot {
+		delete(s.parallel.kvChangesInSlot, key)
+	}
+	addressToStateKeysPool.Put(s.parallel.kvChangesInSlot)
+
+	for key := range s.parallel.kvReadsInSlot {
+		delete(s.parallel.kvReadsInSlot, key)
+	}
+	addressToStoragePool.Put(s.parallel.kvReadsInSlot)
+
+	for key := range s.parallel.balanceChangesInSlot {
+		delete(s.parallel.balanceChangesInSlot, key)
+	}
+	addressToStructPool.Put(s.parallel.balanceChangesInSlot)
+
+	for key := range s.parallel.balanceReadsInSlot {
+		delete(s.parallel.balanceReadsInSlot, key)
+	}
+	balancePool.Put(s.parallel.balanceReadsInSlot)
+
+	for key := range s.parallel.addrStateReadsInSlot {
+		delete(s.parallel.addrStateReadsInSlot, key)
+	}
+	addressToBoolPool.Put(s.parallel.addrStateReadsInSlot)
+
+	for key := range s.parallel.addrStateChangesInSlot {
+		delete(s.parallel.addrStateChangesInSlot, key)
+	}
+	addressToBoolPool.Put(s.parallel.addrStateChangesInSlot)
+
+	for key := range s.parallel.nonceChangesInSlot {
+		delete(s.parallel.nonceChangesInSlot, key)
+	}
+	addressToStructPool.Put(s.parallel.nonceChangesInSlot)
+
+	for key := range s.parallel.nonceReadsInSlot {
+		delete(s.parallel.nonceReadsInSlot, key)
+	}
+	addressToUintPool.Put(s.parallel.nonceReadsInSlot)
+
+	for key := range s.parallel.addrSnapDestructsReadsInSlot {
+		delete(s.parallel.addrSnapDestructsReadsInSlot, key)
+	}
+	addressToBoolPool.Put(s.parallel.addrSnapDestructsReadsInSlot)
+
+	for key := range s.parallel.dirtiedStateObjectsInSlot {
+		delete(s.parallel.dirtiedStateObjectsInSlot, key)
+	}
+	addressToStateObjectsPool.Put(s.parallel.dirtiedStateObjectsInSlot)
+
+	for key := range s.stateObjectsPending {
+		delete(s.stateObjectsPending, key)
+	}
+	addressToStructPool.Put(s.stateObjectsPending)
+
+	for key := range s.stateObjectsDirty {
+		delete(s.stateObjectsDirty, key)
+	}
+	addressToStructPool.Put(s.stateObjectsDirty)
+
+	for key := range s.logs {
+		delete(s.logs, key)
+	}
+	logsPool.Put(s.logs)
+
+	for key := range s.journal.dirties {
+		delete(s.journal.dirties, key)
+	}
+	s.journal.entries = s.journal.entries[:0]
+	journalPool.Put(s.journal)
+
+	for key := range s.snapDestructs {
+		delete(s.snapDestructs, key)
+	}
+	addressToStructPool.Put(s.snapDestructs)
+
+	for key := range s.snapAccounts {
+		delete(s.snapAccounts, key)
+	}
+	addressToBytesPool.Put(s.snapAccounts)
+
+	for key, storage := range s.snapStorage {
+		for key := range storage {
+			delete(storage, key)
+		}
+		snapStorageValuePool.Put(storage)
+		delete(s.snapStorage, key)
+	}
+	snapStoragePool.Put(s.snapStorage)
+}
+
+// CopyForSlot copy all the basic fields, initialize the memory ones
+func (s *StateDB) CopyForSlot() *ParallelStateDB {
+	parallel := ParallelState{
+		// The stateObjects in Parallel is thread-local.
+		// The base stateDB's stateObjects is thread-unsafe as it is not guarded by lock.
+		// The base stateDB's parallel.stateObjects is SyncMap and thread-safe. and no extra lock needed (TODO-dav).
+		// The base stateDB's parallel.stateObjects are updated by mergeSlotDB with Lock.
+		// The base stateDB's stateObject is read-only and never be updated once parallel execution happens.
+		// AND, presumably, the stateDB's stateObject is usually empty for real on-chain cases.
+		// Before execution, the slotDB should copy objects from base stateDB's parallel.stateObjects and stateObjects
+		// NOTICE:
+		// We are not reusing the base slot db's stateObjects although copy can be avoid. Because multiple thread
+		// access has lock check and there might be tricky bug such as thread1 handle tx0 at the same time with thread2
+		// handle tx1, so what thread1's slotDB see in the s.parallel.stateObjects might be the middle result of Thread2.
+		//
+		// We are not do simple copy (lightweight pointer copy) as the stateObject can be accessed by different thread.
+		// Todo-dav: remove lock guard of parallel.stateObject access.
+
+		stateObjects:                 &StateObjectSyncMap{}, // s.parallel.stateObjects,
+		codeReadsInSlot:              addressToBytesPool.Get().(map[common.Address][]byte),
+		codeHashReadsInSlot:          addressToHashPool.Get().(map[common.Address]common.Hash),
+		codeChangesInSlot:            addressToStructPool.Get().(map[common.Address]struct{}),
+		kvChangesInSlot:              addressToStateKeysPool.Get().(map[common.Address]StateKeys),
+		kvReadsInSlot:                addressToStoragePool.Get().(map[common.Address]Storage),
+		balanceChangesInSlot:         addressToStructPool.Get().(map[common.Address]struct{}),
+		balanceReadsInSlot:           balancePool.Get().(map[common.Address]*uint256.Int),
+		addrStateReadsInSlot:         addressToBoolPool.Get().(map[common.Address]bool),
+		addrStateChangesInSlot:       addressToBoolPool.Get().(map[common.Address]bool),
+		nonceChangesInSlot:           addressToStructPool.Get().(map[common.Address]struct{}),
+		nonceReadsInSlot:             addressToUintPool.Get().(map[common.Address]uint64),
+		addrSnapDestructsReadsInSlot: addressToBoolPool.Get().(map[common.Address]bool),
+		isSlotDB:                     true,
+		dirtiedStateObjectsInSlot:    addressToStateObjectsPool.Get().(map[common.Address]*stateObject),
+		accountsDeletedRecord:        make([]common.Hash, 10),
+		storagesDeleteRecord:         make([]common.Hash, 10),
+		accountsOriginDeleteRecord:   make([]common.Address, 10),
+		storagesOriginDeleteRecord:   make([]common.Address, 10),
+	}
+	state := &ParallelStateDB{
+		StateDB: StateDB{
+			db:                   s.db,
+			trie:                 nil, // Parallel StateDB may access the trie, but it takes no effect to the baseDB.
+			accounts:             make(map[common.Hash][]byte),
+			storages:             make(map[common.Hash]map[common.Hash][]byte),
+			accountsOrigin:       make(map[common.Address][]byte),
+			storagesOrigin:       make(map[common.Address]map[common.Hash][]byte),
+			stateObjects:         make(map[common.Address]*stateObject), // replaced by parallel.stateObjects in parallel mode
+			stateObjectsPending:  addressToStructPool.Get().(map[common.Address]struct{}),
+			stateObjectsDirty:    addressToStructPool.Get().(map[common.Address]struct{}),
+			stateObjectsDestruct: make(map[common.Address]*types.StateAccount),
+			refund:               0, // should be 0
+			logs:                 logsPool.Get().(map[common.Hash][]*types.Log),
+			logSize:              0,
+			preimages:            make(map[common.Hash][]byte, len(s.preimages)),
+			journal:              journalPool.Get().(*journal),
+			hasher:               crypto.NewKeccakState(),
+			isParallel:           true,
+			parallel:             parallel,
+		},
+	}
+	// no need to copy preimages, comment out and remove later
+	// for hash, preimage := range s.preimages {
+	//	state.preimages[hash] = preimage
+	// }
+
+	// copy parallel stateObjects
+	s.storeParallelLock.Lock()
+	s.parallel.stateObjects.Range(func(addr any, stateObj any) bool {
+		state.parallel.stateObjects.StoreStateObject(addr.(common.Address), stateObj.(*stateObject).lightCopy(state))
+		return true
+	})
+	s.storeParallelLock.Unlock()
+	if s.snaps != nil {
+		// In order for the miner to be able to use and make additions
+		// to the snapshot tree, we need to copy that as well.
+		// Otherwise, any block mined by ourselves will cause gaps in the tree,
+		// and force the miner to operate trie-backed only
+		state.snaps = s.snaps
+		state.snap = s.snap
+		// deep copy needed
+		state.snapDestructs = addressToStructPool.Get().(map[common.Address]struct{})
+		s.snapParallelLock.RLock()
+		for k, v := range s.snapDestructs {
+			state.snapDestructs[k] = v
+		}
+		s.snapParallelLock.RUnlock()
+		// snapAccounts is useless in SlotDB, comment out and remove later
+		// state.snapAccounts = make(map[common.Address][]byte) // snapAccountPool.Get().(map[common.Address][]byte)
+		// for k, v := range s.snapAccounts {
+		//	state.snapAccounts[k] = v
+		// }
+
+		// snapStorage is useless in SlotDB either, it is updated on updateTrie, which is validation phase to update the snapshot of a finalized block.
+		// state.snapStorage = snapStoragePool.Get().(map[common.Address]map[string][]byte)
+		// for k, v := range s.snapStorage {
+		//	temp := snapStorageValuePool.Get().(map[string][]byte)
+		//	for kk, vv := range v {
+		//		temp[kk] = vv
+		//	}
+		//	state.snapStorage[k] = temp
+		// }
+
+		// trie prefetch should be done by dispatcher on StateObject Merge,
+		// disable it in parallel slot
+		// state.prefetcher = s.prefetcher
+	}
+
+	return state
+}
+
 // Snapshot returns an identifier for the current revision of the state.
 func (s *StateDB) Snapshot() int {
 	id := s.nextRevisionId
@@ -883,8 +1425,21 @@ func (s *StateDB) GetRefund() uint64 {
 // into the tries just yet. Only IntermediateRoot or Commit will do that.
 func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	addressesToPrefetch := make([][]byte, 0, len(s.journal.dirties))
+
 	for addr := range s.journal.dirties {
-		obj, exist := s.stateObjects[addr]
+		var obj *stateObject
+		var exist bool
+		if s.parallel.isSlotDB {
+			obj = s.parallel.dirtiedStateObjectsInSlot[addr]
+			if obj != nil {
+				exist = true
+			} else {
+				log.Error("StateDB Finalise dirty addr not in dirtiedStateObjectsInSlot",
+					"addr", addr)
+			}
+		} else {
+			obj, exist = s.getStateObjectFromStateObjects(addr)
+		}
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
 			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
@@ -894,6 +1449,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			// Thus, we can safely ignore it here
 			continue
 		}
+
 		if obj.selfDestructed || (deleteEmptyObjects && obj.empty()) {
 			obj.deleted = true
 
@@ -910,9 +1466,23 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			delete(s.storages, obj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 			delete(s.accountsOrigin, obj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
 			delete(s.storagesOrigin, obj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
+
+			if s.parallel.isSlotDB {
+				s.parallel.accountsDeletedRecord = append(s.parallel.accountsDeletedRecord, obj.addrHash)
+				s.parallel.storagesDeleteRecord = append(s.parallel.storagesDeleteRecord, obj.addrHash)
+				s.parallel.accountsOriginDeleteRecord = append(s.parallel.accountsOriginDeleteRecord, obj.address)
+				s.parallel.storagesOriginDeleteRecord = append(s.parallel.storagesOriginDeleteRecord, obj.address)
+			}
+
 		} else {
-			obj.finalise(true) // Prefetch slots in the background
+			// 1.none parallel mode, we do obj.finalise(true) as normal
+			// 2.with parallel mode, we do obj.finalise(true) on dispatcher, not on slot routine
+			//   obj.finalise(true) will clear its dirtyStorage, will make prefetch broken.
+			if !s.isParallel || !s.parallel.isSlotDB {
+				obj.finalise(true) // Prefetch slots in the background
+			}
 		}
+
 		obj.created = false
 		s.stateObjectsPending[addr] = struct{}{}
 		s.stateObjectsDirty[addr] = struct{}{}
@@ -932,6 +1502,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 // IntermediateRoot computes the current root hash of the state trie.
 // It is called in between transactions to get the root hash that
 // goes into transaction receipts.
+// TODO: For parallel SlotDB, IntermediateRootForSlot is used, need to clean up this method.
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
@@ -991,18 +1562,39 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	// the remainder without, but pre-byzantium even the initial prefetcher is
 	// useless, so no sleep lost.
 	prefetcher := s.prefetcher
+	r := s.originalRoot
 	if s.prefetcher != nil {
 		defer func() {
 			s.prefetcher.close()
 			s.prefetcher = nil
 		}()
+		if s.isParallel {
+			r = s.trie.Hash()
+		}
 	}
-
+	// Although naively it makes sense to retrieve the account trie and then do
+	// the contract storage and account updates sequentially, that short circuits
+	// the account prefetcher. Instead, let's process all the storage updates
+	// first, giving the account prefetches just a few more milliseconds of time
+	// to pull useful data from disk.
+	for addr := range s.stateObjectsPending {
+		var obj *stateObject
+		if s.parallel.isSlotDB {
+			if obj = s.parallel.dirtiedStateObjectsInSlot[addr]; !obj.deleted {
+				obj.updateRoot()
+			}
+		} else {
+			if obj, _ = s.getStateObjectFromStateObjects(addr); !obj.deleted {
+				obj.updateRoot()
+			}
+		}
+	}
 	// Now we're about to start to write changes to the trie. The trie is so far
 	// _untouched_. We can check with the prefetcher, if it can give us a trie
 	// which has the same root, but also has some content loaded into it.
+	// The parallel execution do the change incrementally, so can not check the prefetcher here
 	if prefetcher != nil {
-		if trie := prefetcher.trie(common.Hash{}, s.originalRoot); trie != nil {
+		if trie := prefetcher.trie(common.Hash{}, r); trie != nil {
 			s.trie = trie
 		}
 	}
@@ -1015,8 +1607,17 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	}
 
 	usedAddrs := make([][]byte, 0, len(s.stateObjectsPending))
+
 	for addr := range s.stateObjectsPending {
-		if obj := s.stateObjects[addr]; obj.deleted {
+		if s.parallel.isSlotDB {
+			if obj := s.parallel.dirtiedStateObjectsInSlot[addr]; obj.deleted {
+				s.deleteStateObject(obj)
+				s.AccountDeleted += 1
+			} else {
+				s.updateStateObject(obj)
+				s.AccountUpdated += 1
+			}
+		} else if obj, _ := s.getStateObjectFromStateObjects(addr); obj.deleted {
 			s.deleteStateObject(obj)
 			s.AccountDeleted += 1
 		} else {
@@ -1028,8 +1629,11 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	if prefetcher != nil {
 		prefetcher.used(common.Hash{}, s.originalRoot, usedAddrs)
 	}
+	// parallel slotDB trie will be updated to mainDB since intermediateRoot happens after conflict check.
+	// so it should be save to clear pending here.
+	// otherwise there can be a case that the deleted object get ignored and processes as live object in verify phase.
 
-	if len(s.stateObjectsPending) > 0 {
+	if /*s.isParallel == false &&*/ len(s.stateObjectsPending) > 0 {
 		s.stateObjectsPending = make(map[common.Address]struct{})
 	}
 	// Track the amount of time wasted on hashing the account trie
@@ -1221,6 +1825,7 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 	if s.db.TrieDB().Scheme() == rawdb.HashScheme {
 		return incomplete, nil
 	}
+
 	for addr, prev := range s.stateObjectsDestruct {
 		// The original account was non-existing, and it's marked as destructed
 		// in the scope of block. It can be case (a) or (b).
@@ -1241,6 +1846,7 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 		if prev.Root == types.EmptyRootHash {
 			continue
 		}
+
 		// Remove storage slots belong to the account.
 		aborted, slots, set, err := s.deleteStorage(addr, addrHash, prev.Root)
 		if err != nil {
@@ -1253,6 +1859,9 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 		if aborted {
 			incomplete[addr] = struct{}{}
 			delete(s.storagesOrigin, addr)
+			if s.parallel.isSlotDB {
+				s.parallel.storagesOriginDeleteRecord = append(s.parallel.storagesOriginDeleteRecord, addr)
+			}
 			continue
 		}
 		if s.storagesOrigin[addr] == nil {
@@ -1651,4 +2260,328 @@ func copy2DSet[k comparable](set map[k]map[common.Hash][]byte) map[k]map[common.
 		}
 	}
 	return copied
+}
+
+// PrepareForParallel prepares for state db to be used in parallel execution mode.
+func (s *StateDB) PrepareForParallel() {
+	s.isParallel = true
+	s.parallel.stateObjects = &StateObjectSyncMap{}
+	// copy objects in stateObjects into parallel if not exist.
+	// This is lock free as the PrepareForParallel() is invoked at serial phase.
+	for addr, objPtr := range s.stateObjects {
+		if _, exist := s.parallel.stateObjects.LoadStateObject(addr); !exist {
+			newObj := objPtr.deepCopy(s)
+			s.parallel.stateObjects.StoreStateObject(addr, newObj)
+		}
+	}
+}
+
+func (s *StateDB) AddrPrefetch(slotDb *ParallelStateDB) {
+	addressesToPrefetch := make([][]byte, 0, len(slotDb.parallel.dirtiedStateObjectsInSlot))
+	for addr, obj := range slotDb.parallel.dirtiedStateObjectsInSlot {
+		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:])) // Copy needed for closure
+		if obj.deleted {
+			continue
+		}
+		// copied from obj.finalise(true)
+		slotsToPrefetch := make([][]byte, 0, obj.dirtyStorage.Length())
+		obj.dirtyStorage.Range(func(key, value interface{}) bool {
+			originalValue, _ := obj.originStorage.GetValue(key.(common.Hash))
+			if value.(common.Hash) != originalValue {
+				originalKey := key.(common.Hash)
+				slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(originalKey[:])) // Copy needed for closure
+			}
+			return true
+		})
+		if s.prefetcher != nil && len(slotsToPrefetch) > 0 {
+			s.prefetcher.prefetch(obj.addrHash, obj.data.Root, obj.address, slotsToPrefetch)
+		}
+	}
+
+	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		// log.Info("AddrPrefetch", "slotDb.TxIndex", slotDb.TxIndex(),
+		//	"len(addressesToPrefetch)", len(slotDb.parallel.addressesToPrefetch))
+		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, emptyAddr, addressesToPrefetch)
+	}
+}
+
+// MergeSlotDB is for Parallel execution mode, when the transaction has been
+// finalized(dirty -> pending) on execution slot, the execution results should be
+// merged back to the main StateDB.
+func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receipt, txIndex int) *StateDB {
+	s.SetTxContext(slotDb.thash, slotDb.txIndex)
+
+	for s.nextRevisionId < slotDb.nextRevisionId {
+		if len(slotDb.validRevisions) > 0 {
+			r := slotDb.validRevisions[s.nextRevisionId]
+			s.validRevisions = append(s.validRevisions, r)
+		}
+		s.nextRevisionId++
+		if len(slotDb.validRevisions) < s.nextRevisionId {
+			continue
+		}
+	}
+
+	// receipt.Logs use unified log index within a block
+	// align slotDB's log index to the block stateDB's logSize
+	for _, l := range slotReceipt.Logs {
+		l.Index += s.logSize
+		s.logs[s.thash] = append(s.logs[s.thash], l)
+	}
+
+	s.logSize += slotDb.logSize
+
+	// only merge dirty objects
+	addressesToPrefetch := make([][]byte, 0, len(slotDb.stateObjectsDirty))
+
+	for addr := range slotDb.stateObjectsDirty {
+		if _, exist := s.stateObjectsDirty[addr]; !exist {
+			s.stateObjectsDirty[addr] = struct{}{}
+		}
+
+		// stateObjects: KV, balance, nonce...
+		dirtyObj, ok := slotDb.parallel.dirtiedStateObjectsInSlot[addr]
+		if !ok {
+			log.Error("parallel merge, but dirty object not exist!", "SlotIndex", slotDb.parallel.SlotIndex, "txIndex:", slotDb.txIndex, "addr", addr)
+			continue
+		}
+		mainObj, exist := s.loadStateObj(addr)
+
+		if !exist || mainObj.deleted {
+
+			// fixme: it is also state change
+			// addr not exist on main DB, do ownership transfer
+			// dirtyObj.db = s
+			// dirtyObj.finalise(true) // true: prefetch on dispatcher
+			mainObj = dirtyObj.deepCopy(s)
+			/*	if addr == WBNBAddress && slotDb.wbnbMakeUpBalance != nil {
+				mainObj.setBalance(slotDb.wbnbMakeUpBalance)
+			}*/
+			if !dirtyObj.deleted {
+				mainObj.finalise(true)
+			}
+			s.storeStateObj(addr, mainObj)
+
+			// fixme: should not delete, would cause unconfirmed DB incorrect?
+			// delete(slotDb.parallel.dirtiedStateObjectsInSlot, addr) // transfer ownership, fixme: shared read?
+			if dirtyObj.deleted {
+				// remove the addr from snapAccounts&snapStorage only when object is deleted.
+				// "deleted" is not equal to "snapDestructs", since createObject() will add an addr for
+				//  snapDestructs to destroy previous object, while it will keep the addr in snapAccounts & snapAccounts
+				delete(s.snapAccounts, addr)
+				delete(s.snapStorage, addr)
+				delete(s.accounts, dirtyObj.addrHash)      // Clear out any previously updated account data (may be recreated via a resurrect)
+				delete(s.storages, dirtyObj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
+				delete(s.accountsOrigin, dirtyObj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
+				delete(s.storagesOrigin, dirtyObj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
+			}
+		} else {
+			// addr already in main DB, do merge: balance, KV, code, State(create, suicide)
+			// can not do copy or ownership transfer directly, since dirtyObj could have outdated
+			// data(maybe updated within the conflict window)
+			var newMainObj = mainObj // we don't need to copy the object since the storages are thread safe
+			if _, ok := slotDb.parallel.addrStateChangesInSlot[addr]; ok {
+				// there are 3 kinds of state change:
+				// 1.Suicide
+				// 2.Empty Delete
+				// 3.createObject
+				//   a: AddBalance,SetState to a non-exist or deleted(suicide, empty delete) address.
+				//   b: CreateAccount: like DAO the fork, regenerate an account carry its balance without KV
+				// For these state change, do ownership transfer for efficiency:
+				// dirtyObj.db = s
+				// newMainObj = dirtyObj
+
+				// The deepCopy() here introduces issue that the pendingStorage may not empty until block validation.
+				// so the pendingStorage filled by the execution of previous txs in same block may get overwritten by
+				// deepCopy here, which causes issue in root calculation.
+				newMainObj = dirtyObj.deepCopy(s)
+
+				// Merge Storages. Only merge ones doesn't exist, since dirtyObj is newer than mainObj
+				mainObj.originStorage.Range(func(key, value interface{}) bool {
+					if _, found := newMainObj.originStorage.GetValue(key.(common.Hash)); !found {
+						newMainObj.originStorage.StoreValue(key.(common.Hash), value.(common.Hash))
+					}
+					return true
+				})
+
+				mainObj.pendingStorage.Range(func(key, value interface{}) bool {
+					if _, found := newMainObj.pendingStorage.GetValue(key.(common.Hash)); !found {
+						newMainObj.pendingStorage.StoreValue(key.(common.Hash), value.(common.Hash))
+					}
+					return true
+				})
+
+				// TODO - dav: check -  the dirtyStorage should be always empty for mainObj as it should be moved to
+				// pendingStorage by Finalise in execution phase.
+				mainObj.dirtyStorage.Range(func(key, value interface{}) bool {
+					if _, found := newMainObj.dirtyStorage.GetValue(key.(common.Hash)); !found {
+						newMainObj.dirtyStorage.StoreValue(key.(common.Hash), value.(common.Hash))
+					}
+					return true
+				})
+
+				// should not delete, would cause unconfirmed DB incorrect.
+				// delete(slotDb.parallel.dirtiedStateObjectsInSlot, addr) // transfer ownership, fixme: shared read?
+				if dirtyObj.deleted {
+					// remove the addr from snapAccounts&snapStorage only when object is deleted.
+					// "deleted" is not equal to "snapDestructs", since createObject() will add an addr for
+					//  snapDestructs to destroy previous object, while it will keep the addr in snapAccounts & snapAccounts
+					delete(s.snapAccounts, addr)
+					delete(s.snapStorage, addr)
+					delete(s.accounts, dirtyObj.addrHash)      // Clear out any previously updated account data (may be recreated via a resurrect)
+					delete(s.storages, dirtyObj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
+					delete(s.accountsOrigin, dirtyObj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
+					delete(s.storagesOrigin, dirtyObj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
+				}
+			} else {
+				// deepCopy a temporary *stateObject for safety, since slot could read the address,
+				// dispatch should avoid overwrite the StateObject directly otherwise, it could
+				// crash for: concurrent map iteration and map write
+
+				if _, balanced := slotDb.parallel.balanceChangesInSlot[addr]; balanced {
+					newMainObj.setBalance(dirtyObj.Balance())
+				}
+				if _, coded := slotDb.parallel.codeChangesInSlot[addr]; coded {
+					if bytes.Equal(dirtyObj.data.CodeHash, types.EmptyCodeHash.Bytes()) { // addr.Hex() == "0x0000000000000000000000000000000000000100" {
+						fmt.Printf("Dav -- MergeSlotDB - codeChangeInSlot - setObjectCodeHash to Empty, addr: %s\n", addr)
+					}
+					newMainObj.code = dirtyObj.code
+					newMainObj.data.CodeHash = dirtyObj.data.CodeHash
+					newMainObj.dirtyCode = true
+				}
+				if keys, stated := slotDb.parallel.kvChangesInSlot[addr]; stated {
+					newMainObj.MergeSlotObject(s.db, dirtyObj, keys)
+				}
+				if _, nonced := slotDb.parallel.nonceChangesInSlot[addr]; nonced {
+					// dirtyObj.Nonce() should not be less than newMainObj
+					newMainObj.setNonce(dirtyObj.Nonce())
+				}
+				newMainObj.deleted = dirtyObj.deleted
+			}
+			if !newMainObj.deleted {
+				newMainObj.finalise(true) // true: prefetch on dispatcher
+			}
+			// update the object
+			s.storeStateObj(addr, newMainObj)
+		}
+		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:])) // Copy needed for closure
+	}
+
+	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, emptyAddr, addressesToPrefetch) // prefetch for trie node of account
+	}
+
+	for addr := range slotDb.stateObjectsPending {
+		if _, exist := s.stateObjectsPending[addr]; !exist {
+			s.stateObjectsPending[addr] = struct{}{}
+		}
+	}
+
+	for addr := range slotDb.stateObjectsDestruct {
+		if acc, exist := s.stateObjectsDestruct[addr]; !exist {
+			s.stateObjectsDestruct[addr] = acc
+		}
+	}
+	// slotDb.logs: logs will be kept in receipts, no need to do merge
+
+	for hash, preimage := range slotDb.preimages {
+		s.preimages[hash] = preimage
+	}
+	if s.accessList != nil && slotDb.accessList != nil {
+		s.accessList = slotDb.accessList.Copy()
+	}
+
+	// handle accounts, storages and origins
+	for _, addr := range slotDb.parallel.accountsDeletedRecord {
+		if _, ok := s.accounts[addr]; ok {
+			delete(s.accounts, addr)
+		}
+	}
+	for addr, val := range slotDb.accounts {
+		s.accounts[addr] = val
+	}
+
+	// storages
+	for _, addr := range slotDb.parallel.storagesDeleteRecord {
+		if _, ok := s.storages[addr]; ok {
+			delete(s.storages, addr)
+		}
+	}
+
+	for addr, slotStMap := range slotDb.storages {
+		mainStMap := s.storages[addr]
+		if mainStMap == nil {
+			mainStMap = make(map[common.Hash][]byte)
+		}
+		for k, v := range slotStMap {
+			mainStMap[k] = v
+		}
+		s.storages[addr] = mainStMap
+	}
+
+	// accountsOrigin
+	for _, addr := range slotDb.parallel.accountsOriginDeleteRecord {
+		if _, ok := s.accountsOrigin[addr]; ok {
+			delete(s.accountsOrigin, addr)
+		}
+	}
+
+	for addr, val := range slotDb.accountsOrigin {
+		s.accountsOrigin[addr] = val
+	}
+
+	// storagesOrigin
+	for _, addr := range slotDb.parallel.storagesOriginDeleteRecord {
+		if _, ok := s.storagesOrigin[addr]; ok {
+			delete(s.storagesOrigin, addr)
+		}
+	}
+
+	for addr, slotStOrgMap := range slotDb.storagesOrigin {
+		mainStOrgMap := s.storagesOrigin[addr]
+		if mainStOrgMap == nil {
+			mainStOrgMap = make(map[common.Hash][]byte)
+		}
+		for k, v := range slotStOrgMap {
+			mainStOrgMap[k] = v
+		}
+		s.storagesOrigin[addr] = mainStOrgMap
+	}
+
+	if slotDb.snaps != nil {
+		for k := range slotDb.snapDestructs {
+			// There could be a race condition for parallel transaction execution
+			// One transaction add balance 0 to an empty address, will delete it(delete empty is enabled).
+			// While another concurrent transaction could add a none-zero balance to it, make it not empty
+			// We fixed it by add an addr state read record for add balance 0
+			s.snapParallelLock.Lock()
+			s.snapDestructs[k] = struct{}{}
+			s.snapParallelLock.Unlock()
+		}
+	}
+
+	return s
+}
+
+func (s *StateDB) ParallelMakeUp(common.Address, []byte) {
+	// do nothing, this API is for parallel mode
+}
+
+func (s *StateDB) PrintParallelStateObjects() {
+	if s.parallel.stateObjects == nil {
+		return
+	}
+	s.parallel.stateObjects.Range(func(a any, v any) bool {
+		fmt.Printf("Dav - .parallel.stateObjects addr %v, val: %v\n", a, v)
+		return true
+	})
+}
+
+func (s *StateDB) GetNonceFromBaseDB(addr common.Address) uint64 {
+	return s.getBaseStateDB().GetNonce(addr)
+}
+
+// delete me!
+func (s *StateDB) GetDB() Database {
+	return s.db
 }

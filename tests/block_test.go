@@ -21,8 +21,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestBlockchain(t *testing.T) {
@@ -90,4 +91,5 @@ func execBlockTest(t *testing.T, bt *testMatcher, test *BlockTest) {
 		t.Errorf("test in path mode with snapshotter failed: %v", err)
 		return
 	}
+
 }

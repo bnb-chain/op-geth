@@ -188,7 +188,7 @@ func benchmarkEVM_Create(bench *testing.B, code string) {
 			EIP155Block:         new(big.Int),
 			EIP158Block:         new(big.Int),
 		},
-		EVMConfig: vm.Config{},
+		EVMConfig: vm.Config{EnableParallelExec: true, ParallelTxNum: 1},
 	}
 	// Warm up the intpools and stuff
 	bench.ResetTimer()

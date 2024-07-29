@@ -243,7 +243,7 @@ func runReport(stats *generateStats, stop chan bool) {
 // generateTrieRoot generates the trie hash based on the snapshot iterator.
 // It can be used for generating account trie, storage trie or even the
 // whole state which connects the accounts and the corresponding storages.
-func generateTrieRoot(db ethdb.KeyValueWriter, scheme string, it Iterator, account common.Hash, generatorFn trieGeneratorFn, leafCallback leafCallbackFn, stats *generateStats, report bool) (common.Hash, error) {
+func generateTrieRoot(db ethdb.KeyValueWriter, scheme string, it Iterator, accountExt common.Hash, generatorFn trieGeneratorFn, leafCallback leafCallbackFn, stats *generateStats, report bool) (common.Hash, error) {
 	var (
 		in      = make(chan trieKV)         // chan to pass leaves
 		out     = make(chan common.Hash, 1) // chan to collect result
@@ -254,7 +254,7 @@ func generateTrieRoot(db ethdb.KeyValueWriter, scheme string, it Iterator, accou
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		generatorFn(db, scheme, account, in, out)
+		generatorFn(db, scheme, accountExt, in, out)
 	}()
 	// Spin up a go-routine for progress logging
 	if report && stats != nil {
@@ -294,12 +294,13 @@ func generateTrieRoot(db ethdb.KeyValueWriter, scheme string, it Iterator, accou
 	)
 	// Start to feed leaves
 	for it.Next() {
-		if account == (common.Hash{}) {
+		if accountExt == (common.Hash{}) {
 			var (
 				err      error
 				fullData []byte
 			)
 			if leafCallback == nil {
+
 				fullData, err = types.FullAccountRLP(it.(AccountIterator).Account())
 				if err != nil {
 					return stop(err)
@@ -323,7 +324,12 @@ func generateTrieRoot(db ethdb.KeyValueWriter, scheme string, it Iterator, accou
 						return
 					}
 					if account.Root != subroot {
-						results <- fmt.Errorf("invalid subroot(path %x), want %x, have %x", hash, account.Root, subroot)
+
+						// results <- fmt.Errorf("invalid subroot(path %x), want %x, have %x", hash, account.Root, subroot)
+
+						results <- fmt.Errorf("invalid subroot(path %x), want %x, have %x\n accountEXT: %s, account.ROOT: %v, codehash: %s\n",
+							hash, account.Root, subroot, accountExt.Hex(), account.Root, common.Bytes2Hex(account.CodeHash))
+
 						return
 					}
 					results <- nil
@@ -342,20 +348,20 @@ func generateTrieRoot(db ethdb.KeyValueWriter, scheme string, it Iterator, accou
 		// Accumulate the generation statistic if it's required.
 		processed++
 		if time.Since(logged) > 3*time.Second && stats != nil {
-			if account == (common.Hash{}) {
+			if accountExt == (common.Hash{}) {
 				stats.progressAccounts(it.Hash(), processed)
 			} else {
-				stats.progressContract(account, it.Hash(), processed)
+				stats.progressContract(accountExt, it.Hash(), processed)
 			}
 			logged, processed = time.Now(), 0
 		}
 	}
 	// Commit the last part statistic.
 	if processed > 0 && stats != nil {
-		if account == (common.Hash{}) {
+		if accountExt == (common.Hash{}) {
 			stats.finishAccounts(processed)
 		} else {
-			stats.finishContract(account, processed)
+			stats.finishContract(accountExt, processed)
 		}
 	}
 	return stop(nil)

@@ -196,11 +196,9 @@ type StateDB struct {
 	parallelStateAccessLock sync.RWMutex
 	snapParallelLock        sync.RWMutex // for parallel mode, for main StateDB, slot will read snapshot, while processor will write.
 	trieParallelLock        sync.Mutex   // for parallel mode of trie, mostly for get states/objects from trie, lock required to handle trie tracer.
-	// TODO: is it possible to remove this accountStorageParallelLock?
-	accountStorageParallelLock sync.RWMutex // for global state account/storage read (copyForSlot) and write (Intermediate)
-	snapDestructs              map[common.Address]struct{}
-	snapAccounts               map[common.Address][]byte
-	snapStorage                map[common.Address]map[string][]byte
+	snapDestructs           map[common.Address]struct{}
+	snapAccounts            map[common.Address][]byte
+	snapStorage             map[common.Address]map[string][]byte
 
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
@@ -757,7 +755,8 @@ func (s *StateDB) GetTransientState(addr common.Address, key common.Hash) common
 // updateStateObject writes the given object to the trie.
 func (s *StateDB) updateStateObject(obj *stateObject) {
 	if !(s.isParallel && s.parallel.isSlotDB) {
-		s.accountStorageParallelLock.Lock()
+		obj.storageRecordsLock.Lock()
+		defer obj.storageRecordsLock.Unlock()
 	}
 	if !s.noTrie {
 		// Track the amount of time wasted on updating the account from the trie
@@ -793,10 +792,6 @@ func (s *StateDB) updateStateObject(obj *stateObject) {
 		} else {
 			s.accountsOrigin[obj.address] = types.SlimAccountRLP(*obj.origin)
 		}
-	}
-
-	if !(s.isParallel && s.parallel.isSlotDB) {
-		s.accountStorageParallelLock.Unlock()
 	}
 }
 

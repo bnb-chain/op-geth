@@ -29,7 +29,6 @@ type TxDAG interface {
 	DelayGasDistribution() bool
 
 	// TxDep query TxDeps from TxDAG
-	// TODO(galaio): txDAG must convert to dependency relation
 	TxDep(int) TxDep
 
 	// TxCount return tx count
@@ -269,27 +268,18 @@ var (
 	longestGasTimer  = metrics.NewRegisteredTimer("dag/longestgas", nil)
 	serialTimeTimer  = metrics.NewRegisteredTimer("dag/serialtime", nil)
 	totalTxMeter     = metrics.NewRegisteredMeter("dag/txcnt", nil)
-	totalNoDepMeter  = metrics.NewRegisteredMeter("dag/nodepcntcnt", nil)
-	total2DepMeter   = metrics.NewRegisteredMeter("dag/2depcntcnt", nil)
-	total4DepMeter   = metrics.NewRegisteredMeter("dag/4depcntcnt", nil)
-	total8DepMeter   = metrics.NewRegisteredMeter("dag/8depcntcnt", nil)
-	total16DepMeter  = metrics.NewRegisteredMeter("dag/16depcntcnt", nil)
-	total32DepMeter  = metrics.NewRegisteredMeter("dag/32depcntcnt", nil)
+	totalNoDepMeter  = metrics.NewRegisteredMeter("dag/nodepcnt", nil)
+	total2DepMeter   = metrics.NewRegisteredMeter("dag/2depcnt", nil)
+	total4DepMeter   = metrics.NewRegisteredMeter("dag/4depcnt", nil)
+	total8DepMeter   = metrics.NewRegisteredMeter("dag/8depcnt", nil)
+	total16DepMeter  = metrics.NewRegisteredMeter("dag/16depcnt", nil)
+	total32DepMeter  = metrics.NewRegisteredMeter("dag/32depcnt", nil)
 )
 
-func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) string {
+func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 	if len(stats) != dag.TxCount() || dag.TxCount() == 0 {
-		return ""
+		return
 	}
-	sb := strings.Builder{}
-	//sb.WriteString("TxDAG:\n")
-	//for i, dep := range dag.TxDeps {
-	//	if stats[i].mustSerialFlag {
-	//		continue
-	//	}
-	//	sb.WriteString(fmt.Sprintf("%v: %v\n", i, dep.TxIndexes))
-	//}
-	//sb.WriteString("Parallel Execution Path:\n")
 	paths := travelTxDAGExecutionPaths(dag)
 	// Attention: this is based on best schedule, it will reduce a lot by executing previous txs in parallel
 	// It assumes that there is no parallel thread limit
@@ -347,8 +337,6 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) string {
 		txGases[i] += stats[i].usedGas
 		txReads[i] += stats[i].readCount
 
-		//sb.WriteString(fmt.Sprintf("Tx%v, %.2fms|%vgas|%vreads\npath: %v\n", i, float64(txTimes[i].Microseconds())/1000, txGases[i], txReads[i], path))
-		//sb.WriteString(fmt.Sprintf("%v: %v\n", i, path))
 		// try to find max gas
 		if txGases[i] > maxGas {
 			maxGas = txGases[i]
@@ -360,8 +348,6 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) string {
 		}
 	}
 
-	sb.WriteString(fmt.Sprintf("LargestGasPath: %.2fms|%vgas|%vreads\npath: %v\n", float64(txTimes[maxGasIndex].Microseconds())/1000, txGases[maxGasIndex], txReads[maxGasIndex], paths[maxGasIndex]))
-	sb.WriteString(fmt.Sprintf("LongestTimePath: %.2fms|%vgas|%vreads\npath: %v\n", float64(txTimes[maxTimeIndex].Microseconds())/1000, txGases[maxTimeIndex], txReads[maxTimeIndex], paths[maxTimeIndex]))
 	longestTimeTimer.Update(txTimes[maxTimeIndex])
 	longestGasTimer.Update(txTimes[maxGasIndex])
 	// serial path
@@ -380,16 +366,7 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) string {
 		sGas += stat.usedGas
 		sRead += stat.readCount
 	}
-	if sTime == 0 {
-		return ""
-	}
-	sb.WriteString(fmt.Sprintf("SerialPath: %.2fms|%vgas|%vreads\npath: %v\n", float64(sTime.Microseconds())/1000, sGas, sRead, sPath))
-	maxParaTime := txTimes[maxTimeIndex]
-	sb.WriteString(fmt.Sprintf("Estimated saving: %.2fms, %.2f%%, %.2fX, noDepCnt: %v|%.2f%%\n",
-		float64((sTime-maxParaTime).Microseconds())/1000, float64(sTime-maxParaTime)/float64(sTime)*100,
-		float64(sTime)/float64(maxParaTime), noDepdencyCount, float64(noDepdencyCount)/float64(txCount)*100))
 	serialTimeTimer.Update(sTime)
-	return sb.String()
 }
 
 // travelTxDAGTargetPath will print target execution path

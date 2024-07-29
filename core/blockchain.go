@@ -2836,7 +2836,7 @@ func (bc *BlockChain) TxDAGEnabled() bool {
 	return bc.enableTxDAG
 }
 
-func (bc *BlockChain) EnableTxDAGGeneration(output string) {
+func (bc *BlockChain) SetupTxDAGGeneration(output string) {
 	bc.enableTxDAG = true
 	if len(output) == 0 {
 		return
@@ -2845,7 +2845,7 @@ func (bc *BlockChain) EnableTxDAGGeneration(output string) {
 	var err error
 	bc.txDAGMapping, err = readTxDAGMappingFromFile(output)
 	if err != nil {
-		log.Error("read TxDAG err", err)
+		log.Error("read TxDAG err", "err", err)
 	}
 
 	// write handler

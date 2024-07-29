@@ -1190,7 +1190,6 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	w.mu.RUnlock()
 
 	start := time.Now()
-<<<<<<< HEAD
 
 	// Retrieve the pending transactions pre-filtered by the 1559/4844 dynamic fees
 	filter := txpool.PendingFilter{
@@ -1352,7 +1351,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 
 	// Because the TxDAG appends after sidecar, so we only enable after cancun
 	if w.chain.TxDAGEnabled() && w.chainConfig.IsCancun(block.Number(), block.Time()) && w.chainConfig.Optimism == nil {
-		txDAG, _ := work.state.MVStates2TxDAG()
+		txDAG, _ := work.state.ResolveTxDAG([]common.Address{work.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 		rawTxDAG, err := types.EncodeTxDAG(txDAG)
 		if err != nil {
 			return &newPayloadResult{err: err}
@@ -1362,7 +1361,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 
 	// TODO(galaio): need hardfork
 	if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
-		txDAG, _ := work.state.MVStates2TxDAG()
+		txDAG, _ := work.state.ResolveTxDAG([]common.Address{work.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 		rawTxDAG, err := types.EncodeTxDAG(txDAG)
 		if err != nil {
 			return &newPayloadResult{err: err}
@@ -1482,7 +1481,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 			for i := len(env.txs); i < len(block.Transactions()); i++ {
 				env.state.RecordSystemTxRWSet(i)
 			}
-			txDAG, _ := env.state.MVStates2TxDAG()
+			txDAG, _ := env.state.ResolveTxDAG([]common.Address{env.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			rawTxDAG, err := types.EncodeTxDAG(txDAG)
 			if err != nil {
 				return err
@@ -1492,7 +1491,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 
 		// TODO(galaio): need hardfork
 		if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
-			txDAG, _ := env.state.MVStates2TxDAG()
+			txDAG, _ := env.state.ResolveTxDAG([]common.Address{env.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			rawTxDAG, err := types.EncodeTxDAG(txDAG)
 			if err != nil {
 				return err

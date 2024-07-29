@@ -50,6 +50,7 @@ type ParallelStateProcessor struct {
 	targetStage2Count     int // when executed txNUM reach it, enter stage2 RT confirm
 	nextStage2TxIndex     int
 	disableStealTx        bool
+	delayGasFee           bool // it is provided by TxDAG
 }
 
 func NewParallelStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine, parallelNum int) *ParallelStateProcessor {
@@ -187,6 +188,8 @@ func (p *ParallelStateProcessor) resetState(txNum int, statedb *state.StateDB) {
 // 3. TODO(galaio) it need to schedule the slow dep tx path properly;
 // 4. TODO(galaio) it is unfriendly for cross slot deps, maybe we can delay dispatch when tx cross in slots, it may increase PEVM parallelism;
 func (p *ParallelStateProcessor) doStaticDispatchV2(txReqs []*ParallelTxRequest, txDAG types.TxDAG) {
+	p.disableStealTx = false
+	p.delayGasFee = false
 	// only support PlainTxDAG dispatch now.
 	if txDAG == nil || txDAG.Type() != types.PlainTxDAGType {
 		p.doStaticDispatch(txReqs)
@@ -213,6 +216,7 @@ func (p *ParallelStateProcessor) doStaticDispatchV2(txReqs []*ParallelTxRequest,
 
 	// it's unnecessary to enable slot steal mechanism, opt the steal mechanism later;
 	p.disableStealTx = true
+	p.delayGasFee = true
 }
 
 // Benefits of StaticDispatch:
@@ -331,7 +335,7 @@ func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxR
 
 	slotDB.SetTxContext(txReq.tx.Hash(), txReq.txIndex)
 
-	evm, result, err := applyTransactionStageExecution(txReq.msg, gpSlot, slotDB, vmenv)
+	evm, result, err := applyTransactionStageExecution(txReq.msg, gpSlot, slotDB, vmenv, p.delayGasFee)
 	txResult := ParallelTxResult{
 		executedIndex: execNum,
 		slotIndex:     slotIndex,
@@ -660,7 +664,19 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 	}
 
 	resultTxIndex := result.txReq.txIndex
-
+	delayGasFee := result.result.delayFees
+	// add delayed gas fee
+	if delayGasFee != nil {
+		if delayGasFee.TipFee != nil {
+			result.slotDB.AddBalance(delayGasFee.Coinbase, delayGasFee.TipFee)
+		}
+		if delayGasFee.BaseFee != nil {
+			result.slotDB.AddBalance(params.OptimismBaseFeeRecipient, delayGasFee.BaseFee)
+		}
+		if delayGasFee.L1Fee != nil {
+			result.slotDB.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
+		}
+	}
 	var root []byte
 	header := result.txReq.block.Header()
 
@@ -669,7 +685,7 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 	result.slotDB.FinaliseForParallel(isByzantium || isEIP158, statedb)
 
 	// merge slotDB into mainDB
-	statedb.MergeSlotDB(result.slotDB, result.receipt, resultTxIndex)
+	statedb.MergeSlotDB(result.slotDB, result.receipt, resultTxIndex, result.result.delayFees)
 
 	// Do IntermediateRoot after mergeSlotDB.
 	if !isByzantium {
@@ -887,13 +903,21 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	return receipts, allLogs, *usedGas, nil
 }
 
-func applyTransactionStageExecution(msg *Message, gp *GasPool, statedb *state.ParallelStateDB, evm *vm.EVM) (*vm.EVM, *ExecutionResult, error) {
+func applyTransactionStageExecution(msg *Message, gp *GasPool, statedb *state.ParallelStateDB, evm *vm.EVM, delayGasFee bool) (*vm.EVM, *ExecutionResult, error) {
 	// Create a new context to be used in the EVM environment.
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
 
 	// Apply the transaction to the current state (included in the env).
-	result, err := ApplyMessage(evm, msg, gp)
+	var (
+		result *ExecutionResult
+		err    error
+	)
+	if delayGasFee {
+		result, err = ApplyMessageDelayGasFee(evm, msg, gp)
+	} else {
+		result, err = ApplyMessage(evm, msg, gp)
+	}
 
 	if err != nil {
 		return nil, nil, err

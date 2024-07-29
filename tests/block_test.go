@@ -17,7 +17,10 @@
 package tests
 
 import (
+	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -26,6 +29,38 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
+func TestBlockchainWithTxDAG(t *testing.T) {
+	bt := new(testMatcher)
+	// General state tests are 'exported' as blockchain tests, but we can run them natively.
+	// For speedier CI-runs, the line below can be uncommented, so those are skipped.
+	// For now, in hardfork-times (Berlin), we run the tests both as StateTests and
+	// as blockchain tests, since the latter also covers things like receipt root
+	bt.skipLoad(`^GeneralStateTests/`)
+
+	// Skip random failures due to selfish mining test
+	bt.skipLoad(`.*bcForgedTest/bcForkUncle\.json`)
+
+	// Slow tests
+	bt.slow(`.*bcExploitTest/DelegateCallSpam.json`)
+	bt.slow(`.*bcExploitTest/ShanghaiLove.json`)
+	bt.slow(`.*bcExploitTest/SuicideIssue.json`)
+	bt.slow(`.*/bcForkStressTest/`)
+	bt.slow(`.*/bcGasPricerTest/RPC_API_Test.json`)
+	bt.slow(`.*/bcWalletTest/`)
+
+	// Very slow test
+	bt.skipLoad(`.*/stTimeConsuming/.*`)
+	// test takes a lot for time and goes easily OOM because of sha3 calculation on a huge range,
+	// using 4.6 TGas
+	bt.skipLoad(`.*randomStatetest94.json.*`)
+
+	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
+		if runtime.GOARCH == "386" && runtime.GOOS == "windows" && rand.Int63()%2 == 0 {
+			t.Skip("test (randomly) skipped on 32-bit windows")
+		}
+		execBlockTestWithTxDAG(t, bt, test)
+	})
+}
 func TestBlockchain(t *testing.T) {
 	bt := new(testMatcher)
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
@@ -74,20 +109,37 @@ func TestExecutionSpecBlocktests(t *testing.T) {
 	})
 }
 
+func execBlockTestWithTxDAG(t *testing.T, bt *testMatcher, test *BlockTest) {
+	txDAGFile := filepath.Join(os.TempDir(), fmt.Sprintf("test_txdag_%s.csv", t.Name()))
+	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, false)); err != nil {
+		t.Errorf("test in path mode with snapshotter failed: %v", err)
+		return
+	}
+
+	// run again with dagFile
+	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, true)); err != nil {
+		t.Errorf("test in path mode with snapshotter failed: %v", err)
+		return
+	}
+
+	// clean
+	os.Remove(txDAGFile)
+}
+
 func execBlockTest(t *testing.T, bt *testMatcher, test *BlockTest) {
-	if err := bt.checkFailure(t, test.Run(false, rawdb.HashScheme, nil, nil)); err != nil {
+	if err := bt.checkFailure(t, test.Run(false, rawdb.HashScheme, nil, nil, "", true)); err != nil {
 		t.Errorf("test in hash mode without snapshotter failed: %v", err)
 		return
 	}
-	if err := bt.checkFailure(t, test.Run(true, rawdb.HashScheme, nil, nil)); err != nil {
+	if err := bt.checkFailure(t, test.Run(true, rawdb.HashScheme, nil, nil, "", true)); err != nil {
 		t.Errorf("test in hash mode with snapshotter failed: %v", err)
 		return
 	}
-	if err := bt.checkFailure(t, test.Run(false, rawdb.PathScheme, nil, nil)); err != nil {
+	if err := bt.checkFailure(t, test.Run(false, rawdb.PathScheme, nil, nil, "", true)); err != nil {
 		t.Errorf("test in path mode without snapshotter failed: %v", err)
 		return
 	}
-	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil)); err != nil {
+	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, "", true)); err != nil {
 		t.Errorf("test in path mode with snapshotter failed: %v", err)
 		return
 	}

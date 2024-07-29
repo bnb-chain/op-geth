@@ -1540,7 +1540,7 @@ func TestMergeSlotDB(t *testing.T) {
 	newSlotDb.SelfDestruct(addr)
 	newSlotDb.Finalise(true)
 
-	changeList := oldSlotDb.MergeSlotDB(newSlotDb, &types.Receipt{}, 0)
+	changeList := oldSlotDb.MergeSlotDB(newSlotDb, &types.Receipt{}, 0, nil)
 
 	if ok := changeList.getDeletedStateObject(addr); ok == nil || !ok.selfDestructed {
 		t.Fatalf("address should exist in StateObjectSuicided")

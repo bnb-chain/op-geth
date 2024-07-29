@@ -17,9 +17,10 @@
 package vm
 
 import (
-	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"math/big"
 	"sync/atomic"
+
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 
 	"github.com/holiman/uint256"
 
@@ -261,6 +262,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 				contract.optimized, code = tryGetOptimizedCode(evm, codeHash, code)
 				contract.SetCallCode(&addrCopy, codeHash, code)
 				ret, err = evm.interpreter.Run(contract, input, false)
+				evm.StateDB.ParallelMakeUp(addr, input)
 				gas = contract.Gas
 			} else {
 				addrCopy := addr
@@ -269,6 +271,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 				contract := NewContract(caller, AccountRef(addrCopy), value, gas)
 				contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), code)
 				ret, err = evm.interpreter.Run(contract, input, false)
+				evm.StateDB.ParallelMakeUp(addr, input)
 				gas = contract.Gas
 			}
 		}
@@ -523,14 +526,18 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, common.Address{}, gas, ErrNonceUintOverflow
 	}
 	evm.StateDB.SetNonce(caller.Address(), nonce+1)
+
 	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
 	// the access-list change should not be rolled back
 	if evm.chainRules.IsBerlin {
 		evm.StateDB.AddAddressToAccessList(address)
 	}
+
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.StateDB.GetCodeHash(address)
-	if evm.StateDB.GetNonce(address) != 0 || (contractHash != (common.Hash{}) && contractHash != types.EmptyCodeHash) {
+	// debug
+	no := evm.StateDB.GetNonce(address)
+	if no != 0 || (contractHash != (common.Hash{}) && contractHash != types.EmptyCodeHash) {
 		return nil, common.Address{}, 0, ErrContractAddressCollision
 	}
 	// Create a new account on the state

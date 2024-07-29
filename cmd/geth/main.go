@@ -169,6 +169,8 @@ var (
 		utils.RollupComputePendingBlock,
 		utils.RollupHaltOnIncompatibleProtocolVersionFlag,
 		utils.RollupSuperchainUpgradesFlag,
+		utils.ParallelTxFlag,
+		utils.ParallelTxNumFlag,
 		configFileFlag,
 		utils.LogDebugFlag,
 		utils.LogBacktraceAtFlag,

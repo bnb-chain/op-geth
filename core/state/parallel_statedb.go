@@ -94,11 +94,13 @@ func hasKvConflict(slotDB *ParallelStateDB, addr common.Address, key common.Hash
 		}
 	}
 	valMain := mainDB.GetState(addr, key)
+
 	if !bytes.Equal(val.Bytes(), valMain.Bytes()) {
 		log.Debug("hasKvConflict is invalid", "addr", addr,
 			"key", key, "valSlot", val,
 			"valMain", valMain, "SlotIndex", slotDB.parallel.SlotIndex,
 			"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex)
+
 		return true // return false, Range will be terminated.
 	}
 	return false
@@ -656,8 +658,6 @@ func (s *ParallelStateDB) GetState(addr common.Address, hash common.Hash) common
 			// it could be suicided within this SlotDB?
 			// it should be able to get state from suicided address within a Tx:
 			// e.g. within a transaction: call addr:suicide -> get state: should be ok
-			// return common.Hash{}
-			log.Info("ParallelStateDB GetState suicided", "addr", addr, "hash", hash)
 
 			if dirtyObj == nil {
 				log.Error("ParallelStateDB GetState access untouched object after create, may check create2")
@@ -1285,7 +1285,6 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 				}
 			}
 		}
-
 		/* can not use mainDB.GetNonce() because we do not want to record the stateObject */
 		var nonceMain uint64 = 0
 		mainObj := mainDB.getStateObjectNoUpdate(addr)
@@ -1296,6 +1295,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			log.Debug("IsSlotDBReadsValid nonce read is invalid", "addr", addr,
 				"nonceSlot", nonceSlot, "nonceMain", nonceMain, "SlotIndex", slotDB.parallel.SlotIndex,
 				"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex)
+
 			return false
 		}
 	}
@@ -1395,6 +1395,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			}
 		}
 	}
+
 	if isStage2 { // stage2 skip check code, or state, since they are likely unchanged.
 		return true
 	}
@@ -1596,7 +1597,11 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 			}
 		}
 
+		if obj.created {
+			s.parallel.createdObjectRecord[addr] = struct{}{}
+		}
 		obj.created = false
+
 		s.stateObjectsPending[addr] = struct{}{}
 		s.stateObjectsDirty[addr] = struct{}{}
 

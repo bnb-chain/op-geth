@@ -349,23 +349,33 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		return value
 	}
 
-	// Add-Dav:
-	// Need to confirm the object is not destructed in unconfirmed db and resurrected in this tx.
-	// otherwise there is an issue for cases like:
-	//	B0: TX0 --> createAccount @addr1	-- merged into DB
-	//			  B1: Tx1 and Tx2
-	//			      Tx1 account@addr1, setState(key0), setState(key1) selfDestruct  -- unconfirmed
-	//			      Tx2 recreate account@addr2, setState(key0)  	-- executing
-	//			      TX2 GetState(addr2, key1) ---
-	//			 key1 is never set after recurrsect, and should not return state in trie as it destructed in unconfirmed
-	// TODO - dav: do we need try storages from unconfirmedDB? - currently not because conflict detection need it for get from mainDB.
-	obj, exist := s.dbItf.GetStateObjectFromUnconfirmedDB(s.address)
-	if exist {
-		if obj.deleted || obj.selfDestructed {
-			return common.Hash{}
+	if s.db.isParallel && s.db.parallel.isSlotDB {
+		// Add-Dav:
+		// Need to confirm the object is not destructed in unconfirmed db and resurrected in this tx.
+		// otherwise there is an issue for cases like:
+		//	B0: TX0 --> createAccount @addr1	-- merged into DB
+		//			  B1: Tx1 and Tx2
+		//			      Tx1 account@addr1, setState(key0), setState(key1) selfDestruct  -- unconfirmed
+		//			      Tx2 recreate account@addr2, setState(key0)  	-- executing
+		//			      TX2 GetState(addr2, key1) ---
+		//			 key1 is never set after recurrsect, and should not return state in trie as it destructed in unconfirmed
+		// TODO - dav: do we need try storages from unconfirmedDB? - currently not because conflict detection need it for get from mainDB.
+		obj, exist := s.dbItf.GetStateObjectFromUnconfirmedDB(s.address)
+		if exist {
+			if obj.deleted || obj.selfDestructed {
+				return common.Hash{}
+			}
+		}
+
+		// also test whether the object is in mainDB and deleted.
+		pdb := s.db.parallel.baseStateDB
+		obj, exist = pdb.getStateObjectFromStateObjects(s.address)
+		if exist {
+			if obj.deleted || obj.selfDestructed {
+				return common.Hash{}
+			}
 		}
 	}
-
 	// If the object was destructed in *this* block (and potentially resurrected),
 	// the storage has been cleared out, and we should *not* consult the previous
 	// database about any storage values. The only possible alternatives are:
@@ -526,7 +536,6 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		maindb.accountStorageParallelLock.Lock()
 		defer maindb.accountStorageParallelLock.Unlock()
 	}
-
 	// Make sure all dirty slots are finalized into the pending storage area
 	s.finalise(false)
 
@@ -549,6 +558,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		maindb.setError(err)
 		return nil, err
 	}
+
 	// Insert all the pending storage updates into the trie
 	usedStorage := make([][]byte, 0, s.pendingStorage.Length())
 	dirtyStorage := make(map[common.Hash][]byte)
@@ -594,6 +604,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	go func() {
 		defer wg.Done()
 		maindb.StorageMux.Lock()
+		defer maindb.StorageMux.Unlock()
 		// The snapshot storage map for the object
 		storage = maindb.storages[s.addrHash]
 		if storage == nil {
@@ -606,7 +617,6 @@ func (s *stateObject) updateTrie() (Trie, error) {
 			origin = make(map[common.Hash][]byte)
 			maindb.storagesOrigin[s.address] = origin
 		}
-		maindb.StorageMux.Unlock()
 		for key, value := range dirtyStorage {
 			khash := crypto.HashData(hasher, key[:])
 
@@ -636,6 +646,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	if maindb.prefetcher != nil {
 		maindb.prefetcher.used(s.addrHash, s.data.Root, usedStorage)
 	}
+
 	s.pendingStorage = newStorage(s.isParallel) // reset pending map
 	return tr, nil
 	/*
@@ -714,8 +725,9 @@ func (s *stateObject) updateRoot() {
 	// is occurred or there is not change in the trie.
 	// TODO: The trieParallelLock seems heavy, can we remove it?
 	s.db.trieParallelLock.Lock()
+	defer s.db.trieParallelLock.Unlock()
+
 	tr, err := s.updateTrie()
-	s.db.trieParallelLock.Unlock()
 	if err != nil || tr == nil {
 		return
 	}

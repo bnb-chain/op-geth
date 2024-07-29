@@ -339,7 +339,7 @@ func (s *MVStates) ReadState(key RWKey) (interface{}, bool) {
 }
 
 // FulfillRWSet it can execute as async, and rwSet & stat must guarantee read-only
-// TODO(galaio): try to generate TxDAG, when fulfill RWSet
+// try to generate TxDAG, when fulfill RWSet
 // TODO(galaio): support flag to stat execution as optional
 func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 	log.Debug("FulfillRWSet", "s.len", len(s.rwSets), "cur", rwSet.ver.TxIndex, "reads", len(rwSet.readSet), "writes", len(rwSet.writeSet))
@@ -382,7 +382,6 @@ func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 		if _, ok := s.rwSets[prev]; !ok {
 			continue
 		}
-		// TODO: check if there are RW with system address for gas delay calculation
 		// check if there has written op before i
 		if checkDependency(s.rwSets[prev].writeSet, rwSet.readSet) {
 			s.depsCache[index].add(prev)
@@ -420,10 +419,16 @@ func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*ReadRecord, w
 }
 
 // ResolveTxDAG generate TxDAG from RWSets
-func (s *MVStates) ResolveTxDAG() TxDAG {
+func (s *MVStates) ResolveTxDAG(gasFeeReceivers []common.Address) TxDAG {
 	rwSets := s.RWSets()
 	txDAG := NewPlainTxDAG(len(rwSets))
 	for i := len(rwSets) - 1; i >= 0; i-- {
+		// check if there are RW with gas fee receiver for gas delay calculation
+		for _, addr := range gasFeeReceivers {
+			if _, ok := rwSets[i].readSet[AccountStateKey(addr, AccountSelf)]; ok {
+				return NewEmptyTxDAG()
+			}
+		}
 		txDAG.TxDeps[i].TxIndexes = []uint64{}
 		if rwSets[i].mustSerial {
 			txDAG.TxDeps[i].Relation = 1

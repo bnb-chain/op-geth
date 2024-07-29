@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum/log"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -125,10 +127,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if p.bc.enableTxDAG {
 		// TODO(galaio): append dag into block body, TxDAGPerformance will print metrics when profile is enabled
 		// compare input TxDAG when it enable in consensus
-		dag, exrStats := statedb.MVStates2TxDAG()
-		fmt.Print(types.EvaluateTxDAGPerformance(dag, exrStats))
-		//log.Info("Process result", "block", block.NumberU64(), "txDAG", dag)
-		// try write txDAG into file
+		dag, extraStats := statedb.ResolveTxDAG([]common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+		log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
+		if metrics.EnabledExpensive {
+			types.EvaluateTxDAGPerformance(dag, extraStats)
+		}
+		// try to write txDAG into file
 		if p.bc.txDAGWriteCh != nil && dag != nil {
 			p.bc.txDAGWriteCh <- TxDAGOutputItem{
 				blockNumber: block.NumberU64(),

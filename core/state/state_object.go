@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/big"
 	"sync"
 	"time"
 
@@ -34,27 +35,112 @@ import (
 	"github.com/holiman/uint256"
 )
 
+var emptyCodeHash = crypto.Keccak256(nil)
+
 type Code []byte
 
 func (c Code) String() string {
 	return string(c) //strings.Join(Disassemble(c), " ")
 }
 
-type Storage map[common.Hash]common.Hash
+type Storage interface {
+	String() string
+	GetValue(hash common.Hash) (common.Hash, bool)
+	StoreValue(hash common.Hash, value common.Hash)
+	Length() (length int)
+	Copy() Storage
+	Range(func(key, value interface{}) bool)
+}
 
-func (s Storage) String() (str string) {
+type StorageMap map[common.Hash]common.Hash
+
+func (s StorageMap) String() (str string) {
 	for key, value := range s {
 		str += fmt.Sprintf("%X : %X\n", key, value)
 	}
 	return
 }
 
-func (s Storage) Copy() Storage {
-	cpy := make(Storage, len(s))
+func (s StorageMap) Copy() Storage {
+	cpy := make(StorageMap, len(s))
 	for key, value := range s {
 		cpy[key] = value
 	}
+
 	return cpy
+}
+
+func (s StorageMap) GetValue(hash common.Hash) (common.Hash, bool) {
+	value, ok := s[hash]
+	return value, ok
+}
+
+func (s StorageMap) StoreValue(hash common.Hash, value common.Hash) {
+	s[hash] = value
+}
+
+func (s StorageMap) Length() int {
+	return len(s)
+}
+
+func (s StorageMap) Range(f func(hash, value interface{}) bool) {
+	for k, v := range s {
+		result := f(k, v)
+		if !result {
+			return
+		}
+	}
+}
+
+type StorageSyncMap struct {
+	sync.Map
+}
+
+func (s *StorageSyncMap) String() (str string) {
+	s.Range(func(key, value interface{}) bool {
+		str += fmt.Sprintf("%X : %X\n", key, value)
+		return true
+	})
+
+	return
+}
+
+func (s *StorageSyncMap) GetValue(hash common.Hash) (common.Hash, bool) {
+	value, ok := s.Load(hash)
+	if !ok {
+		return common.Hash{}, ok
+	}
+
+	return value.(common.Hash), ok
+}
+
+func (s *StorageSyncMap) StoreValue(hash common.Hash, value common.Hash) {
+	s.Store(hash, value)
+}
+
+func (s *StorageSyncMap) Length() (length int) {
+	s.Range(func(key, value interface{}) bool {
+		length++
+		return true
+	})
+	return length
+}
+
+func (s *StorageSyncMap) Copy() Storage {
+	cpy := StorageSyncMap{}
+	s.Range(func(key, value interface{}) bool {
+		cpy.Store(key, value)
+		return true
+	})
+
+	return &cpy
+}
+
+func newStorage(isParallel bool) Storage {
+	if isParallel {
+		return &StorageSyncMap{}
+	}
+	return make(StorageMap)
 }
 
 // stateObject represents an Ethereum account which is being modified.
@@ -64,7 +150,8 @@ func (s Storage) Copy() Storage {
 // - Account values as well as storages can be accessed and modified through the object.
 // - Finally, call commit to return the changes of storage trie and update account data.
 type stateObject struct {
-	db       *StateDB
+	db       *StateDB            // The baseDB for parallel.
+	dbItf    StateDBer           // The slotDB for parallel.
 	address  common.Address      // address of ethereum account
 	addrHash common.Hash         // hash of ethereum address of the account
 	origin   *types.StateAccount // Account original data without any change applied, nil means it was not existent
@@ -73,6 +160,10 @@ type stateObject struct {
 	// Write caches.
 	trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
+
+	// isParallel indicates this state object is used in parallel mode, in which mode the
+	// storage would be sync.Map instead of map
+	isParallel bool
 
 	originStorage  Storage // Storage cache of original entries to dedup rewrites
 	pendingStorage Storage // Storage entries that need to be flushed to disk, at the end of an entire block
@@ -96,11 +187,55 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (s *stateObject) empty() bool {
-	return s.data.Nonce == 0 && s.data.Balance.IsZero() && bytes.Equal(s.data.CodeHash, types.EmptyCodeHash.Bytes())
+	// return s.data.Nongn() == 0 && bytes.ce == 0 && s.data.Balance.SiEqual(s.data.CodeHash, types.EmptyCodeHash.Bytes())
+	// return s.data.Nonce == 0 && s.data.Balance.Sign() == 0 && bytes.Equal(s.data.CodeHash, emptyCodeHash)
+
+	// empty() has 3 use cases:
+	// 1.StateDB.Empty(), to empty check
+	//   A: It is ok, we have handled it in Empty(), to make sure nonce, balance, codeHash are solid
+	// 2:AddBalance 0, empty check for touch event
+	//   empty() will add a touch event.
+	//   if we misjudge it, the touch event could be lost, which make address not deleted.  // fixme
+	// 3.Finalise(), to do empty delete
+	//   the address should be dirtied or touched
+	//   if it nonce dirtied, it is ok, since nonce is monotonically increasing, won't be zero
+	//   if balance is dirtied, balance could be zero, we should refer solid nonce & codeHash  // fixme
+	//   if codeHash is dirtied, it is ok, since code will not be updated.
+	//   if suicide, it is ok
+	//   if object is new created, it is ok
+	//   if CreateAccount, recreate the address, it is ok.
+
+	// Slot 0 tx 0: AddBalance(100) to addr_1, => addr_1: balance = 100, nonce = 0, code is empty
+	// Slot 1 tx 1: addr_1 Transfer 99.9979 with GasFee 0.0021, => addr_1: balance = 0, nonce = 1, code is empty
+	//              notice: balance transfer cost 21,000 gas, with gasPrice = 100Gwei, GasFee will be 0.0021
+	// Slot 0 tx 2: add balance 0 to addr_1(empty check for touch event),
+	//              the object was lightCopied from tx 0,
+
+	// in parallel mode, we should not check empty by raw nonce, balance, codeHash anymore,
+	// since it could be invalid.
+	// e.g., AddBalance() to an address, we will do lightCopy to get a new StateObject, we did balance fixup to
+	// make sure object's Balance is reliable. But we did not fixup nonce or code, we only do nonce or codehash
+	// fixup on need, that's when we wanna to update the nonce or codehash.
+	// So nonce, balance
+	// Before the block is processed, addr_1 account: nonce = 0, emptyCodeHash, balance = 100
+	//   Slot 0 tx 0: no access to addr_1
+	//   Slot 1 tx 1: sub balance 100, it is empty and deleted
+	//   Slot 0 tx 2: GetNonce, lightCopy based on main DB(balance = 100) , not empty
+
+	if s.dbItf.GetBalance(s.address).Sign() != 0 { // check balance first, since it is most likely not zero
+		return false
+	}
+	if s.dbItf.GetNonce(s.address) != 0 {
+		return false
+	}
+	codeHash := s.dbItf.GetCodeHash(s.address)
+	return bytes.Equal(codeHash.Bytes(), emptyCodeHash) // code is empty, the object is empty
+
 }
 
 // newObject creates a state object.
-func newObject(db *StateDB, address common.Address, acct *types.StateAccount) *stateObject {
+func newObject(dbItf StateDBer, isParallel bool, address common.Address, acct *types.StateAccount) *stateObject {
+	db := dbItf.getBaseStateDB()
 	var (
 		origin  = acct
 		created = acct == nil // true if the account was not existent
@@ -110,13 +245,15 @@ func newObject(db *StateDB, address common.Address, acct *types.StateAccount) *s
 	}
 	return &stateObject{
 		db:             db,
+		dbItf:          dbItf,
 		address:        address,
 		addrHash:       crypto.Keccak256Hash(address[:]),
 		origin:         origin,
 		data:           *acct,
-		originStorage:  make(Storage),
-		pendingStorage: make(Storage),
-		dirtyStorage:   make(Storage),
+		isParallel:     isParallel,
+		originStorage:  newStorage(isParallel),
+		pendingStorage: newStorage(isParallel),
+		dirtyStorage:   newStorage(isParallel),
 		created:        created,
 	}
 }
@@ -165,7 +302,7 @@ func (s *stateObject) getTrie() (Trie, error) {
 // GetState retrieves a value from the account storage trie.
 func (s *stateObject) GetState(key common.Hash) common.Hash {
 	// If we have a dirty value for this state entry, return it
-	value, dirty := s.dirtyStorage[key]
+	value, dirty := s.dirtyStorage.GetValue(key)
 	if dirty {
 		return value
 	}
@@ -176,21 +313,45 @@ func (s *stateObject) GetState(key common.Hash) common.Hash {
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	// If we have a pending write or clean cached, return that
-	if value, pending := s.pendingStorage[key]; pending {
+	// if value, pending := s.pendingStorage[key]; pending {
+	if value, pending := s.pendingStorage.GetValue(key); pending {
 		return value
 	}
-	if value, cached := s.originStorage[key]; cached {
+	if value, cached := s.originStorage.GetValue(key); cached {
 		return value
 	}
+
+	// Add-Dav:
+	// Need to confirm the object is not destructed in unconfirmed db and resurrected in this tx.
+	// otherwise there is an issue for cases like:
+	//	B0: TX0 --> createAccount @addr1	-- merged into DB
+	//			  B1: Tx1 and Tx2
+	//			      Tx1 account@addr1, setState(key0), setState(key1) selfDestruct  -- unconfirmed
+	//			      Tx2 recreate account@addr2, setState(key0)  	-- executing
+	//			      TX2 GetState(addr2, key1) ---
+	//			 key1 is never set after recurrsect, and should not return state in trie as it destructed in unconfirmed
+	// TODO - dav: do we need try storages from unconfirmedDB? - currently not because conflict detection need it for get from mainDB.
+	obj, exist := s.dbItf.GetStateObjectFromUnconfirmedDB(s.address)
+	if exist {
+		if obj.deleted || obj.selfDestructed {
+			return common.Hash{}
+		}
+	}
+
 	// If the object was destructed in *this* block (and potentially resurrected),
 	// the storage has been cleared out, and we should *not* consult the previous
 	// database about any storage values. The only possible alternatives are:
 	//   1) resurrect happened, and new slot values were set -- those should
 	//      have been handles via pendingStorage above.
 	//   2) we don't have new values, and can deliver empty response back
-	if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
+	//if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
+	s.db.snapParallelLock.RLock()
+	if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed { // fixme: use sync.Map, instead of RWMutex?
+		s.db.snapParallelLock.RUnlock()
 		return common.Hash{}
 	}
+	s.db.snapParallelLock.RUnlock()
+
 	// If no live objects are available, attempt to use snapshots
 	var (
 		enc   []byte
@@ -229,14 +390,22 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		}
 		value.SetBytes(val)
 	}
-	s.originStorage[key] = value
+	s.originStorage.StoreValue(key, value)
+
 	return value
 }
 
 // SetState updates a value in account storage.
 func (s *stateObject) SetState(key, value common.Hash) {
 	// If the new value is the same as old, don't set
-	prev := s.GetState(key)
+	// In parallel mode, it has to get from StateDB, in case:
+	//  a.the Slot did not set the key before and try to set it to `val_1`
+	//  b.Unconfirmed DB has set the key to `val_2`
+	//  c.if we use StateObject.GetState, and the key load from the main DB is `val_1`
+	//    this `SetState could be skipped`
+	//  d.Finally, the key's value will be `val_2`, while it should be `val_1`
+	// such as: https://bscscan.com/txs?block=2491181
+	prev := s.dbItf.GetState(s.address, key)
 	if prev == value {
 		return
 	}
@@ -246,28 +415,35 @@ func (s *stateObject) SetState(key, value common.Hash) {
 		key:      key,
 		prevalue: prev,
 	})
+
+	if s.db.parallel.isSlotDB {
+		s.db.parallel.kvChangesInSlot[s.address][key] = struct{}{} // should be moved to here, after `s.db.GetState()`
+	}
 	s.setState(key, value)
 }
 
 func (s *stateObject) setState(key, value common.Hash) {
-	s.dirtyStorage[key] = value
+	s.dirtyStorage.StoreValue(key, value)
 }
 
 // finalise moves all dirty storage slots into the pending area to be hashed or
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise(prefetch bool) {
-	slotsToPrefetch := make([][]byte, 0, len(s.dirtyStorage))
-	for key, value := range s.dirtyStorage {
-		s.pendingStorage[key] = value
-		if value != s.originStorage[key] {
-			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(key[:])) // Copy needed for closure
+	slotsToPrefetch := make([][]byte, 0, s.dirtyStorage.Length())
+	s.dirtyStorage.Range(func(key, value interface{}) bool {
+		s.pendingStorage.StoreValue(key.(common.Hash), value.(common.Hash))
+		originalValue, _ := s.originStorage.GetValue(key.(common.Hash))
+		if value.(common.Hash) != originalValue {
+			originalKey := key.(common.Hash)
+			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(originalKey[:])) // Copy needed for closure
 		}
-	}
+		return true
+	})
 	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
 		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, slotsToPrefetch)
 	}
-	if len(s.dirtyStorage) > 0 {
-		s.dirtyStorage = make(Storage)
+	if s.dirtyStorage.Length() > 0 {
+		s.dirtyStorage = newStorage(s.isParallel)
 	}
 }
 
@@ -282,7 +458,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	s.finalise(false)
 
 	// Short circuit if nothing changed, don't bother with hashing anything
-	if len(s.pendingStorage) == 0 {
+	if s.pendingStorage.Length() == 0 {
 		return s.trie, nil
 	}
 	// Track the amount of time wasted on updating the storage trie
@@ -300,14 +476,18 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		s.db.setError(err)
 		return nil, err
 	}
+
 	// Insert all the pending storage updates into the trie
-	usedStorage := make([][]byte, 0, len(s.pendingStorage))
+	usedStorage := make([][]byte, 0, s.pendingStorage.Length())
 	dirtyStorage := make(map[common.Hash][]byte)
 
-	for key, value := range s.pendingStorage {
+	s.pendingStorage.Range(func(keyItf, valueItf interface{}) bool {
+		key := keyItf.(common.Hash)
+		value := valueItf.(common.Hash)
 		// Skip noop changes, persist actual changes
-		if value == s.originStorage[key] {
-			continue
+		originalValue, _ := s.originStorage.GetValue(key)
+		if value == originalValue {
+			return true
 		}
 		var v []byte
 		if value != (common.Hash{}) {
@@ -315,7 +495,8 @@ func (s *stateObject) updateTrie() (Trie, error) {
 			v = common.TrimLeftZeroes(value[:])
 		}
 		dirtyStorage[key] = v
-	}
+		return true
+	})
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -365,8 +546,8 @@ func (s *stateObject) updateTrie() (Trie, error) {
 			storage[khash] = encoded // encoded will be nil if it's deleted
 
 			// Track the original value of slot only if it's mutated first time
-			prev := s.originStorage[key]
-			s.originStorage[key] = common.BytesToHash(value) // fill back left zeroes by BytesToHash
+			prev, _ := s.originStorage.GetValue(key)
+			s.originStorage.StoreValue(key, common.BytesToHash(value)) // fill back left zeroes by BytesToHash
 			if _, ok := origin[khash]; !ok {
 				if prev == (common.Hash{}) {
 					origin[khash] = nil // nil if it was not present previously
@@ -383,7 +564,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	if s.db.prefetcher != nil {
 		s.db.prefetcher.used(s.addrHash, s.data.Root, usedStorage)
 	}
-	s.pendingStorage = make(Storage) // reset pending map
+	s.pendingStorage = newStorage(s.isParallel) // reset pending map
 	return tr, nil
 }
 
@@ -434,6 +615,7 @@ func (s *stateObject) commit() (*trienode.NodeSet, error) {
 
 	// Update original account data after commit
 	s.origin = s.data.Copy()
+
 	return nodes, nil
 }
 
@@ -472,13 +654,57 @@ func (s *stateObject) setBalance(amount *uint256.Int) {
 	s.data.Balance = amount
 }
 
+// ReturnGas Return the gas back to the origin. Used by the Virtual machine or Closures
+func (s *stateObject) ReturnGas(gas *big.Int) {}
+
+func (s *stateObject) lightCopy(db *ParallelStateDB) *stateObject {
+	object := newObject(db, s.isParallel, s.address, &s.data)
+	object.code = s.code
+	object.selfDestructed = s.selfDestructed // should be false
+	object.dirtyCode = s.dirtyCode           // it is not used in slot, but keep it is ok
+	object.deleted = s.deleted               // should be false
+
+	// we must copy because it is possible that s comes from unconfirmedDB and hence storage is necessary.
+	// otherwise there is problem that the light copied obj is in dirty and addrStateChangeInSlot is marked, but
+	// GetState get empty from storages and load from mainDB, which is inconsistent with real execution.
+	// Moreover, as the wrong object already in dirty, no KVStateRead recorded. and hence can not identified in
+	// conflict detection.
+	// example: block contains tx1 tx2
+	// after execution of tx1, it store object@theAddr in unconfirmedDB.
+	// at tx2, it first AddBalance of theAddr, which cause lightcopy and store in dirty, and mark the addrStateChangeInSlot
+	// Then the GetState(theAddr) find addrStateChangeInSlot and get obj in dirty, but the slot is empty so it load from
+	// mainDB, and return is inconsistent with unconfirmedDB of Tx1 result. (and as object in dirty, it doesn't mark KVStateRead.)
+	if object.address.Hex() == "0x864BbDA5C698aC34b47a9ea3BD4228802cC5ce3b" {
+		fmt.Printf("Dav -- ligthCopy -- update storage :%s\n storages:\ndirty:", object.address.Hex())
+		s.dirtyStorage.Range(func(key, value interface{}) bool {
+			fmt.Printf("key: %s, value: %s\n",
+				key.(common.Hash), value.(common.Hash))
+			return true
+		})
+		fmt.Printf("\npending:\n")
+		s.pendingStorage.Range(func(key, value interface{}) bool {
+			fmt.Printf("key: %s, value: %s\n",
+				key.(common.Hash), value.(common.Hash))
+			return true
+		})
+	}
+
+	object.dirtyStorage = s.dirtyStorage.Copy()
+	object.originStorage = s.originStorage.Copy()
+	object.pendingStorage = s.pendingStorage.Copy()
+
+	return object
+}
+
 func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	obj := &stateObject{
-		db:       db,
-		address:  s.address,
-		addrHash: s.addrHash,
-		origin:   s.origin,
-		data:     s.data,
+		db:         db.getBaseStateDB(),
+		dbItf:      db,
+		address:    s.address,
+		addrHash:   s.addrHash,
+		origin:     s.origin,
+		data:       s.data,
+		isParallel: s.isParallel,
 	}
 	if s.trie != nil {
 		obj.trie = db.db.CopyTrie(s.trie)
@@ -491,6 +717,15 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	obj.dirtyCode = s.dirtyCode
 	obj.deleted = s.deleted
 	return obj
+}
+
+func (s *stateObject) MergeSlotObject(db Database, dirtyObjs *stateObject, keys StateKeys) {
+	for key := range keys {
+		// In parallel mode, always GetState by StateDB, not by StateObject directly,
+		// since it the KV could exist in unconfirmed DB.
+		// But here, it should be ok, since the KV should be changed and valid in the SlotDB,
+		s.setState(key, dirtyObjs.GetState(key))
+	}
 }
 
 //
@@ -507,13 +742,16 @@ func (s *stateObject) Code() []byte {
 	if s.code != nil {
 		return s.code
 	}
+
 	if bytes.Equal(s.CodeHash(), types.EmptyCodeHash.Bytes()) {
 		return nil
 	}
+
 	code, err := s.db.db.ContractCode(s.address, common.BytesToHash(s.CodeHash()))
 	if err != nil {
 		s.db.setError(fmt.Errorf("can't load code hash %x: %v", s.CodeHash(), err))
 	}
+
 	s.code = code
 	return code
 }
@@ -536,7 +774,7 @@ func (s *stateObject) CodeSize() int {
 }
 
 func (s *stateObject) SetCode(codeHash common.Hash, code []byte) {
-	prevcode := s.Code()
+	prevcode := s.dbItf.GetCode(s.address)
 	s.db.journal.append(codeChange{
 		account:  &s.address,
 		prevhash: s.CodeHash(),
@@ -553,9 +791,10 @@ func (s *stateObject) setCode(codeHash common.Hash, code []byte) {
 }
 
 func (s *stateObject) SetNonce(nonce uint64) {
+	prevNonce := s.dbItf.GetNonce(s.address)
 	s.db.journal.append(nonceChange{
 		account: &s.address,
-		prev:    s.data.Nonce,
+		prev:    prevNonce,
 	})
 	s.setNonce(nonce)
 }

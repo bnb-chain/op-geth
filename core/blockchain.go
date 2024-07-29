@@ -106,6 +106,8 @@ var (
 	errChainStopped         = errors.New("blockchain is stopped")
 	errInvalidOldChain      = errors.New("invalid old chain")
 	errInvalidNewChain      = errors.New("invalid new chain")
+
+	ParallelTxMode = false // parallel transaction execution
 )
 
 const (
@@ -292,12 +294,13 @@ type BlockChain struct {
 	stopping      atomic.Bool   // false if chain is running, true when stopped
 	procInterrupt atomic.Bool   // interrupt signaler for block processing
 
-	engine     consensus.Engine
-	validator  Validator // Block and state validator interface
-	prefetcher Prefetcher
-	processor  Processor // Block transaction processor interface
-	forker     *ForkChoice
-	vmConfig   vm.Config
+	engine            consensus.Engine
+	validator         Validator // Block and state validator interface
+	prefetcher        Prefetcher
+	processor         Processor // Block transaction processor interface
+	forker            *ForkChoice
+	vmConfig          vm.Config
+	parallelExecution bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -362,7 +365,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
-	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	err := proofKeeper.Start(bc, db)
 	if err != nil {
@@ -539,6 +541,12 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			NoTries:    bc.stateCache.NoTries(),
 		}
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
+	}
+
+	if vmConfig.EnableParallelExec {
+		bc.EnableParallelProcessor(vmConfig.ParallelTxNum)
+	} else {
+		bc.processor = NewStateProcessor(chainConfig, bc, engine)
 	}
 
 	// Start future block processor.
@@ -1619,6 +1627,7 @@ func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types
 // writeBlockAndSetHead is the internal implementation of WriteBlockAndSetHead.
 // This function expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
+
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
@@ -1660,6 +1669,7 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 	} else {
 		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 	}
+
 	return status, nil
 }
 
@@ -1801,7 +1811,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 			lastCanon = block
-
 			block, err = it.next()
 		}
 		// Falls through to the block import
@@ -1941,7 +1950,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
-			if !bc.cacheConfig.TrieCleanNoPrefetch {
+			// parallel mode has a pipeline, similar to this prefetch, to save CPU we disable this prefetch for parallel
+			if !bc.cacheConfig.TrieCleanNoPrefetch && !bc.parallelExecution {
 				if followup, err := it.peek(); followup != nil && err == nil {
 					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
 
@@ -1970,6 +1980,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		ptime := time.Since(pstart)
 
 		vstart := time.Now()
+
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
 			bc.reportBlock(block, receipts, err)
 			followupInterrupt.Store(true)
@@ -2726,6 +2737,19 @@ func (bc *BlockChain) SetTrieFlushInterval(interval time.Duration) {
 // GetTrieFlushInterval gets the in-memory tries flushAlloc interval
 func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 	return time.Duration(bc.flushInterval.Load())
+}
+
+func (bc *BlockChain) EnableParallelProcessor(parallelNum int) (*BlockChain, error) {
+	/*
+		if bc.snaps == nil {
+				// disable parallel processor if snapshot is not enabled to avoid concurrent issue for SecureTrie
+				log.Info("parallel processor is not enabled since snapshot is not enabled")
+				return bc, nil
+		}
+	*/
+	bc.parallelExecution = true
+	bc.processor = NewParallelStateProcessor(bc.Config(), bc, bc.engine, parallelNum)
+	return bc, nil
 }
 
 func (bc *BlockChain) NoTries() bool {

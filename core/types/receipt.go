@@ -18,6 +18,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -604,4 +605,12 @@ func u32ptrTou64ptr(a *uint32) *uint64 {
 	}
 	b := uint64(*a)
 	return &b
+}
+
+// Debug PrettyPrint
+func (r Receipt) PrettyPrint() (string, error) {
+	b, err := r.MarshalJSON()
+	var prettyJSON bytes.Buffer
+	json.Indent(&prettyJSON, b, "", "\t")
+	return prettyJSON.String(), err
 }

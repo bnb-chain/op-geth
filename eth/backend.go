@@ -236,6 +236,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording:   config.EnablePreimageRecording,
+			EnableParallelExec:        config.ParallelTxMode,
+			ParallelTxNum:             config.ParallelTxNum,
 			EnableOpcodeOptimizations: config.EnableOpcodeOptimizing,
 		}
 		cacheConfig = &core.CacheConfig{

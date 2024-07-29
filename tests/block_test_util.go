@@ -153,15 +153,19 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 		cache.SnapshotWait = true
 	}
 	chain, err := core.NewBlockChain(db, cache, gspec, nil, engine, vm.Config{
-		Tracer: tracer,
+		EnableParallelExec: true,
+		ParallelTxNum:      4,
+		Tracer:             tracer,
 	}, nil, nil)
 	if err != nil {
+		fmt.Printf("Dav -- Test - NewBlockChain fail, err: %s\n", err)
 		return err
 	}
 	defer chain.Stop()
 
 	validBlocks, err := t.insertBlocks(chain)
 	if err != nil {
+		fmt.Printf("Dav -- Test - t.insertBlocks fail, err: %s\n", err)
 		return err
 	}
 	// Import succeeded: regardless of whether the _test_ succeeds or not, schedule

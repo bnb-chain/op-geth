@@ -33,6 +33,8 @@ type Config struct {
 	NoBaseFee                   bool                // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	EnablePreimageRecording     bool                // Enables recording of SHA3/keccak preimages
 	ExtraEips                   []int               // Additional EIPS that are to be enabled
+	EnableParallelExec          bool                // Whether to execute transaction in parallel mode when do full sync
+	ParallelTxNum               int                 // Number of slot for transaction execution
 	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
 	EnableOpcodeOptimizations   bool                // Enable opcode optimization
 }
@@ -174,6 +176,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			}
 		}()
 	}
+
 	// The Interpreter main run loop (contextual). This loop runs until either an
 	// explicit STOP, RETURN or SELFDESTRUCT is executed, an error occurred during
 	// the execution of one of the operations or until the done flag is set by the
@@ -197,6 +200,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if !contract.UseGas(cost) {
 			return nil, ErrOutOfGas
 		}
+
 		if operation.dynamicGas != nil {
 			// All ops with a dynamic memory usage also has a dynamic gas cost.
 			var memorySize uint64
@@ -242,10 +246,8 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		}
 		pc++
 	}
-
 	if err == errStopToken {
 		err = nil // clear stop token error
 	}
-
 	return res, err
 }

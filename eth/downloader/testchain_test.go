@@ -64,7 +64,6 @@ func init() {
 	fsHeaderContCheck = 500 * time.Millisecond
 
 	testChainBase = newTestChain(blockCacheMaxItems+200, testGenesis)
-
 	var forkLen = int(fullMaxForkAncestry + 50)
 	var wg sync.WaitGroup
 
@@ -218,7 +217,7 @@ func newTestBlockchain(blocks []*types.Block) *core.BlockChain {
 		if pregenerated {
 			panic("Requested chain generation outside of init")
 		}
-		chain, err := core.NewBlockChain(rawdb.NewMemoryDatabase(), nil, testGspec, nil, ethash.NewFaker(), vm.Config{}, nil, nil)
+		chain, err := core.NewBlockChain(rawdb.NewMemoryDatabase(), nil, testGspec, nil, ethash.NewFaker(), vm.Config{EnableParallelExec: true, ParallelTxNum: 1}, nil, nil)
 		if err != nil {
 			panic(err)
 		}

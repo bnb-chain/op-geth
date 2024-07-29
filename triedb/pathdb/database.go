@@ -410,11 +410,13 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		start = time.Now()
 		dl    = db.tree.bottom()
 	)
+	//  fmt.Printf("Dav -- pathdb Recover, dl, root: %s\n", dl.rootHash())
 	for dl.rootHash() != root {
 		h, err := readHistory(db.freezer, dl.stateID(), db.fastRecovery)
 		if err != nil {
 			return err
 		}
+
 		dl, err = dl.revert(h, loader)
 		if err != nil {
 			return err

@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	godebug "runtime/debug"
 	"strconv"
 	"strings"
@@ -1099,6 +1100,18 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.MetricsCategory,
 	}
 
+	ParallelTxFlag = &cli.BoolFlag{
+		Name:     "parallel",
+		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxNumFlag = &cli.IntFlag{
+		Name:     "parallel.num",
+		Usage:    "Number of slot for transaction execution, only valid in parallel mode (runtime calculated, no fixed default value)",
+		Category: flags.VMCategory,
+	}
+
 	VMOpcodeOptimizeFlag = &cli.BoolFlag{
 		Name:     "vm.opcode.optimize",
 		Usage:    "enable opcode optimization",
@@ -1987,6 +2000,27 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.IsSet(VMEnableDebugFlag.Name) {
 		// TODO(fjl): force-enable this in --dev mode
 		cfg.EnablePreimageRecording = ctx.Bool(VMEnableDebugFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxFlag.Name) {
+		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
+		// The best prallel num will be tuned later, we do a simple parallel num set here
+		numCpu := runtime.NumCPU()
+		var parallelNum int
+		if ctx.IsSet(ParallelTxNumFlag.Name) {
+			// first of all, we use "--parallel.num", but "--parallel.num 0" is not allowed
+			parallelNum = ctx.Int(ParallelTxNumFlag.Name)
+			if parallelNum < 1 {
+				parallelNum = 1
+			}
+		} else if numCpu == 1 {
+			parallelNum = 1 // single CPU core
+		} else if numCpu < 10 {
+			parallelNum = numCpu - 1
+		} else {
+			parallelNum = 8 // we found concurrency 8 is slightly better than 15
+		}
+		cfg.ParallelTxNum = parallelNum
 	}
 
 	if ctx.IsSet(VMOpcodeOptimizeFlag.Name) {

@@ -152,6 +152,8 @@ type ParallelState struct {
 	accountsOriginDeleteRecord []common.Address
 	storagesOriginDeleteRecord []common.Address
 
+	createdObjectRecord map[common.Address]struct{}
+
 	// Transaction will pay gas fee to system address.
 	// Parallel execution will clear system address's balance at first, in order to maintain transaction's
 	// gas fee value. Normal transaction will access system address twice, otherwise it means the transaction
@@ -1354,6 +1356,11 @@ func (s *StateDB) PutSyncPool() {
 	}
 	addressToStructPool.Put(s.snapDestructs)
 
+	for key := range s.parallel.createdObjectRecord {
+		delete(s.parallel.createdObjectRecord, key)
+	}
+	addressToStructPool.Put(s.parallel.createdObjectRecord)
+
 	for key := range s.snapAccounts {
 		delete(s.snapAccounts, key)
 	}
@@ -1406,6 +1413,7 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 		storagesDeleteRecord:         make([]common.Hash, 10),
 		accountsOriginDeleteRecord:   make([]common.Address, 10),
 		storagesOriginDeleteRecord:   make([]common.Address, 10),
+		createdObjectRecord:          addressToStructPool.Get().(map[common.Address]struct{}),
 	}
 	state := &ParallelStateDB{
 		StateDB: StateDB{
@@ -2625,17 +2633,9 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 			continue
 		}
 		mainObj, exist := s.loadStateObj(addr)
-
 		if !exist || mainObj.deleted {
-
-			// fixme: it is also state change
-			// addr not exist on main DB, do ownership transfer
-			// dirtyObj.db = s
-			// dirtyObj.finalise(true) // true: prefetch on dispatcher
+			// addr not exist on main DB, the object is created in the merging tx.
 			mainObj = dirtyObj.deepCopy(s)
-			/*	if addr == WBNBAddress && slotDb.wbnbMakeUpBalance != nil {
-				mainObj.setBalance(slotDb.wbnbMakeUpBalance)
-			}*/
 			if !dirtyObj.deleted {
 				mainObj.finalise(true)
 			}
@@ -2665,40 +2665,51 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 			// can not do copy or ownership transfer directly, since dirtyObj could have outdated
 			// data(maybe updated within the conflict window)
 			var newMainObj = mainObj // we don't need to copy the object since the storages are thread safe
-			if _, ok := slotDb.parallel.addrStateChangesInSlot[addr]; ok {
-				// there are 3 kinds of state change:
+			if createdOrChanged, ok := slotDb.parallel.addrStateChangesInSlot[addr]; ok {
+				// there are 4 kinds of state change:
 				// 1.Suicide
 				// 2.Empty Delete
 				// 3.createObject
 				//   a: AddBalance,SetState to a non-exist or deleted(suicide, empty delete) address.
 				//   b: CreateAccount: like DAO the fork, regenerate an account carry its balance without KV
-				// For these state change, do ownership transfer for efficiency:
-				// dirtyObj.db = s
-				// newMainObj = dirtyObj
-
-				// The deepCopy() here introduces issue that the pendingStorage may not empty until block validation.
-				// so the pendingStorage filled by the execution of previous txs in same block may get overwritten by
-				// deepCopy here, which causes issue in root calculation.
-				newMainObj = dirtyObj.deepCopy(s)
-
-				mainObj.pendingStorage.Range(func(key, value interface{}) bool {
-					if _, found := newMainObj.pendingStorage.GetValue(key.(common.Hash)); !found {
-						newMainObj.pendingStorage.StoreValue(key.(common.Hash), value.(common.Hash))
+				// 4. setState.
+				// For these state change
+				if createdOrChanged {
+					// Need to differentiate the case of createObject and setState, since the mainDB at this moment contains
+					// the latest update of the object, which cause the object.data.root newer then the dirtyObject. so
+					// the deepCopy() here can not be used for setState as it introduces issue that the pendingStorage
+					// may not empty until block validation. so the pendingStorage filled by the execution of previous txs
+					// in same block may get overwritten by deepCopy here, which causes issue in root calculation.
+					if _, created := s.parallel.createdObjectRecord[addr]; created {
+						newMainObj = dirtyObj.deepCopy(s)
+					} else {
+						// Merge the dirtyObject with mainObject
+						if _, balanced := slotDb.parallel.balanceChangesInSlot[addr]; balanced {
+							newMainObj.dirtyBalance = dirtyObj.dirtyBalance
+							newMainObj.data.Balance = dirtyObj.data.Balance
+						}
+						if _, coded := slotDb.parallel.codeChangesInSlot[addr]; coded {
+							newMainObj.code = dirtyObj.code
+							newMainObj.dirtyCodeHash = dirtyObj.dirtyCodeHash
+							newMainObj.data.CodeHash = dirtyObj.data.CodeHash
+							newMainObj.dirtyCode = true
+						}
+						if keys, stated := slotDb.parallel.kvChangesInSlot[addr]; stated {
+							newMainObj.MergeSlotObject(s.db, dirtyObj, keys)
+						}
+						if _, nonced := slotDb.parallel.nonceChangesInSlot[addr]; nonced {
+							// dirtyObj.Nonce() should not be less than newMainObj
+							newMainObj.data.Nonce = dirtyObj.data.Nonce
+							newMainObj.dirtyNonce = dirtyObj.dirtyNonce
+						}
+						newMainObj.deleted = dirtyObj.deleted
 					}
-					return true
-				})
+				} else {
+					// The object is deleted in the TX.
+					newMainObj = dirtyObj.deepCopy(s)
+				}
 
-				// TODO - dav: check -  the dirtyStorage should be always empty for mainObj as it should be moved to
-				// pendingStorage by Finalise in execution phase.
-				mainObj.dirtyStorage.Range(func(key, value interface{}) bool {
-					if _, found := newMainObj.dirtyStorage.GetValue(key.(common.Hash)); !found {
-						newMainObj.dirtyStorage.StoreValue(key.(common.Hash), value.(common.Hash))
-					}
-					return true
-				})
-
-				// should not delete, would cause unconfirmed DB incorrect.
-				// delete(slotDb.parallel.dirtiedStateObjectsInSlot, addr) // transfer ownership, fixme: shared read?
+				// All cases with addrStateChange set to true/false can be deleted. so handle it here.
 				if dirtyObj.deleted {
 					// remove the addr from snapAccounts&snapStorage only when object is deleted.
 					// "deleted" is not equal to "snapDestructs", since createObject() will add an addr for

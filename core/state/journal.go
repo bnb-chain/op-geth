@@ -17,16 +17,16 @@
 package state
 
 import (
-	"math/big"
-
+	"fmt"
 	"github.com/ethereum/go-ethereum/common"
+	"math/big"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
 // reverted on demand.
 type journalEntry interface {
 	// revert undoes the changes introduced by this journal entry.
-	revert(*StateDB)
+	revert(StateDBer)
 
 	// dirtied returns the Ethereum address modified by this journal entry.
 	dirtied() *common.Address
@@ -50,6 +50,7 @@ func newJournal() *journal {
 // append inserts a new modification entry to the end of the change journal.
 func (j *journal) append(entry journalEntry) {
 	j.entries = append(j.entries, entry)
+
 	if addr := entry.dirtied(); addr != nil {
 		j.dirties[*addr]++
 	}
@@ -57,10 +58,10 @@ func (j *journal) append(entry journalEntry) {
 
 // revert undoes a batch of journalled modifications along with any reverted
 // dirty handling too.
-func (j *journal) revert(statedb *StateDB, snapshot int) {
+func (j *journal) revert(dber StateDBer, snapshot int) {
 	for i := len(j.entries) - 1; i >= snapshot; i-- {
 		// Undo the changes made by the operation
-		j.entries[i].revert(statedb)
+		j.entries[i].revert(dber)
 
 		// Drop any dirty tracking induced by the change
 		if addr := j.entries[i].dirtied(); addr != nil {
@@ -152,8 +153,18 @@ type (
 	}
 )
 
-func (ch createObjectChange) revert(s *StateDB) {
-	delete(s.stateObjects, *ch.account)
+func (ch createObjectChange) revert(dber StateDBer) {
+	s := dber.getBaseStateDB()
+	if s.parallel.isSlotDB {
+		delete(s.parallel.dirtiedStateObjectsInSlot, *ch.account)
+		delete(s.parallel.addrStateChangesInSlot, *ch.account)
+		delete(s.parallel.nonceChangesInSlot, *ch.account)
+		delete(s.parallel.balanceChangesInSlot, *ch.account)
+		delete(s.parallel.codeChangesInSlot, *ch.account)
+		delete(s.parallel.kvChangesInSlot, *ch.account)
+	} else {
+		s.deleteStateObj(*ch.account)
+	}
 	delete(s.stateObjectsDirty, *ch.account)
 }
 
@@ -161,10 +172,25 @@ func (ch createObjectChange) dirtied() *common.Address {
 	return ch.account
 }
 
-func (ch resetObjectChange) revert(s *StateDB) {
-	s.setStateObject(ch.prev)
+func (ch resetObjectChange) revert(dber StateDBer) {
+	s := dber.getBaseStateDB()
+	if s.parallel.isSlotDB {
+
+		if ch.prev.address.Hex() == "0x6295eE1B4F6dD65047762F924Ecd367c17eaBf8f" {
+			fmt.Printf("Dav - revert() - set dirtiedStateObjectsInSlot[%s] = obj, obj.codehash: %s\n",
+				ch.prev.address, common.Bytes2Hex(ch.prev.CodeHash()))
+		}
+		// ch.prev must be from dirtiedStateObjectsInSlot, put it back
+		s.parallel.dirtiedStateObjectsInSlot[ch.prev.address] = ch.prev
+	} else {
+		// ch.prev was got from main DB, put it back to main DB.
+		s.storeStateObj(ch.prev.address, ch.prev)
+	}
+
 	if !ch.prevdestruct {
+		s.snapParallelLock.Lock()
 		delete(s.stateObjectsDestruct, ch.prev.address)
+		s.snapParallelLock.Unlock()
 	}
 	if ch.prevAccount != nil {
 		s.accounts[ch.prev.addrHash] = ch.prevAccount
@@ -184,8 +210,8 @@ func (ch resetObjectChange) dirtied() *common.Address {
 	return ch.account
 }
 
-func (ch selfDestructChange) revert(s *StateDB) {
-	obj := s.getStateObject(*ch.account)
+func (ch selfDestructChange) revert(dber StateDBer) {
+	obj := dber.getStateObject(*ch.account)
 	if obj != nil {
 		obj.selfDestructed = ch.prev
 		obj.setBalance(ch.prevbalance)
@@ -198,46 +224,47 @@ func (ch selfDestructChange) dirtied() *common.Address {
 
 var ripemd = common.HexToAddress("0000000000000000000000000000000000000003")
 
-func (ch touchChange) revert(s *StateDB) {
+func (ch touchChange) revert(dber StateDBer) {
 }
 
 func (ch touchChange) dirtied() *common.Address {
 	return ch.account
 }
 
-func (ch balanceChange) revert(s *StateDB) {
-	s.getStateObject(*ch.account).setBalance(ch.prev)
+func (ch balanceChange) revert(dber StateDBer) {
+	dber.getStateObject(*ch.account).setBalance(ch.prev)
 }
 
 func (ch balanceChange) dirtied() *common.Address {
 	return ch.account
 }
 
-func (ch nonceChange) revert(s *StateDB) {
-	s.getStateObject(*ch.account).setNonce(ch.prev)
+func (ch nonceChange) revert(dber StateDBer) {
+	dber.getStateObject(*ch.account).setNonce(ch.prev)
 }
 
 func (ch nonceChange) dirtied() *common.Address {
 	return ch.account
 }
 
-func (ch codeChange) revert(s *StateDB) {
-	s.getStateObject(*ch.account).setCode(common.BytesToHash(ch.prevhash), ch.prevcode)
+func (ch codeChange) revert(dber StateDBer) {
+	dber.getStateObject(*ch.account).setCode(common.BytesToHash(ch.prevhash), ch.prevcode)
 }
 
 func (ch codeChange) dirtied() *common.Address {
 	return ch.account
 }
 
-func (ch storageChange) revert(s *StateDB) {
-	s.getStateObject(*ch.account).setState(ch.key, ch.prevalue)
+func (ch storageChange) revert(dber StateDBer) {
+	dber.getStateObject(*ch.account).setState(ch.key, ch.prevalue)
 }
 
 func (ch storageChange) dirtied() *common.Address {
 	return ch.account
 }
 
-func (ch transientStorageChange) revert(s *StateDB) {
+func (ch transientStorageChange) revert(dber StateDBer) {
+	s := dber.getBaseStateDB()
 	s.setTransientState(*ch.account, ch.key, ch.prevalue)
 }
 
@@ -245,7 +272,8 @@ func (ch transientStorageChange) dirtied() *common.Address {
 	return nil
 }
 
-func (ch refundChange) revert(s *StateDB) {
+func (ch refundChange) revert(dber StateDBer) {
+	s := dber.getBaseStateDB()
 	s.refund = ch.prev
 }
 
@@ -253,7 +281,8 @@ func (ch refundChange) dirtied() *common.Address {
 	return nil
 }
 
-func (ch addLogChange) revert(s *StateDB) {
+func (ch addLogChange) revert(dber StateDBer) {
+	s := dber.getBaseStateDB()
 	logs := s.logs[ch.txhash]
 	if len(logs) == 1 {
 		delete(s.logs, ch.txhash)
@@ -267,7 +296,8 @@ func (ch addLogChange) dirtied() *common.Address {
 	return nil
 }
 
-func (ch addPreimageChange) revert(s *StateDB) {
+func (ch addPreimageChange) revert(dber StateDBer) {
+	s := dber.getBaseStateDB()
 	delete(s.preimages, ch.hash)
 }
 
@@ -275,7 +305,7 @@ func (ch addPreimageChange) dirtied() *common.Address {
 	return nil
 }
 
-func (ch accessListAddAccountChange) revert(s *StateDB) {
+func (ch accessListAddAccountChange) revert(dber StateDBer) {
 	/*
 		One important invariant here, is that whenever a (addr, slot) is added, if the
 		addr is not already present, the add causes two journal entries:
@@ -285,6 +315,7 @@ func (ch accessListAddAccountChange) revert(s *StateDB) {
 		(addr) at this point, since no storage adds can remain when come upon
 		a single (addr) change.
 	*/
+	s := dber.getBaseStateDB()
 	s.accessList.DeleteAddress(*ch.address)
 }
 
@@ -292,7 +323,8 @@ func (ch accessListAddAccountChange) dirtied() *common.Address {
 	return nil
 }
 
-func (ch accessListAddSlotChange) revert(s *StateDB) {
+func (ch accessListAddSlotChange) revert(dber StateDBer) {
+	s := dber.getBaseStateDB()
 	s.accessList.DeleteSlot(*ch.address, *ch.slot)
 }
 

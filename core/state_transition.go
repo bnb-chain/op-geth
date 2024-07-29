@@ -531,6 +531,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			ReturnData:  ret,
 		}, nil
 	}
+
 	effectiveTip := msg.GasPrice
 	if rules.IsLondon {
 		effectiveTip = cmath.BigMin(msg.GasTipCap, new(big.Int).Sub(msg.GasFeeCap, st.evm.Context.BaseFee))
@@ -560,7 +561,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			st.state.AddBalance(params.OptimismL1FeeRecipient, l1Cost)
 		}
 	}
-
 	return &ExecutionResult{
 		UsedGas:     st.gasUsed(),
 		RefundedGas: gasRefund,

@@ -33,7 +33,7 @@ func TestEvaluateTxDAG(t *testing.T) {
 			stats[i].WithSerialFlag()
 		}
 	}
-	t.Log(EvaluateTxDAGPerformance(dag, stats))
+	EvaluateTxDAGPerformance(dag, stats)
 }
 
 func TestSimpleMVStates2TxDAG(t *testing.T) {
@@ -50,7 +50,7 @@ func TestSimpleMVStates2TxDAG(t *testing.T) {
 	ms.rwSets[8] = mockRWSet(8, []string{"0x08"}, []string{"0x08"})
 	ms.rwSets[9] = mockRWSet(9, []string{"0x08", "0x09"}, []string{"0x09"})
 
-	dag := ms.ResolveTxDAG()
+	dag := ms.ResolveTxDAG(nil)
 	require.Equal(t, mockSimpleDAG(), dag)
 	t.Log(dag)
 }
@@ -71,7 +71,7 @@ func TestSystemTxMVStates2TxDAG(t *testing.T) {
 	ms.rwSets[10] = mockRWSet(10, []string{"0x10"}, []string{"0x10"}).WithSerialFlag()
 	ms.rwSets[11] = mockRWSet(11, []string{"0x11"}, []string{"0x11"}).WithSerialFlag()
 
-	dag := ms.ResolveTxDAG()
+	dag := ms.ResolveTxDAG(nil)
 	require.Equal(t, mockSystemTxDAG(), dag)
 	t.Log(dag)
 }

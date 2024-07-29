@@ -60,6 +60,13 @@ type StateObjectSyncMap struct {
 	sync.Map
 }
 
+type DelayedGasFee struct {
+	BaseFee  *big.Int
+	TipFee   *big.Int
+	L1Fee    *big.Int
+	Coinbase common.Address
+}
+
 func (s *StateObjectSyncMap) LoadStateObject(addr common.Address) (*stateObject, bool) {
 	so, ok := s.Load(addr)
 	if !ok {
@@ -239,9 +246,10 @@ type StateDB struct {
 	logSize uint
 
 	// parallel EVM related
-	rwSet    *types.RWSet
-	mvStates *types.MVStates
-	es       *types.ExeStat
+	rwSet        *types.RWSet
+	mvStates     *types.MVStates
+	stat         *types.ExeStat
+	rwRecordFlag bool
 
 	// Preimages occurred seen by VM in the scope of block.
 	preimages map[common.Hash][]byte
@@ -2370,6 +2378,7 @@ func (s *StateDB) BeforeTxTransition() {
 	s.rwSet = types.NewRWSet(types.StateVersion{
 		TxIndex: s.txIndex,
 	})
+	s.rwRecordFlag = true
 }
 
 func (s *StateDB) BeginTxStat(index int) {
@@ -2379,7 +2388,9 @@ func (s *StateDB) BeginTxStat(index int) {
 	if s.mvStates == nil {
 		return
 	}
-	s.es = types.NewExeStat(index).Begin()
+	if metrics.EnabledExpensive {
+		s.stat = types.NewExeStat(index).Begin()
+	}
 }
 
 func (s *StateDB) StopTxStat(usedGas uint64) {
@@ -2390,8 +2401,8 @@ func (s *StateDB) StopTxStat(usedGas uint64) {
 		return
 	}
 	// record stat first
-	if s.es != nil {
-		s.es.Done().WithGas(usedGas).WithRead(len(s.rwSet.ReadSet()))
+	if metrics.EnabledExpensive && s.stat != nil {
+		s.stat.Done().WithGas(usedGas).WithRead(len(s.rwSet.ReadSet()))
 	}
 }
 
@@ -2399,7 +2410,7 @@ func (s *StateDB) RecordRead(key types.RWKey, val interface{}) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return
 	}
-	if s.mvStates == nil || s.rwSet == nil {
+	if !s.rwRecordFlag {
 		return
 	}
 	// TODO: read from MVStates, record with ver
@@ -2412,7 +2423,7 @@ func (s *StateDB) RecordWrite(key types.RWKey, val interface{}) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return
 	}
-	if s.mvStates == nil || s.rwSet == nil {
+	if !s.rwRecordFlag {
 		return
 	}
 	s.rwSet.RecordWrite(key, val)
@@ -2424,13 +2435,14 @@ func (s *StateDB) ResetMVStates(txCount int) {
 	}
 	s.mvStates = types.NewMVStates(txCount)
 	s.rwSet = nil
+	s.rwRecordFlag = false
 }
 
 func (s *StateDB) FinaliseRWSet() error {
 	if s.isParallel && s.parallel.isSlotDB {
 		return nil
 	}
-	if s.mvStates == nil || s.rwSet == nil {
+	if !s.rwRecordFlag {
 		return nil
 	}
 	if metrics.EnabledExpensive {
@@ -2468,7 +2480,8 @@ func (s *StateDB) FinaliseRWSet() error {
 		}
 	}
 
-	return s.mvStates.FulfillRWSet(s.rwSet, s.es)
+	s.rwRecordFlag = false
+	return s.mvStates.FulfillRWSet(s.rwSet, s.stat)
 }
 
 func (s *StateDB) queryStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool) {
@@ -2498,7 +2511,7 @@ func (s *StateDB) deleteStateObjectsDestruct(addr common.Address) {
 	delete(s.stateObjectsDestruct, addr)
 }
 
-func (s *StateDB) MVStates2TxDAG() (types.TxDAG, map[int]*types.ExeStat) {
+func (s *StateDB) ResolveTxDAG(gasFeeReceivers []common.Address) (types.TxDAG, map[int]*types.ExeStat) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return nil, nil
 	}
@@ -2511,7 +2524,7 @@ func (s *StateDB) MVStates2TxDAG() (types.TxDAG, map[int]*types.ExeStat) {
 		}(time.Now())
 	}
 
-	return s.mvStates.ResolveTxDAG(), s.mvStates.Stats()
+	return s.mvStates.ResolveTxDAG(gasFeeReceivers), s.mvStates.Stats()
 }
 
 func (s *StateDB) MVStates() *types.MVStates {
@@ -2600,7 +2613,7 @@ func (s *StateDB) AddrPrefetch(slotDb *ParallelStateDB) {
 // MergeSlotDB is for Parallel execution mode, when the transaction has been
 // finalized(dirty -> pending) on execution slot, the execution results should be
 // merged back to the main StateDB.
-func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receipt, txIndex int) *StateDB {
+func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receipt, txIndex int, fees *DelayedGasFee) *StateDB {
 	s.SetTxContext(slotDb.thash, slotDb.txIndex)
 
 	for s.nextRevisionId < slotDb.nextRevisionId {

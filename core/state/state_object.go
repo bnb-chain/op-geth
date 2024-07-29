@@ -172,7 +172,8 @@ type stateObject struct {
 
 	// isParallel indicates this state object is used in parallel mode, in which mode the
 	// storage would be sync.Map instead of map
-	isParallel bool
+	isParallel         bool
+	storageRecordsLock sync.RWMutex // for pending/dirty/origin storage read (lightCopy) and write (Intermediate/FixupOrigin)
 
 	originStorage  Storage // Storage cache of original entries to dedup rewrites
 	pendingStorage Storage // Storage entries that need to be flushed to disk, at the end of an entire block
@@ -533,8 +534,8 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		// is wrong.
 		maindb = s.db.parallel.baseStateDB
 		// For dirty/pending/origin Storage access and update.
-		maindb.accountStorageParallelLock.Lock()
-		defer maindb.accountStorageParallelLock.Unlock()
+		s.storageRecordsLock.Lock()
+		defer s.storageRecordsLock.Unlock()
 	}
 	// Make sure all dirty slots are finalized into the pending storage area
 	s.finalise(false)
@@ -830,10 +831,10 @@ func (s *stateObject) lightCopy(db *ParallelStateDB) *stateObject {
 	// the problem. fortunately, the KVRead will record this and compare it with mainDB.
 
 	//object.dirtyStorage = s.dirtyStorage.Copy()
-	s.db.accountStorageParallelLock.RLock()
+	s.storageRecordsLock.RLock()
 	object.originStorage = s.originStorage.Copy()
 	object.pendingStorage = s.pendingStorage.Copy()
-	s.db.accountStorageParallelLock.RUnlock()
+	s.storageRecordsLock.RUnlock()
 	return object
 }
 
@@ -986,14 +987,27 @@ func (s *stateObject) fixUpOriginAndResetPendingStorage() {
 	if s.db.isParallel && s.db.parallel.isSlotDB {
 		mainDB := s.db.parallel.baseStateDB
 		origObj := mainDB.getStateObjectNoUpdate(s.address)
-		mainDB.accountStorageParallelLock.RLock()
+		s.storageRecordsLock.RLock()
 		if origObj != nil && origObj.originStorage.Length() != 0 {
-			s.originStorage = origObj.originStorage.Copy()
+			originStorage := origObj.originStorage.Copy()
+			// During the tx execution, the originStorage can be updated with GetCommittedState()
+			// But is never get updated for the already existed one as there is no finalise called in execution.
+			// so here get the latest object in MainDB, and update the object storage with
+			s.originStorage.Range(func(keyItf, valueItf interface{}) bool {
+				key := keyItf.(common.Hash)
+				value := valueItf.(common.Hash)
+				// Skip noop changes, persist actual changes
+				if _, ok := originStorage.GetValue(key); !ok {
+					originStorage.StoreValue(key, value)
+				}
+				return true
+			})
+			s.originStorage = originStorage
 		}
 		// isParallel is unnecessary since the pendingStorage for slotObject will be used serially from now on.
 		if s.pendingStorage.Length() > 0 {
 			s.pendingStorage = newStorage(false)
 		}
-		mainDB.accountStorageParallelLock.RUnlock()
+		s.storageRecordsLock.RUnlock()
 	}
 }

@@ -91,6 +91,8 @@ var (
 	triedbCommitExternalTimer = metrics.NewRegisteredTimer("chain/triedb/commit/external", nil)
 	innerExecutionTimer       = metrics.NewRegisteredTimer("chain/inner/execution", nil)
 
+	txDAGGenerateTimer = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
 
@@ -294,6 +296,9 @@ type BlockChain struct {
 	processor  Processor // Block transaction processor interface
 	forker     *ForkChoice
 	vmConfig   vm.Config
+
+	// parallel EVM related
+	enableTxDAG bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -1924,8 +1929,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		storageUpdateTimer.Update(statedb.StorageUpdates)             // Storage updates are complete(in validation)
 		accountHashTimer.Update(statedb.AccountHashes)                // Account hashes are complete(in validation)
 		storageHashTimer.Update(statedb.StorageHashes)                // Storage hashes are complete(in validation)
-		blockExecutionTimer.Update(ptime)                             // The time spent on block execution
-		blockValidationTimer.Update(vtime)                            // The time spent on block validation
+		txDAGGenerateTimer.Update(statedb.TxDAGGenerate)
+		blockExecutionTimer.Update(ptime)  // The time spent on block execution
+		blockValidationTimer.Update(vtime) // The time spent on block validation
 
 		innerExecutionTimer.Update(DebugInnerExecutionDuration)
 
@@ -2627,4 +2633,12 @@ func createDelFn(bc *BlockChain) func(db ethdb.KeyValueWriter, hash common.Hash,
 
 func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 	bc.hc.SetHead(headNumber, nil, createDelFn(bc))
+}
+
+func (bc *BlockChain) TxDAGEnabled() bool {
+	return bc.enableTxDAG
+}
+
+func (bc *BlockChain) SetupTxDAGGeneration() {
+	bc.enableTxDAG = true
 }

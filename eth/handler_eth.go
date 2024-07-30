@@ -102,9 +102,6 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 		return h.handleBlockAnnounces(peer, hashes, numbers)
 
 	case *eth.NewBlockPacket:
-		if len(packet.TxDAG) != 0 {
-			packet.Block = packet.Block.WithTxDAG(packet.TxDAG)
-		}
 		return h.handleBlockBroadcast(peer, packet.Block, packet.TD)
 
 	case *eth.NewPooledTransactionHashesPacket:

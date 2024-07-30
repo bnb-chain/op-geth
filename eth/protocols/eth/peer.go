@@ -284,7 +284,6 @@ func (p *Peer) SendNewBlock(block *types.Block, td *big.Int) error {
 	return p2p.Send(p.rw, NewBlockMsg, &NewBlockPacket{
 		Block: block,
 		TD:    td,
-		TxDAG: block.TxDAG(),
 	})
 }
 

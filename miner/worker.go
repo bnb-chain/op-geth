@@ -1349,25 +1349,14 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		return &newPayloadResult{err: fmt.Errorf("empty block root")}
 	}
 
-	// Because the TxDAG appends after sidecar, so we only enable after cancun
-	if w.chain.TxDAGEnabled() && w.chainConfig.IsCancun(block.Number(), block.Time()) && w.chainConfig.Optimism == nil {
-		txDAG, _ := work.state.ResolveTxDAG([]common.Address{work.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-		rawTxDAG, err := types.EncodeTxDAG(txDAG)
-		if err != nil {
-			return &newPayloadResult{err: err}
-		}
-		block = block.WithTxDAG(rawTxDAG)
-	}
-
-	// TODO(galaio): need hardfork
-	if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
-		txDAG, _ := work.state.ResolveTxDAG([]common.Address{work.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-		rawTxDAG, err := types.EncodeTxDAG(txDAG)
-		if err != nil {
-			return &newPayloadResult{err: err}
-		}
-		block.Header().Extra = rawTxDAG
-	}
+	// TODO(galaio): fulfill TxDAG to mined block
+	//if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
+	//	txDAG, _ := work.state.ResolveTxDAG([]common.Address{work.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+	//	rawTxDAG, err := types.EncodeTxDAG(txDAG)
+	//	if err != nil {
+	//		return &newPayloadResult{err: err}
+	//	}
+	//}
 
 	assembleBlockTimer.UpdateSince(start)
 	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
@@ -1474,29 +1463,6 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		block, err := w.engine.FinalizeAndAssemble(w.chain, env.header, env.state, env.txs, nil, env.receipts, nil)
 		if err != nil {
 			return err
-		}
-
-		// Because the TxDAG appends after sidecar, so we only enable after cancun
-		if w.chain.TxDAGEnabled() && w.chainConfig.IsCancun(env.header.Number, env.header.Time) && w.chainConfig.Optimism == nil {
-			for i := len(env.txs); i < len(block.Transactions()); i++ {
-				env.state.RecordSystemTxRWSet(i)
-			}
-			txDAG, _ := env.state.ResolveTxDAG([]common.Address{env.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-			rawTxDAG, err := types.EncodeTxDAG(txDAG)
-			if err != nil {
-				return err
-			}
-			block = block.WithTxDAG(rawTxDAG)
-		}
-
-		// TODO(galaio): need hardfork
-		if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
-			txDAG, _ := env.state.ResolveTxDAG([]common.Address{env.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-			rawTxDAG, err := types.EncodeTxDAG(txDAG)
-			if err != nil {
-				return err
-			}
-			block.Header().Extra = rawTxDAG
 		}
 
 		// If we're post merge, just ignore

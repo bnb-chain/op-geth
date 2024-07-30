@@ -1955,22 +1955,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 
-			// TODO(galaio): use txDAG in some accelerate scenarios, like state pre-fetcher.
-			//if bc.enableTxDAG && len(block.TxDAG()) > 0 {
-			//	txDAG, err := types.DecodeTxDAG(block.TxDAG())
-			//	if err != nil {
-			//		return it.index, err
-			//	}
-			//	log.Info("Insert chain", "block", block.NumberU64(), "txDAG", txDAG)
-			//}
-			// TODO(galaio): need hardfork
-			if bc.enableTxDAG && bc.chainConfig.Optimism != nil && len(block.Header().Extra) > 0 {
-				txDAG, err := types.DecodeTxDAG(block.Header().Extra)
-				if err != nil {
-					return it.index, err
-				}
-				log.Info("Insert chain", "block", block.NumberU64(), "txDAG", txDAG.Type())
-			}
+			// TODO(galaio): load TxDAG from block, use txDAG in some accelerate scenarios, like state pre-fetcher.
+			//if bc.enableTxDAG {}
 
 			// Enable prefetching to pull in trie node paths while processing transactions
 			statedb.StartPrefetcher("chain")
@@ -2849,13 +2835,13 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string) {
 	}
 
 	// write handler
-	bc.txDAGWriteCh = make(chan TxDAGOutputItem, 10000)
 	go func() {
 		writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 		if err != nil {
 			log.Error("OpenFile when open the txDAG output file", "file", output)
 			return
 		}
+		bc.txDAGWriteCh = make(chan TxDAGOutputItem, 10000)
 		defer writeHandle.Close()
 		for {
 			select {

@@ -217,11 +217,9 @@ func ExecutableDataToBlock(params ExecutableData, versionedHashes []common.Hash,
 	if err != nil {
 		return nil, err
 	}
-
-	// TODO(galaio): need hardfork, skip check
-	//if len(params.ExtraData) > 32 {
-	//	return nil, fmt.Errorf("invalid extradata length: %v", len(params.ExtraData))
-	//}
+	if len(params.ExtraData) > 32 {
+		return nil, fmt.Errorf("invalid extradata length: %v", len(params.ExtraData))
+	}
 	if len(params.LogsBloom) != 256 {
 		return nil, fmt.Errorf("invalid logsBloom length: %v", len(params.LogsBloom))
 	}

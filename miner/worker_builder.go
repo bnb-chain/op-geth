@@ -283,6 +283,10 @@ func (w *worker) mergeBundles(
 
 		simulatedBundle, err := w.simulateBundle(env, bundle.OriginalBundle, currentState, gasPool, len(includedTxs), true, false)
 
+		if err != nil && errors.Is(err, core.ErrGasLimitReached) {
+			log.Error("failed to merge bundle, interrupt merge process", "err", err)
+			break
+		}
 		if err != nil || simulatedBundle.BundleGasPrice.Cmp(floorGasPrice) <= 0 {
 			currentState = prevState
 			gasPool = prevGasPool

@@ -264,7 +264,7 @@ func (test *stateTest) verifyAccountCreation(next common.Hash, db *trie.Database
 		return err
 	}
 	if len(oBlob) != 0 {
-		return fmt.Errorf("unexpected account in old trie, %x", addrHash)
+		return fmt.Errorf("unexpected account in old trie, %v", addr)
 	}
 	if len(nBlob) == 0 {
 		return fmt.Errorf("missing account in new trie, %x", addrHash)

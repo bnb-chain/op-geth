@@ -801,27 +801,13 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 
 	var (
 		txDAG types.TxDAG
-		err   error
 	)
 	if p.bc.enableTxDAG {
-		if len(block.TxDAG()) != 0 {
-			txDAG, err = types.DecodeTxDAG(block.TxDAG())
-			if err != nil {
-				return nil, nil, 0, err
-			}
-		}
-		// load cache txDAG from file
+		// TODO(galaio): load TxDAG from block
+		// or load cache txDAG from file
 		if txDAG == nil && len(p.bc.txDAGMapping) > 0 {
 			txDAG = p.bc.txDAGMapping[block.NumberU64()]
 		}
-	}
-	// TODO(galaio): need hardfork
-	if p.bc.enableTxDAG && p.bc.chainConfig.Optimism != nil && len(block.Header().Extra) > 0 {
-		txDAG, err = types.DecodeTxDAG(block.Header().Extra)
-		if err != nil {
-			return nil, nil, 0, err
-		}
-		log.Info("dispatch chain with", "block", block.NumberU64(), "txDAG", txDAG.Type())
 	}
 	// From now on, entering parallel execution.
 	p.doStaticDispatchV2(p.allTxReqs, txDAG) // todo: put txReqs in unit?

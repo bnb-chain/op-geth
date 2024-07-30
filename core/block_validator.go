@@ -156,13 +156,6 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	if ancestorErr != nil {
 		return ancestorErr
 	}
-
-	// TODO(galaio): add more TxDAG hash when TxDAG in consensus, txDAG check here
-	if len(block.TxDAG()) > 0 {
-		if _, err := types.DecodeTxDAG(block.TxDAG()); err != nil {
-			return errors.New("wrong TxDAG in block body")
-		}
-	}
 	return nil
 }
 

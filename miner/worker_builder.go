@@ -87,9 +87,9 @@ func (w *worker) commitBundles(
 	txs types.Transactions,
 	interrupt *atomic.Int32,
 ) error {
-	gasLimit := env.header.GasLimit
+	gasLimit := prepareGasPool(env.header.GasLimit)
 	if env.gasPool == nil {
-		env.gasPool = new(core.GasPool).AddGas(gasLimit)
+		env.gasPool = new(core.GasPool).AddGas(gasLimit.Gas())
 	}
 	var coalescedLogs []*types.Log
 
@@ -261,6 +261,9 @@ func (w *worker) mergeBundles(
 ) (types.Transactions, *types.SimulatedBundle, error) {
 	currentState := env.state.Copy()
 	gasPool := prepareGasPool(env.header.GasLimit)
+	if env.gasPool != nil {
+		gasPool = env.gasPool
+	}
 	env.UnRevertible = mapset.NewSet[common.Hash]()
 
 	includedTxs := types.Transactions{}
@@ -366,7 +369,6 @@ func (w *worker) simulateBundle(
 				return nil, er
 			}
 			if env.header.BaseFee != nil {
-				log.Info("simulate bundle: header base fee", "value", env.header.BaseFee.String())
 				effectiveTip.Add(effectiveTip, env.header.BaseFee)
 			}
 			txGasFees := new(big.Int).Mul(txGasUsed, effectiveTip)

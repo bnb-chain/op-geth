@@ -987,9 +987,12 @@ func (s *stateObject) fixUpOriginAndResetPendingStorage() {
 	if s.db.isParallel && s.db.parallel.isSlotDB {
 		mainDB := s.db.parallel.baseStateDB
 		origObj := mainDB.getStateObjectNoUpdate(s.address)
-		s.storageRecordsLock.RLock()
+		s.storageRecordsLock.Lock()
 		if origObj != nil && origObj.originStorage.Length() != 0 {
+			// There can be racing issue with CopyForSlot/LightCopy
+			origObj.storageRecordsLock.RLock()
 			originStorage := origObj.originStorage.Copy()
+			origObj.storageRecordsLock.RUnlock()
 			// During the tx execution, the originStorage can be updated with GetCommittedState()
 			// But is never get updated for the already existed one as there is no finalise called in execution.
 			// so here get the latest object in MainDB, and update the object storage with
@@ -1008,6 +1011,6 @@ func (s *stateObject) fixUpOriginAndResetPendingStorage() {
 		if s.pendingStorage.Length() > 0 {
 			s.pendingStorage = newStorage(false)
 		}
-		s.storageRecordsLock.RUnlock()
+		s.storageRecordsLock.Unlock()
 	}
 }

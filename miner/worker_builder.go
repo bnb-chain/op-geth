@@ -421,13 +421,12 @@ func (w *worker) simulateGaslessBundle(env *environment, bundle *types.Bundle) (
 			log.Warn("fail to simulate gasless bundle, skipped", "txHash", tx.Hash(), "err", err)
 		} else {
 			txIdx++
+			result = append(result, types.GaslessTxSimResult{
+				Hash:    tx.Hash(),
+				GasUsed: receipt.GasUsed,
+				Valid:   valid,
+			})
 		}
-
-		result = append(result, types.GaslessTxSimResult{
-			Hash:    tx.Hash(),
-			GasUsed: receipt.GasUsed,
-			Valid:   valid,
-		})
 	}
 
 	return &types.SimulateGaslessBundleResp{

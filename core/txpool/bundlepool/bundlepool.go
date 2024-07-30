@@ -36,8 +36,10 @@ const (
 )
 
 var (
-	bundleGauge = metrics.NewRegisteredGauge("bundlepool/bundles", nil)
-	slotsGauge  = metrics.NewRegisteredGauge("bundlepool/slots", nil)
+	bundleGauge         = metrics.NewRegisteredGauge("bundlepool/bundles", nil)
+	slotsGauge          = metrics.NewRegisteredGauge("bundlepool/slots", nil)
+	bundleDeliverAll    = metrics.NewRegisteredCounter("bundle/deliver/all", nil)
+	bundleDeliverFailed = metrics.NewRegisteredCounter("bundle/deliver/failed", nil)
 )
 
 var (
@@ -187,9 +189,11 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 			var hash common.Hash
 			err := cli.CallContext(context.Background(), &hash, "eth_sendBundle", *originBundle)
 			if err != nil {
+				bundleDeliverFailed.Inc(1)
 				log.Error("failed to deliver bundle to receiver", "url", url, "err", err)
 			}
 		}()
+		bundleDeliverAll.Inc(1)
 	}
 
 	for p.slots+numSlots(bundle) > p.config.GlobalSlots {

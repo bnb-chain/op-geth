@@ -39,6 +39,11 @@ func (s *PrivateTxBundleAPI) SimulateGaslessBundle(_ context.Context, args types
 		if err := tx.UnmarshalBinary(encodedTx); err != nil {
 			return nil, err
 		}
+		switch tx.Type() {
+		case types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType:
+		default:
+			return nil, errors.New(fmt.Sprintf("transaction type %d not supported", tx.Type()))
+		}
 		txs = append(txs, tx)
 	}
 

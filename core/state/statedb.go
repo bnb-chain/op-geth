@@ -244,10 +244,9 @@ type StateDB struct {
 	logSize uint
 
 	// parallel EVM related
-	rwSet        *types.RWSet
-	mvStates     *types.MVStates
-	stat         *types.ExeStat
-	rwRecordFlag bool
+	rwSet    *types.RWSet
+	mvStates *types.MVStates
+	stat     *types.ExeStat
 
 	// Preimages occurred seen by VM in the scope of block.
 	preimages map[common.Hash][]byte
@@ -683,8 +682,8 @@ func (s *StateDB) SetStorage(addr common.Address, storage map[common.Hash]common
 	//
 	// TODO(rjl493456442) this function should only be supported by 'unwritable'
 	// state and all mutations made should all be discarded afterwards.
-	if _, ok := s.queryStateObjectsDestruct(addr); !ok {
-		s.tagStateObjectsDestruct(addr, nil)
+	if _, ok := s.getStateObjectsDegetstruct(addr); !ok {
+		s.setStateObjectsDestruct(addr, nil)
 	}
 	stateObject := s.getOrNewStateObject(addr)
 	for k, v := range storage {
@@ -1022,9 +1021,9 @@ func (s *StateDB) createObject(addr common.Address) (newobj *stateObject) {
 		// account and storage data should be cleared as well. Note, it must
 		// be done here, otherwise the destruction event of "original account"
 		// will be lost.
-		_, prevdestruct := s.queryStateObjectsDestruct(prev.address)
+		_, prevdestruct := s.getStateObjectsDegetstruct(prev.address)
 		if !prevdestruct {
-			s.tagStateObjectsDestruct(prev.address, prev.origin)
+			s.setStateObjectsDestruct(prev.address, prev.origin)
 		}
 		// There may be some cached account/storage data already since IntermediateRoot
 		// will be called for each transaction before byzantium fork which will always
@@ -2368,7 +2367,6 @@ func (s *StateDB) BeforeTxTransition() {
 	s.rwSet = types.NewRWSet(types.StateVersion{
 		TxIndex: s.txIndex,
 	})
-	s.rwRecordFlag = true
 }
 
 func (s *StateDB) BeginTxStat(index int) {
@@ -2400,10 +2398,9 @@ func (s *StateDB) RecordRead(key types.RWKey, val interface{}) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return
 	}
-	if !s.rwRecordFlag {
+	if s.rwSet == nil || s.rwSet.RWRecordDone() {
 		return
 	}
-	// TODO: read from MVStates, record with ver
 	s.rwSet.RecordRead(key, types.StateVersion{
 		TxIndex: -1,
 	}, val)
@@ -2413,7 +2410,7 @@ func (s *StateDB) RecordWrite(key types.RWKey, val interface{}) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return
 	}
-	if !s.rwRecordFlag {
+	if s.rwSet == nil || s.rwSet.RWRecordDone() {
 		return
 	}
 	s.rwSet.RecordWrite(key, val)
@@ -2425,14 +2422,13 @@ func (s *StateDB) ResetMVStates(txCount int) {
 	}
 	s.mvStates = types.NewMVStates(txCount)
 	s.rwSet = nil
-	s.rwRecordFlag = false
 }
 
 func (s *StateDB) FinaliseRWSet() error {
 	if s.isParallel && s.parallel.isSlotDB {
 		return nil
 	}
-	if !s.rwRecordFlag {
+	if s.rwSet == nil || s.rwSet.RWRecordDone() {
 		return nil
 	}
 	if metrics.EnabledExpensive {
@@ -2470,11 +2466,11 @@ func (s *StateDB) FinaliseRWSet() error {
 		}
 	}
 
-	s.rwRecordFlag = false
+	s.rwSet.SetRWRecordDone()
 	return s.mvStates.FulfillRWSet(s.rwSet, s.stat)
 }
 
-func (s *StateDB) queryStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool) {
+func (s *StateDB) getStateObjectsDegetstruct(addr common.Address) (*types.StateAccount, bool) {
 	if !(s.isParallel && s.parallel.isSlotDB) {
 		if acc, ok := s.stateObjectsDestructDirty[addr]; ok {
 			return acc, ok
@@ -2484,7 +2480,7 @@ func (s *StateDB) queryStateObjectsDestruct(addr common.Address) (*types.StateAc
 	return acc, ok
 }
 
-func (s *StateDB) tagStateObjectsDestruct(addr common.Address, acc *types.StateAccount) {
+func (s *StateDB) setStateObjectsDestruct(addr common.Address, acc *types.StateAccount) {
 	if !(s.isParallel && s.parallel.isSlotDB) {
 		s.stateObjectsDestructDirty[addr] = acc
 		return
@@ -2493,7 +2489,7 @@ func (s *StateDB) tagStateObjectsDestruct(addr common.Address, acc *types.StateA
 	return
 }
 
-func (s *StateDB) deleteStateObjectsDestruct(addr common.Address) {
+func (s *StateDB) removeStateObjectsDestruct(addr common.Address) {
 	if !(s.isParallel && s.parallel.isSlotDB) {
 		delete(s.stateObjectsDestructDirty, addr)
 		return

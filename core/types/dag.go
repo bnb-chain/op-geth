@@ -33,6 +33,9 @@ type TxDAG interface {
 
 	// TxCount return tx count
 	TxCount() int
+
+	// SetTxDep at the last one
+	SetTxDep(int, TxDep) error
 }
 
 func EncodeTxDAG(dag TxDAG) ([]byte, error) {
@@ -99,6 +102,10 @@ func (d *EmptyTxDAG) TxCount() int {
 	return 0
 }
 
+func (d *EmptyTxDAG) SetTxDep(int, TxDep) error {
+	return nil
+}
+
 func (d *EmptyTxDAG) String() string {
 	return "None"
 }
@@ -127,6 +134,18 @@ func (d *PlainTxDAG) TxDep(i int) TxDep {
 
 func (d *PlainTxDAG) TxCount() int {
 	return len(d.TxDeps)
+}
+
+func (d *PlainTxDAG) SetTxDep(i int, dep TxDep) error {
+	if i < 0 || i > len(d.TxDeps) {
+		return fmt.Errorf("SetTxDep with wrong index: %d", i)
+	}
+	if i < len(d.TxDeps) {
+		d.TxDeps[i] = dep
+		return nil
+	}
+	d.TxDeps = append(d.TxDeps, dep)
+	return nil
 }
 
 func NewPlainTxDAG(txLen int) *PlainTxDAG {
@@ -285,23 +304,23 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 	// It assumes that there is no parallel thread limit
 	txCount := dag.TxCount()
 	var (
-		maxGasIndex     int
-		maxGas          uint64
-		maxTimeIndex    int
-		maxTime         time.Duration
-		txTimes         = make([]time.Duration, txCount)
-		txGases         = make([]uint64, txCount)
-		txReads         = make([]int, txCount)
-		noDepdencyCount int
+		maxGasIndex  int
+		maxGas       uint64
+		maxTimeIndex int
+		maxTime      time.Duration
+		txTimes      = make([]time.Duration, txCount)
+		txGases      = make([]uint64, txCount)
+		txReads      = make([]int, txCount)
+		noDepCnt     int
 	)
 
 	totalTxMeter.Mark(int64(txCount))
 	for i, path := range paths {
-		if stats[i].mustSerialFlag {
+		if stats[i].mustSerial {
 			continue
 		}
 		if len(path) <= 1 {
-			noDepdencyCount++
+			noDepCnt++
 			totalNoDepMeter.Mark(1)
 		}
 		if len(path) <= 3 {
@@ -358,7 +377,7 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 		sPath []int
 	)
 	for i, stat := range stats {
-		if stat.mustSerialFlag {
+		if stat.mustSerial {
 			continue
 		}
 		sPath = append(sPath, i)
@@ -399,8 +418,9 @@ type ExeStat struct {
 	readCount int
 	startTime time.Time
 	costTime  time.Duration
-	// TODO: consider system tx, gas fee issues, may need to use different flag
-	mustSerialFlag bool
+
+	// some flags
+	mustSerial bool
 }
 
 func NewExeStat(txIndex int) *ExeStat {
@@ -420,7 +440,7 @@ func (s *ExeStat) Done() *ExeStat {
 }
 
 func (s *ExeStat) WithSerialFlag() *ExeStat {
-	s.mustSerialFlag = true
+	s.mustSerial = true
 	return s
 }
 

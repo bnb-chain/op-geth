@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ethereum/go-ethereum/metrics"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/holiman/uint256"
@@ -86,37 +88,26 @@ func (key *RWKey) Addr() common.Address {
 // if TxIndex equals to -1, it means the state read from DB.
 type StateVersion struct {
 	TxIndex int
-	// TODO(galaio): used for multi ver state
+	// Tx incarnation used for multi ver state
 	TxIncarnation int
-}
-
-// ReadRecord keep read value & its version
-type ReadRecord struct {
-	StateVersion
-	Val interface{}
-}
-
-// WriteRecord keep latest state value & change count
-type WriteRecord struct {
-	Val interface{}
 }
 
 // RWSet record all read & write set in txs
 // Attention: this is not a concurrent safety structure
 type RWSet struct {
 	ver      StateVersion
-	readSet  map[RWKey]*ReadRecord
-	writeSet map[RWKey]*WriteRecord
+	readSet  map[RWKey]*RWItem
+	writeSet map[RWKey]*RWItem
 
-	// some flags
-	mustSerial bool
+	rwRecordDone bool
+	mustSerial   bool
 }
 
 func NewRWSet(ver StateVersion) *RWSet {
 	return &RWSet{
 		ver:      ver,
-		readSet:  make(map[RWKey]*ReadRecord),
-		writeSet: make(map[RWKey]*WriteRecord),
+		readSet:  make(map[RWKey]*RWItem),
+		writeSet: make(map[RWKey]*RWItem),
 	}
 }
 
@@ -125,16 +116,17 @@ func (s *RWSet) RecordRead(key RWKey, ver StateVersion, val interface{}) {
 	if _, exist := s.readSet[key]; exist {
 		return
 	}
-	s.readSet[key] = &ReadRecord{
-		StateVersion: ver,
-		Val:          val,
+	s.readSet[key] = &RWItem{
+		Ver: ver,
+		Val: val,
 	}
 }
 
 func (s *RWSet) RecordWrite(key RWKey, val interface{}) {
 	wr, exist := s.writeSet[key]
 	if !exist {
-		s.writeSet[key] = &WriteRecord{
+		s.writeSet[key] = &RWItem{
+			Ver: s.ver,
 			Val: val,
 		}
 		return
@@ -146,17 +138,25 @@ func (s *RWSet) Version() StateVersion {
 	return s.ver
 }
 
-func (s *RWSet) ReadSet() map[RWKey]*ReadRecord {
+func (s *RWSet) ReadSet() map[RWKey]*RWItem {
 	return s.readSet
 }
 
-func (s *RWSet) WriteSet() map[RWKey]*WriteRecord {
+func (s *RWSet) WriteSet() map[RWKey]*RWItem {
 	return s.writeSet
 }
 
 func (s *RWSet) WithSerialFlag() *RWSet {
 	s.mustSerial = true
 	return s
+}
+
+func (s *RWSet) RWRecordDone() bool {
+	return s.rwRecordDone
+}
+
+func (s *RWSet) SetRWRecordDone() {
+	s.rwRecordDone = true
 }
 
 func (s *RWSet) String() string {
@@ -219,37 +219,37 @@ func equalUint256(s, c *uint256.Int) bool {
 	return s == c
 }
 
-type PendingWrite struct {
+type RWItem struct {
 	Ver StateVersion
 	Val interface{}
 }
 
-func NewPendingWrite(ver StateVersion, wr *WriteRecord) *PendingWrite {
-	return &PendingWrite{
+func NewRWItem(ver StateVersion, val interface{}) *RWItem {
+	return &RWItem{
 		Ver: ver,
-		Val: wr.Val,
+		Val: val,
 	}
 }
 
-func (w *PendingWrite) TxIndex() int {
+func (w *RWItem) TxIndex() int {
 	return w.Ver.TxIndex
 }
 
-func (w *PendingWrite) TxIncarnation() int {
+func (w *RWItem) TxIncarnation() int {
 	return w.Ver.TxIncarnation
 }
 
 type PendingWrites struct {
-	list []*PendingWrite
+	list []*RWItem
 }
 
 func NewPendingWrites() *PendingWrites {
 	return &PendingWrites{
-		list: make([]*PendingWrite, 0),
+		list: make([]*RWItem, 0),
 	}
 }
 
-func (w *PendingWrites) Append(pw *PendingWrite) {
+func (w *PendingWrites) Append(pw *RWItem) {
 	if i, found := w.SearchTxIndex(pw.TxIndex()); found {
 		w.list[i] = pw
 		return
@@ -279,7 +279,7 @@ func (w *PendingWrites) SearchTxIndex(txIndex int) (int, bool) {
 	return i, i < n && w.list[i].TxIndex() == txIndex
 }
 
-func (w *PendingWrites) FindLastWrite(txIndex int) *PendingWrite {
+func (w *PendingWrites) FindLastWrite(txIndex int) *RWItem {
 	var i, _ = w.SearchTxIndex(txIndex)
 	for j := i - 1; j >= 0; j-- {
 		if w.list[j].TxIndex() < txIndex {
@@ -291,8 +291,9 @@ func (w *PendingWrites) FindLastWrite(txIndex int) *PendingWrite {
 }
 
 type MVStates struct {
-	rwSets          map[int]*RWSet
-	pendingWriteSet map[RWKey]*PendingWrites
+	rwSets            map[int]*RWSet
+	pendingWriteSet   map[RWKey]*PendingWrites
+	nextFinaliseIndex int
 
 	// dependency map cache for generating TxDAG
 	// depsCache[i].exist(j) means j->i, and i > j
@@ -333,21 +334,27 @@ func (s *MVStates) RWSet(index int) *RWSet {
 	return s.rwSets[index]
 }
 
-// ReadState TODO(galaio): read state from MVStates
-func (s *MVStates) ReadState(key RWKey) (interface{}, bool) {
-	return nil, false
+// ReadState read state from MVStates
+func (s *MVStates) ReadState(txIndex int, key RWKey) *RWItem {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	wset, ok := s.pendingWriteSet[key]
+	if !ok {
+		return nil
+	}
+	return wset.FindLastWrite(txIndex)
 }
 
 // FulfillRWSet it can execute as async, and rwSet & stat must guarantee read-only
 // try to generate TxDAG, when fulfill RWSet
-// TODO(galaio): support flag to stat execution as optional
 func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
-	log.Debug("FulfillRWSet", "s.len", len(s.rwSets), "cur", rwSet.ver.TxIndex, "reads", len(rwSet.readSet), "writes", len(rwSet.writeSet))
+	log.Debug("FulfillRWSet", "total", len(s.rwSets), "cur", rwSet.ver.TxIndex, "reads", len(rwSet.readSet), "writes", len(rwSet.writeSet))
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	index := rwSet.ver.TxIndex
-	if s := s.rwSets[index]; s != nil {
-		return errors.New("refill a exist RWSet")
+	if index < s.nextFinaliseIndex {
+		return errors.New("fulfill a finalized RWSet")
 	}
 	if stat != nil {
 		if stat.txIndex != index {
@@ -356,26 +363,46 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 		s.stats[index] = stat
 	}
 
+	if metrics.EnabledExpensive {
+		for k := range rwSet.writeSet {
+			// this action is only for testing, it runs when enable expensive metrics.
+			checkRWSetInconsistent(index, k, rwSet.readSet, rwSet.writeSet)
+		}
+	}
 	s.resolveDepsCache(index, rwSet)
+	s.rwSets[index] = rwSet
+	return nil
+}
+
+// Finalise it will put target write set into pending writes.
+func (s *MVStates) Finalise(index int) error {
+	log.Debug("Finalise", "total", len(s.rwSets), "index", index)
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	rwSet := s.rwSets[index]
+	if rwSet == nil {
+		return fmt.Errorf("finalise a non-exist RWSet, index: %d", index)
+	}
+
+	if index != s.nextFinaliseIndex {
+		return fmt.Errorf("finalise in wrong order, next: %d, input: %d", s.nextFinaliseIndex, index)
+	}
+
 	// append to pending write set
 	for k, v := range rwSet.writeSet {
-		// TODO(galaio): this action is only for testing, it can be removed in production mode.
-		// ignore no changed write record
-		checkRWSetInconsistent(index, k, rwSet.readSet, rwSet.writeSet)
 		if _, exist := s.pendingWriteSet[k]; !exist {
 			s.pendingWriteSet[k] = NewPendingWrites()
 		}
-		s.pendingWriteSet[k].Append(NewPendingWrite(rwSet.ver, v))
+		s.pendingWriteSet[k].Append(v)
 	}
-	s.rwSets[index] = rwSet
+	s.nextFinaliseIndex++
 	return nil
 }
 
 func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
-	if _, ok := s.depsCache[index]; !ok {
-		s.depsCache[index] = NewTxDeps(0)
-	}
+	s.depsCache[index] = NewTxDeps(0)
 	for prev := 0; prev < index; prev++ {
 		// if there are some parallel execution or system txs, it will fulfill in advance
 		// it's ok, and try re-generate later
@@ -395,11 +422,11 @@ func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 	}
 }
 
-func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*ReadRecord, writeSet map[RWKey]*WriteRecord) bool {
+func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*RWItem, writeSet map[RWKey]*RWItem) bool {
 	var (
 		readOk  bool
 		writeOk bool
-		r       *WriteRecord
+		r       *RWItem
 	)
 
 	if k.IsAccountSuicide() {
@@ -411,7 +438,7 @@ func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*ReadRecord, w
 	r, writeOk = writeSet[k]
 	if readOk != writeOk {
 		// check if it's correct? read nil, write non-nil
-		log.Info("checkRWSetInconsistent find inconsistent", "tx", index, "k", k.String(), "read", readOk, "write", writeOk, "val", r.Val)
+		log.Warn("checkRWSetInconsistent find inconsistent", "tx", index, "k", k.String(), "read", readOk, "write", writeOk, "val", r.Val)
 		return true
 	}
 
@@ -443,7 +470,7 @@ func (s *MVStates) ResolveTxDAG(gasFeeReceivers []common.Address) TxDAG {
 	return txDAG
 }
 
-func checkDependency(writeSet map[RWKey]*WriteRecord, readSet map[RWKey]*ReadRecord) bool {
+func checkDependency(writeSet map[RWKey]*RWItem, readSet map[RWKey]*RWItem) bool {
 	// check tx dependency, only check key, skip version
 	for k, _ := range writeSet {
 		// check suicide, add read address flag, it only for check suicide quickly, and cannot for other scenarios.

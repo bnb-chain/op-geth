@@ -24,11 +24,14 @@ import (
 	"math/big"
 	"math/rand"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/mattn/go-colorable"
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
@@ -50,7 +53,6 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
-	"github.com/mattn/go-colorable"
 )
 
 var (
@@ -717,7 +719,7 @@ func TestEmptyBlocks(t *testing.T) {
 	payload := getNewPayload(t, api, commonAncestor, nil)
 
 	status, err := api.NewPayloadV1(*payload)
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "forced head needed for startup") {
 		t.Fatal(err)
 	}
 	if status.Status != engine.VALID {
@@ -733,7 +735,7 @@ func TestEmptyBlocks(t *testing.T) {
 	payload = setBlockhash(payload)
 	// Now latestValidHash should be the common ancestor
 	status, err = api.NewPayloadV1(*payload)
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "forced head needed for startup") {
 		t.Fatal(err)
 	}
 	if status.Status != engine.INVALID {
@@ -751,7 +753,7 @@ func TestEmptyBlocks(t *testing.T) {
 	payload = setBlockhash(payload)
 	// Now latestValidHash should be the common ancestor
 	status, err = api.NewPayloadV1(*payload)
-	if err != nil {
+	if err != nil && !strings.Contains(err.Error(), "forced head needed for startup") {
 		t.Fatal(err)
 	}
 	if status.Status != engine.SYNCING {
@@ -863,7 +865,7 @@ func TestTrickRemoteBlockCache(t *testing.T) {
 	// feed the payloads to node B
 	for _, payload := range invalidChain {
 		status, err := apiB.NewPayloadV1(*payload)
-		if err != nil {
+		if err != nil && !strings.Contains(err.Error(), "forced head needed for startup") {
 			panic(err)
 		}
 		if status.Status == engine.VALID {

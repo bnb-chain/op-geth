@@ -359,14 +359,17 @@ func (p *BundlePool) reset(newHead *types.Header) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Prune outdated bundles
+	// Prune outdated bundles and invalid bundle
 	for hash, bundle := range p.bundles {
 		if (bundle.MaxTimestamp != 0 && newHead.Time > bundle.MaxTimestamp) ||
 			(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
 			p.slots -= numSlots(p.bundles[hash])
 			delete(p.bundles, hash)
 		}
+		p.simulator.SimulateBundle(bundle)
 	}
+	bundleGauge.Update(int64(len(p.bundles)))
+	slotsGauge.Update(int64(p.slots))
 }
 
 // deleteBundle deletes a bundle from the pool.

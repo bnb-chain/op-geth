@@ -169,7 +169,7 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 		return err
 	}
 
-	if price.Cmp(p.minimalBundleGasPrice()) < 0 && p.slots+numSlots(bundle) > p.config.GlobalSlots {
+	if price.Cmp(p.minimalBundleGasPrice()) <= 0 && p.slots+numSlots(bundle) > p.config.GlobalSlots {
 		return ErrBundleGasPriceLow
 	}
 	bundle.Price = price

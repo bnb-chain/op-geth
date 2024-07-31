@@ -11,9 +11,9 @@ import (
 
 const (
 	// MaxBundleAliveBlock is the max alive block for bundle
-	MaxBundleAliveBlock = 300
+	MaxBundleAliveBlock = 60
 	// MaxBundleAliveTime is the max alive time for bundle
-	MaxBundleAliveTime = 5 * 60 // second
+	MaxBundleAliveTime = 60 // second
 )
 
 // SendBundleArgs represents the arguments for a call.

@@ -384,8 +384,6 @@ func (p *BundlePool) deleteBundle(hash common.Hash) {
 
 // drop removes the bundle with the lowest gas price from the pool.
 func (p *BundlePool) drop() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	for len(p.bundleHeap) > 0 {
 		// Pop the bundle with the lowest gas price
 		// the min element in the heap may not exist in the pool as it may be pruned

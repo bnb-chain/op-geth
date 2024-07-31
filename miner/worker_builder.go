@@ -261,9 +261,6 @@ func (w *worker) mergeBundles(
 ) (types.Transactions, *types.SimulatedBundle, error) {
 	currentState := env.state.Copy()
 	gasPool := prepareGasPool(env.header.GasLimit)
-	if env.gasPool != nil {
-		gasPool = env.gasPool
-	}
 	env.UnRevertible = mapset.NewSet[common.Hash]()
 
 	includedTxs := types.Transactions{}
@@ -451,7 +448,8 @@ func containsHash(arr []common.Hash, match common.Hash) bool {
 }
 
 func prepareGasPool(gasLimit uint64) *core.GasPool {
-	gasPool := new(core.GasPool).AddGas(gasLimit)
-	gasPool.SubGas(params.SystemTxsGas)
+	// for opbnb, 1/4 gaslimit for bundles currently
+	bundleGas := gasLimit / 4
+	gasPool := new(core.GasPool).AddGas(bundleGas)
 	return gasPool
 }

@@ -1241,7 +1241,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			go func() {
 				defer wg.Done()
 				err := w.fillTransactionsAndBundles(interrupt, newWork)
-				if !(errors.Is(err, errBlockInterruptedByTimeout) || errors.Is(err, errBlockInterruptedByResolve)) {
+				if err != nil && (!(errors.Is(err, errBlockInterruptedByTimeout) || errors.Is(err, errBlockInterruptedByResolve))) {
 					log.Warn("fillTransactionsAndBundles is interrupted", "err", err)
 				}
 			}()

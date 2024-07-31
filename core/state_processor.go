@@ -125,9 +125,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), withdrawals)
 
 	if p.bc.enableTxDAG {
-		// TODO(galaio): append dag into block body, TxDAGPerformance will print metrics when profile is enabled
 		// compare input TxDAG when it enable in consensus
 		dag, extraStats := statedb.ResolveTxDAG([]common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+		// TODO(galaio): check TxDAG correctness?
 		log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
 		if metrics.EnabledExpensive {
 			types.EvaluateTxDAGPerformance(dag, extraStats)

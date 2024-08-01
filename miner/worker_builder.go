@@ -38,7 +38,7 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 
 	// if no bundles, not necessary to fill transactions
 	if len(bundles) == 0 {
-		log.Error("no bundles in bundle poo")
+		log.Warn("no bundles in bundle pool")
 		return errFillBundleInterrupted
 	}
 

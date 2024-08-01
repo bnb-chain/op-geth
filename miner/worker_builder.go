@@ -223,8 +223,8 @@ func (w *worker) simulateBundles(env *environment, bundles []*types.Bundle) ([]*
 		wg.Add(1)
 		go func(idx int, bundle *types.Bundle, state *state.StateDB) {
 			defer wg.Done()
-
-			simmed, err := w.simulateBundle(env, bundle, state, env.gasPool, 0, true, true)
+			gasPool := prepareGasPool()
+			simmed, err := w.simulateBundle(env, bundle, state, gasPool, 0, true, true)
 			if err != nil {
 				log.Trace("Error computing gas for a simulateBundle", "error", err)
 				return

@@ -295,7 +295,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	bundlePool := &bundlepool.BundlePool{}
 	if config.Miner.Mev.MevEnabled {
-		bundlePool = bundlepool.New(config.BundlePool, config.Miner.Mev)
+		bundlePool = bundlepool.New(config.BundlePool, config.Miner.Mev, eth.blockchain)
 		txPools = append(txPools, bundlePool)
 	}
 	eth.txPool, err = txpool.New(new(big.Int).SetUint64(config.TxPool.PriceLimit), eth.blockchain, txPools)

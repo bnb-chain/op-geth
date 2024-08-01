@@ -29,7 +29,8 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 	// TODO will remove after fix txpool perf issue
 	if interrupt != nil {
 		if signal := interrupt.Load(); signal != commitInterruptNone {
-			return signalToErr(signal)
+			log.Warn("fill bundles interrupted by signal")
+			return errFillBundleInterrupted
 		}
 	}
 
@@ -37,20 +38,19 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 
 	// if no bundles, not necessary to fill transactions
 	if len(bundles) == 0 {
-		return errors.New("no bundles in bundle pool")
+		log.Error("no bundles in bundle poo")
+		return errFillBundleInterrupted
 	}
 
 	txs, _, err := w.generateOrderedBundles(env, bundles)
 	if err != nil {
 		log.Error("fail to generate ordered bundles", "err", err)
-		return err
+		return errFillBundleInterrupted
 	}
 
 	if err = w.commitBundles(env, txs, interrupt); err != nil {
 		log.Error("fail to commit bundles", "err", err)
-		// if commit bundles failed, set profit is 0, discard all fill bundles
-		env.profit.Set(big.NewInt(0))
-		return err
+		return errFillBundleInterrupted
 	}
 	log.Info("fill bundles", "bundles_count", len(bundles))
 
@@ -87,7 +87,7 @@ func (w *worker) commitBundles(
 	txs types.Transactions,
 	interrupt *atomic.Int32,
 ) error {
-	gasLimit := prepareGasPool(env.header.GasLimit)
+	gasLimit := prepareGasPool()
 	if env.gasPool == nil {
 		env.gasPool = new(core.GasPool).AddGas(gasLimit.Gas())
 	}
@@ -260,7 +260,7 @@ func (w *worker) mergeBundles(
 	bundles []*types.SimulatedBundle,
 ) (types.Transactions, *types.SimulatedBundle, error) {
 	currentState := env.state.Copy()
-	gasPool := prepareGasPool(env.header.GasLimit)
+	gasPool := prepareGasPool()
 	env.UnRevertible = mapset.NewSet[common.Hash]()
 
 	includedTxs := types.Transactions{}
@@ -447,9 +447,7 @@ func containsHash(arr []common.Hash, match common.Hash) bool {
 	return false
 }
 
-func prepareGasPool(gasLimit uint64) *core.GasPool {
-	// for opbnb, 1/4 gaslimit for bundles currently
-	bundleGas := gasLimit / 4
-	gasPool := new(core.GasPool).AddGas(bundleGas)
+func prepareGasPool() *core.GasPool {
+	gasPool := new(core.GasPool).AddGas(params.BundleGasLimit)
 	return gasPool
 }

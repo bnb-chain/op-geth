@@ -383,7 +383,7 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 		header:  header,
 		state:   state.Copy(),
 		signer:  types.MakeSigner(miner.worker.chainConfig, header.Number, header.Time),
-		gasPool: prepareGasPool(header.GasLimit),
+		gasPool: prepareGasPool(),
 	}
 	return env, nil
 }

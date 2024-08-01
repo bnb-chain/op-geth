@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/rpc"
 	"math/big"
@@ -80,6 +81,7 @@ type BundleSimulator interface {
 type BundlePool struct {
 	config    Config
 	mevConfig miner.MevConfig
+	chain     BlockChain
 
 	bundles    map[common.Hash]*types.Bundle
 	bundleHeap BundleHeap
@@ -92,13 +94,14 @@ type BundlePool struct {
 	bundleReceiverClients map[string]*rpc.Client
 }
 
-func New(config Config, mevConfig miner.MevConfig) *BundlePool {
+func New(config Config, mevConfig miner.MevConfig, chain BlockChain) *BundlePool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
 	pool := &BundlePool{
 		config:                config,
 		mevConfig:             mevConfig,
+		chain:                 chain,
 		bundles:               make(map[common.Hash]*types.Bundle),
 		bundleHeap:            make(BundleHeap, 0),
 		bundleReceiverClients: make(map[string]*rpc.Client),
@@ -169,13 +172,13 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 		return err
 	}
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if price.Cmp(p.minimalBundleGasPrice()) <= 0 && p.slots+numSlots(bundle) > p.config.GlobalSlots {
 		return ErrBundleGasPriceLow
 	}
 	bundle.Price = price
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
 
 	hash := bundle.Hash()
 	if _, ok := p.bundles[hash]; ok {
@@ -359,10 +362,21 @@ func (p *BundlePool) reset(newHead *types.Header) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Prune outdated bundles
+	// Prune outdated bundles and invalid bundles
+	block := p.chain.GetBlock(newHead.Hash(), newHead.Number.Uint64())
+	txSet := mapset.NewSet[common.Hash]()
+	if block != nil {
+		txs := block.Transactions()
+		for _, tx := range txs {
+			txSet.Add(tx.Hash())
+		}
+	}
 	for hash, bundle := range p.bundles {
 		if (bundle.MaxTimestamp != 0 && newHead.Time > bundle.MaxTimestamp) ||
 			(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
+			p.slots -= numSlots(p.bundles[hash])
+			delete(p.bundles, hash)
+		} else if txSet.Contains(bundle.Txs[0].Hash()) {
 			p.slots -= numSlots(p.bundles[hash])
 			delete(p.bundles, hash)
 		}

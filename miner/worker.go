@@ -1225,7 +1225,6 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			go func() {
 				defer wg.Done()
 				err := w.fillTransactions(interrupt, newWork)
-				timer.Stop() // don't need timeout interruption any more
 				if errors.Is(err, errBlockInterruptedByTimeout) {
 					log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
 					isBuildBlockInterruptCounter.Inc(1)
@@ -1235,8 +1234,8 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 				}
 			}()
 			err := w.fillTransactionsAndBundles(interrupt, work)
-			timer.Stop() // don't need timeout interruption any more
 			wg.Wait()
+			timer.Stop() // don't need timeout interruption any more
 			if errors.Is(err, errFillBundleInterrupted) {
 				log.Warn("fill bundles is interrupted, discard", "err", err)
 				work = newWork

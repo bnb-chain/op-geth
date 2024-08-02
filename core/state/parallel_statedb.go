@@ -1500,10 +1500,11 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 				// We need to maintain account deletions explicitly (will remain
 				// set indefinitely). Note only the first occurred self-destruct
 				// event is tracked.
+				mainDB.stateObjectDestructLock.Lock()
 				if _, ok := mainDB.stateObjectsDestruct[obj.address]; !ok {
 					mainDB.stateObjectsDestruct[obj.address] = obj.origin
 				}
-
+				mainDB.stateObjectDestructLock.Unlock()
 				// Note, we can't do this only at the end of a block because multiple
 				// transactions within the same block might self destruct and then
 				// resurrect an account; but the snapshotter needs both events.
@@ -1561,6 +1562,7 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 			// We need to maintain account deletions explicitly (will remain
 			// set indefinitely). Note only the first occurred self-destruct
 			// event is tracked.
+			// This is the thread local one, no need to acquire the stateObjectsDestructLock.
 			if _, ok := s.stateObjectsDestruct[obj.address]; !ok {
 				s.stateObjectsDestruct[obj.address] = obj.origin
 			}

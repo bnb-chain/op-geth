@@ -110,7 +110,9 @@ func (s *StateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 // deleteStateObj is the entry for deleting state object to stateObjects in StateDB or stateObjects in parallel
 func (s *StateDB) deleteStateObj(addr common.Address) {
 	if s.isParallel {
+		s.parallelStateAccessLock.Lock()
 		s.parallel.stateObjects.Delete(addr)
+		s.parallelStateAccessLock.Unlock()
 	} else {
 		delete(s.stateObjects, addr)
 	}
@@ -196,6 +198,7 @@ type StateDB struct {
 	parallelStateAccessLock sync.RWMutex
 	snapParallelLock        sync.RWMutex // for parallel mode, for main StateDB, slot will read snapshot, while processor will write.
 	trieParallelLock        sync.Mutex   // for parallel mode of trie, mostly for get states/objects from trie, lock required to handle trie tracer.
+	stateObjectDestructLock sync.RWMutex // for parallel mode, used in mainDB for mergeSlot and conflict check.
 	snapDestructs           map[common.Address]struct{}
 	snapAccounts            map[common.Address][]byte
 	snapStorage             map[common.Address]map[string][]byte
@@ -1021,10 +1024,12 @@ func (s *StateDB) createObject(addr common.Address) (newobj *stateObject) {
 		// account and storage data should be cleared as well. Note, it must
 		// be done here, otherwise the destruction event of "original account"
 		// will be lost.
+		s.stateObjectDestructLock.Lock()
 		_, prevdestruct := s.getStateObjectsDegetstruct(prev.address)
 		if !prevdestruct {
 			s.setStateObjectsDestruct(prev.address, prev.origin)
 		}
+		s.stateObjectDestructLock.Unlock()
 		// There may be some cached account/storage data already since IntermediateRoot
 		// will be called for each transaction before byzantium fork which will always
 		// cache the latest account/storage data.
@@ -1536,6 +1541,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	addressesToPrefetch := make([][]byte, 0, len(s.journal.dirties))
 
 	// finalise stateObjectsDestruct
+	// The finalise of stateDB is called at verify & commit phase, which is global, no need to acquire the lock.
 	for addr, acc := range s.stateObjectsDestructDirty {
 		s.stateObjectsDestruct[addr] = acc
 	}
@@ -1570,6 +1576,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			// We need to maintain account deletions explicitly (will remain
 			// set indefinitely). Note only the first occurred self-destruct
 			// event is tracked.
+			// The finalise of stateDB is called at verify & commit phase, which is global, no need to acquire the lock.
 			if _, ok := s.stateObjectsDestruct[obj.address]; !ok {
 				s.stateObjectsDestruct[obj.address] = obj.origin
 			}
@@ -1941,6 +1948,7 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 		return incomplete, nil
 	}
 
+	// Commit phase, no need to acquire lock.
 	for addr, prev := range s.stateObjectsDestruct {
 		// The original account was non-existing, and it's marked as destructed
 		// in the scope of block. It can be case (a) or (b).
@@ -2600,6 +2608,7 @@ func (s *StateDB) AddrPrefetch(slotDb *ParallelStateDB) {
 // finalized(dirty -> pending) on execution slot, the execution results should be
 // merged back to the main StateDB.
 func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receipt, txIndex int, fees *DelayedGasFee) *StateDB {
+
 	s.SetTxContext(slotDb.thash, slotDb.txIndex)
 
 	for s.nextRevisionId < slotDb.nextRevisionId {
@@ -2777,11 +2786,13 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 		}
 	}
 
+	s.stateObjectDestructLock.Lock()
 	for addr := range slotDb.stateObjectsDestruct {
 		if acc, exist := s.stateObjectsDestruct[addr]; !exist {
 			s.stateObjectsDestruct[addr] = acc
 		}
 	}
+	s.stateObjectDestructLock.Unlock()
 	// slotDb.logs: logs will be kept in receipts, no need to do merge
 	for hash, preimage := range slotDb.preimages {
 		s.preimages[hash] = preimage

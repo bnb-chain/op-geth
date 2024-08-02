@@ -4728,9 +4728,20 @@ func TestTxDAGFile_ReadWrite(t *testing.T) {
 		1: makeEmptyPlainTxDAG(1),
 		2: makeEmptyPlainTxDAG(2),
 	}
-	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
 	require.NoError(t, err)
 	for num, dag := range except {
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
+	}
+	writeFile.Close()
+
+	except2 := map[uint64]types.TxDAG{
+		3: types.NewEmptyTxDAG(),
+		4: makeEmptyPlainTxDAG(4),
+	}
+	writeFile, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
+	require.NoError(t, err)
+	for num, dag := range except2 {
 		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
 	}
 	writeFile.Close()
@@ -4738,6 +4749,9 @@ func TestTxDAGFile_ReadWrite(t *testing.T) {
 	actual, err := readTxDAGMappingFromFile(path)
 	require.NoError(t, err)
 	for num, dag := range except {
+		require.Equal(t, dag, actual[num])
+	}
+	for num, dag := range except2 {
 		require.Equal(t, dag, actual[num])
 	}
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
@@ -432,12 +433,22 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		if st.msg.IsSystemTx && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
 			gasUsed = 0
 		}
+		// just record error tx here
+		if ferr := st.state.FinaliseRWSet(); ferr != nil {
+			log.Error("finalise error deposit tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+		}
 		result = &ExecutionResult{
 			UsedGas:    gasUsed,
 			Err:        fmt.Errorf("failed deposit: %w", err),
 			ReturnData: nil,
 		}
 		err = nil
+	}
+	if err != nil {
+		// just record error tx here
+		if ferr := st.state.FinaliseRWSet(); ferr != nil {
+			log.Error("finalise error tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+		}
 	}
 	return result, err
 }
@@ -521,6 +532,11 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	}
 	DebugInnerExecutionDuration += time.Since(start)
 
+	// stop record rw set in here, skip gas fee distribution
+	if ferr := st.state.FinaliseRWSet(); ferr != nil {
+		log.Error("finalise tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+	}
+
 	// if deposit: skip refunds, skip tipping coinbase
 	// Regolith changes this behaviour to report the actual gasUsed instead of always reporting all gas used.
 	if st.msg.IsDepositTx && !rules.IsOptimismRegolith {
@@ -535,10 +551,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			Err:        vmerr,
 			ReturnData: ret,
 		}, nil
-	}
-	// stop record rw set in here, skip gas fee distribution
-	if err := st.state.FinaliseRWSet(); err != nil {
-		return nil, err
 	}
 
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice

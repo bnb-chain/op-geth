@@ -80,6 +80,8 @@ type StateDB interface {
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
 
+	TxIndex() int
+
 	BeforeTxTransition()
 	FinaliseRWSet() error
 }

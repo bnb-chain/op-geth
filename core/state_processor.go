@@ -126,11 +126,15 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 	if p.bc.enableTxDAG {
 		// compare input TxDAG when it enable in consensus
-		dag, extraStats := statedb.ResolveTxDAG([]common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-		// TODO(galaio): check TxDAG correctness?
-		log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
-		if metrics.EnabledExpensive {
-			types.EvaluateTxDAGPerformance(dag, extraStats)
+		dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+		if err == nil {
+			// TODO(galaio): check TxDAG correctness?
+			log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
+			if metrics.EnabledExpensive {
+				types.EvaluateTxDAGPerformance(dag, statedb.ResolveStats())
+			}
+		} else {
+			log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
 		}
 	}
 	return receipts, allLogs, *usedGas, nil

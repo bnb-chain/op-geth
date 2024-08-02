@@ -1798,7 +1798,7 @@ func (s *StateDB) removeStateObjectsDestruct(addr common.Address) {
 	delete(s.stateObjectsDestructDirty, addr)
 }
 
-func (s *StateDB) ResolveTxDAG(gasFeeReceivers []common.Address) (types.TxDAG, map[int]*types.ExeStat) {
+func (s *StateDB) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (types.TxDAG, error) {
 	if s.mvStates == nil {
 		return types.NewEmptyTxDAG(), nil
 	}
@@ -1808,7 +1808,15 @@ func (s *StateDB) ResolveTxDAG(gasFeeReceivers []common.Address) (types.TxDAG, m
 		}(time.Now())
 	}
 
-	return s.mvStates.ResolveTxDAG(gasFeeReceivers), s.mvStates.Stats()
+	return s.mvStates.ResolveTxDAG(txCnt, gasFeeReceivers)
+}
+
+func (s *StateDB) ResolveStats() map[int]*types.ExeStat {
+	if s.mvStates == nil {
+		return nil
+	}
+
+	return s.mvStates.Stats()
 }
 
 func (s *StateDB) MVStates() *types.MVStates {

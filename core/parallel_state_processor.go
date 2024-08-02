@@ -203,7 +203,7 @@ func (p *ParallelStateProcessor) doStaticDispatchV2(txReqs []*ParallelTxRequest,
 	}
 	// resolve isolate execution paths from TxDAG, it indicates the tx dispatch
 	paths := types.MergeTxDAGExecutionPaths(txDAG)
-	log.Info("doStaticDispatchV2 merge parallel execution paths", "slots", len(p.slotState), "paths", len(paths))
+	log.Debug("doStaticDispatchV2 merge parallel execution paths", "slots", len(p.slotState), "paths", len(paths))
 
 	for _, path := range paths {
 		slotIndex := p.mostHungrySlot()
@@ -866,12 +866,13 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	p.doCleanUp()
 
 	// len(commonTxs) could be 0, such as: https://bscscan.com/block/14580486
-	if len(commonTxs) > 0 {
+	if len(commonTxs) > 0 && p.debugConflictRedoNum > 0 {
 		log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", *usedGas,
 			"txNum", txNum,
 			"len(commonTxs)", len(commonTxs),
 			"conflictNum", p.debugConflictRedoNum,
-			"redoRate(%)", 100*(p.debugConflictRedoNum)/len(commonTxs))
+			"redoRate(%)", 100*(p.debugConflictRedoNum)/len(commonTxs),
+			"txDAG", txDAG)
 	}
 
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.

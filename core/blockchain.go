@@ -2823,6 +2823,7 @@ func (bc *BlockChain) TxDAGEnabled() bool {
 }
 
 func (bc *BlockChain) SetupTxDAGGeneration(output string) {
+	log.Info("node enable TxDAG feature", "output", output)
 	bc.enableTxDAG = true
 	if len(output) == 0 {
 		return
@@ -2833,10 +2834,11 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string) {
 	if err != nil {
 		log.Error("read TxDAG err", "err", err)
 	}
+	log.Info("load TxDAG from file", "output", output, "count", len(bc.txDAGMapping))
 
 	// write handler
 	go func() {
-		writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+		writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
 		if err != nil {
 			log.Error("OpenFile when open the txDAG output file", "file", output)
 			return
@@ -2876,6 +2878,7 @@ func writeTxDAGToFile(writeHandle *os.File, item TxDAGOutputItem) error {
 	return err
 }
 
+// TODO(galaio): support load with segments, every segment 100000 blocks?
 func readTxDAGMappingFromFile(output string) (map[uint64]types.TxDAG, error) {
 	file, err := os.Open(output)
 	if err != nil {

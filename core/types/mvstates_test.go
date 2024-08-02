@@ -39,7 +39,7 @@ func TestMVStates_BasicUsage(t *testing.T) {
 	require.Equal(t, NewRWItem(StateVersion{TxIndex: 3}, 3), ms.ReadState(5, str2key("0x00")))
 }
 
-func TestSimpleMVStates2TxDAG(t *testing.T) {
+func TestMVStates_SimpleResolveTxDAG(t *testing.T) {
 	ms := NewMVStates(10)
 
 	ms.rwSets[0] = mockRWSet(0, []string{"0x00"}, []string{"0x00"})
@@ -53,12 +53,13 @@ func TestSimpleMVStates2TxDAG(t *testing.T) {
 	ms.rwSets[8] = mockRWSet(8, []string{"0x08"}, []string{"0x08"})
 	ms.rwSets[9] = mockRWSet(9, []string{"0x08", "0x09"}, []string{"0x09"})
 
-	dag := ms.ResolveTxDAG(nil)
+	dag, err := ms.ResolveTxDAG(10, nil)
+	require.NoError(t, err)
 	require.Equal(t, mockSimpleDAG(), dag)
 	t.Log(dag)
 }
 
-func TestSystemTxMVStates2TxDAG(t *testing.T) {
+func TestMVStates_SystemTxResolveTxDAG(t *testing.T) {
 	ms := NewMVStates(12)
 
 	ms.rwSets[0] = mockRWSet(0, []string{"0x00"}, []string{"0x00"})
@@ -74,8 +75,31 @@ func TestSystemTxMVStates2TxDAG(t *testing.T) {
 	ms.rwSets[10] = mockRWSet(10, []string{"0x10"}, []string{"0x10"}).WithSerialFlag()
 	ms.rwSets[11] = mockRWSet(11, []string{"0x11"}, []string{"0x11"}).WithSerialFlag()
 
-	dag := ms.ResolveTxDAG(nil)
+	dag, err := ms.ResolveTxDAG(12, nil)
+	require.NoError(t, err)
 	require.Equal(t, mockSystemTxDAG(), dag)
+	t.Log(dag)
+}
+
+func TestMVStates_SystemTxWithLargeDepsResolveTxDAG(t *testing.T) {
+	ms := NewMVStates(12)
+
+	ms.rwSets[0] = mockRWSet(0, []string{"0x00"}, []string{"0x00"})
+	ms.rwSets[1] = mockRWSet(1, []string{"0x01"}, []string{"0x01"})
+	ms.rwSets[2] = mockRWSet(2, []string{"0x02"}, []string{"0x02"})
+	ms.rwSets[3] = mockRWSet(3, []string{"0x00", "0x03"}, []string{"0x03"})
+	ms.rwSets[4] = mockRWSet(4, []string{"0x00", "0x04"}, []string{"0x04"})
+	ms.rwSets[5] = mockRWSet(5, []string{"0x01", "0x02", "0x05"}, []string{"0x05"})
+	ms.rwSets[6] = mockRWSet(6, []string{"0x02", "0x05", "0x06"}, []string{"0x06"})
+	ms.rwSets[7] = mockRWSet(7, []string{"0x00", "0x01", "0x03", "0x05", "0x06", "0x07"}, []string{"0x07"})
+	ms.rwSets[8] = mockRWSet(8, []string{"0x08"}, []string{"0x08"})
+	ms.rwSets[9] = mockRWSet(9, []string{"0x00", "0x01", "0x02", "0x03", "0x04", "0x08", "0x09"}, []string{"0x09"})
+	ms.rwSets[10] = mockRWSet(10, []string{"0x10"}, []string{"0x10"}).WithSerialFlag()
+	ms.rwSets[11] = mockRWSet(11, []string{"0x11"}, []string{"0x11"}).WithSerialFlag()
+
+	dag, err := ms.ResolveTxDAG(12, nil)
+	require.NoError(t, err)
+	require.Equal(t, mockSystemTxDAGWithLargeDeps(), dag)
 	t.Log(dag)
 }
 

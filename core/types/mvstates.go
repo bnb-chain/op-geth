@@ -446,28 +446,43 @@ func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*RWItem, write
 }
 
 // ResolveTxDAG generate TxDAG from RWSets
-func (s *MVStates) ResolveTxDAG(gasFeeReceivers []common.Address) TxDAG {
-	rwSets := s.RWSets()
-	txDAG := NewPlainTxDAG(len(rwSets))
-	for i := len(rwSets) - 1; i >= 0; i-- {
+func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (TxDAG, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	if len(s.rwSets) != txCnt {
+		return nil, fmt.Errorf("wrong rwSet count, expect: %v, actual: %v", txCnt, len(s.rwSets))
+	}
+	txDAG := NewPlainTxDAG(len(s.rwSets))
+	for i := txCnt - 1; i >= 0; i-- {
 		// check if there are RW with gas fee receiver for gas delay calculation
 		for _, addr := range gasFeeReceivers {
-			if _, ok := rwSets[i].readSet[AccountStateKey(addr, AccountSelf)]; ok {
-				return NewEmptyTxDAG()
+			if _, ok := s.rwSets[i].readSet[AccountStateKey(addr, AccountSelf)]; ok {
+				return NewEmptyTxDAG(), nil
 			}
 		}
 		txDAG.TxDeps[i].TxIndexes = []uint64{}
-		if rwSets[i].mustSerial {
-			txDAG.TxDeps[i].Relation = 1
+		if s.rwSets[i].mustSerial {
+			txDAG.TxDeps[i].Relation = &TxDAGRelation1
 			continue
 		}
 		if s.depsCache[i] == nil {
-			s.resolveDepsCache(i, rwSets[i])
+			s.resolveDepsCache(i, s.rwSets[i])
 		}
-		txDAG.TxDeps[i].TxIndexes = s.depsCache[i].toArray()
+		deps := s.depsCache[i].toArray()
+		if len(deps) <= (txCnt-1)/2 {
+			txDAG.TxDeps[i].TxIndexes = deps
+			continue
+		}
+		// if tx deps larger than half of txs, then convert to relation1
+		txDAG.TxDeps[i].Relation = &TxDAGRelation1
+		for j := uint64(0); j < uint64(txCnt); j++ {
+			if !slices.Contains(deps, j) && j != uint64(i) {
+				txDAG.TxDeps[i].TxIndexes = append(txDAG.TxDeps[i].TxIndexes, j)
+			}
+		}
 	}
 
-	return txDAG
+	return txDAG, nil
 }
 
 func checkDependency(writeSet map[RWKey]*RWItem, readSet map[RWKey]*RWItem) bool {

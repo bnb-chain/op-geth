@@ -18,6 +18,11 @@ const (
 	PlainTxDAGType
 )
 
+var (
+	TxDAGRelation0 uint8 = 0
+	TxDAGRelation1 uint8 = 1
+)
+
 type TxDAG interface {
 	// Type return TxDAG type
 	Type() byte
@@ -93,8 +98,8 @@ func (d *EmptyTxDAG) DelayGasDistribution() bool {
 
 func (d *EmptyTxDAG) TxDep(int) TxDep {
 	return TxDep{
-		Relation:  1,
 		TxIndexes: nil,
+		Relation:  &TxDAGRelation1,
 	}
 }
 
@@ -156,9 +161,12 @@ func NewPlainTxDAG(txLen int) *PlainTxDAG {
 
 func (d *PlainTxDAG) String() string {
 	builder := strings.Builder{}
-	exePaths := travelTxDAGExecutionPaths(d)
-	for _, path := range exePaths {
-		builder.WriteString(fmt.Sprintf("%v\n", path))
+	for _, txDep := range d.TxDeps {
+		if txDep.Relation == nil || txDep.RelationEqual(TxDAGRelation0) {
+			builder.WriteString(fmt.Sprintf("%v\n", txDep.TxIndexes))
+			continue
+		}
+		builder.WriteString(fmt.Sprintf("%d: %v\n", *txDep.Relation, txDep.TxIndexes))
 	}
 	return builder.String()
 }
@@ -174,11 +182,12 @@ func (d *PlainTxDAG) Size() int {
 // MergeTxDAGExecutionPaths will merge duplicate tx path for scheduling parallel.
 // Any tx cannot exist in >= 2 paths.
 func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
-	mergeMap := make(map[uint64][]uint64, d.TxCount())
-	txMap := make(map[uint64]uint64, d.TxCount())
-	for i := d.TxCount() - 1; i >= 0; i-- {
+	nd := convert2PlainTxDAGWithRelation0(d)
+	mergeMap := make(map[uint64][]uint64, nd.TxCount())
+	txMap := make(map[uint64]uint64, nd.TxCount())
+	for i := nd.TxCount() - 1; i >= 0; i-- {
 		index, merge := uint64(i), uint64(i)
-		deps := d.TxDep(i).TxIndexes
+		deps := nd.TxDep(i).TxIndexes
 		if oldIdx, exist := findTxPathIndex(deps, index, txMap); exist {
 			merge = oldIdx
 		}
@@ -196,7 +205,7 @@ func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
 		mergeMap[t] = append(mergeMap[t], f)
 	}
 	mergePaths := make([][]uint64, 0, len(mergeMap))
-	for i := 0; i < d.TxCount(); i++ {
+	for i := 0; i < nd.TxCount(); i++ {
 		path, ok := mergeMap[uint64(i)]
 		if !ok {
 			continue
@@ -224,37 +233,46 @@ func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64
 
 // travelTxDAGExecutionPaths will print all tx execution path
 func travelTxDAGExecutionPaths(d TxDAG) [][]uint64 {
-	txCount := d.TxCount()
-	deps := make([]TxDep, txCount)
-	for i := 0; i < txCount; i++ {
-		dep := d.TxDep(i)
-		if dep.Relation == 0 {
-			deps[i] = dep
-			continue
-		}
-		// recover to relation 0
-		for j := 0; j < i; j++ {
-			if !dep.Exist(j) {
-				deps[i].AppendDep(j)
-			}
-		}
-	}
+	nd := convert2PlainTxDAGWithRelation0(d)
 
 	exePaths := make([][]uint64, 0)
 	// travel tx deps with BFS
-	for i := uint64(0); i < uint64(txCount); i++ {
-		exePaths = append(exePaths, travelTxDAGTargetPath(deps, i))
+	for i := uint64(0); i < uint64(nd.TxCount()); i++ {
+		exePaths = append(exePaths, travelTxDAGTargetPath(nd.TxDeps, i))
 	}
 	return exePaths
 }
 
+func convert2PlainTxDAGWithRelation0(d TxDAG) *PlainTxDAG {
+	if d.TxCount() == 0 {
+		return NewPlainTxDAG(0)
+	}
+	nd := NewPlainTxDAG(d.TxCount())
+	for i := 0; i < d.TxCount(); i++ {
+		dep := d.TxDep(i)
+		if dep.RelationEqual(TxDAGRelation0) {
+			nd.SetTxDep(i, dep)
+			continue
+		}
+		np := TxDep{}
+		// recover to relation 0
+		for j := 0; j < i; j++ {
+			if !dep.Exist(j) && j != i {
+				np.AppendDep(j)
+			}
+		}
+		nd.SetTxDep(i, np)
+	}
+	return nd
+}
+
 // TxDep store the current tx dependency relation with other txs
 type TxDep struct {
-	// It describes the Relation with below txs
-	// 0: this tx depends on below txs
-	// 1: this transaction does not depend on below txs, all other previous txs depend on
-	Relation  uint8
 	TxIndexes []uint64
+	// It describes the Relation with below txs
+	// 0: this tx depends on below txs, it can be ignored and not be encoded in rlp encoder.
+	// 1: this transaction does not depend on below txs, all other previous txs depend on
+	Relation *uint8 `rlp:"optional"`
 }
 
 func (d *TxDep) AppendDep(i int) {
@@ -280,6 +298,13 @@ func (d *TxDep) Last() int {
 		return -1
 	}
 	return int(d.TxIndexes[len(d.TxIndexes)-1])
+}
+
+func (d *TxDep) RelationEqual(rel uint8) bool {
+	if d.Relation == nil {
+		return TxDAGRelation0 == rel
+	}
+	return *d.Relation == rel
 }
 
 var (

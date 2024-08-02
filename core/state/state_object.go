@@ -384,12 +384,12 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	//      have been handles via pendingStorage above.
 	//   2) we don't have new values, and can deliver empty response back
 	//if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
-	s.db.snapParallelLock.RLock()
+	s.db.stateObjectDestructLock.RLock()
 	if _, destructed := s.db.getStateObjectsDegetstruct(s.address); destructed { // fixme: use sync.Map, instead of RWMutex?
-		s.db.snapParallelLock.RUnlock()
+		s.db.stateObjectDestructLock.RUnlock()
 		return common.Hash{}
 	}
-	s.db.snapParallelLock.RUnlock()
+	s.db.stateObjectDestructLock.RUnlock()
 
 	// If no live objects are available, attempt to use snapshots
 	var (
@@ -469,6 +469,8 @@ func (s *stateObject) setState(key, value common.Hash) {
 // finalise moves all dirty storage slots into the pending area to be hashed or
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise(prefetch bool) {
+	s.storageRecordsLock.Lock()
+	defer s.storageRecordsLock.Unlock()
 	slotsToPrefetch := make([][]byte, 0, s.dirtyStorage.Length())
 	s.dirtyStorage.Range(func(key, value interface{}) bool {
 		s.pendingStorage.StoreValue(key.(common.Hash), value.(common.Hash))
@@ -479,6 +481,7 @@ func (s *stateObject) finalise(prefetch bool) {
 		}
 		return true
 	})
+
 	if s.dirtyNonce != nil {
 		s.data.Nonce = *s.dirtyNonce
 		s.dirtyNonce = nil

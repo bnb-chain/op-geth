@@ -182,9 +182,9 @@ func (ch resetObjectChange) revert(dber StateDBer) {
 	}
 
 	if !ch.prevdestruct {
-		s.snapParallelLock.Lock()
+		s.stateObjectDestructLock.Lock()
 		s.removeStateObjectsDestruct(ch.prev.address)
-		s.snapParallelLock.Unlock()
+		s.stateObjectDestructLock.Unlock()
 	}
 	if ch.prevAccount != nil {
 		s.accounts[ch.prev.addrHash] = ch.prevAccount

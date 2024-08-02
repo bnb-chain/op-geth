@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -37,12 +38,14 @@ func (s *PrivateTxBundleAPI) SimulateGaslessBundle(_ context.Context, args types
 	for _, encodedTx := range args.Txs {
 		tx := new(types.Transaction)
 		if err := tx.UnmarshalBinary(encodedTx); err != nil {
-			return nil, err
+			log.Error("failed to unmarshal gasless tx", "err", err)
+			continue
 		}
 		switch tx.Type() {
 		case types.LegacyTxType, types.AccessListTxType, types.DynamicFeeTxType:
 		default:
-			return nil, errors.New(fmt.Sprintf("transaction type %d not supported", tx.Type()))
+			log.Error("transaction type not supported", "txType", tx.Type())
+			continue
 		}
 		txs = append(txs, tx)
 	}

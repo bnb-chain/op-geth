@@ -93,7 +93,7 @@ func hasKvConflict(slotDB *ParallelStateDB, addr common.Address, key common.Hash
 			}
 		}
 	}
-	valMain := mainDB.GetState(addr, key)
+	valMain := mainDB.GetStateNoUpdate(addr, key)
 
 	if !bytes.Equal(val.Bytes(), valMain.Bytes()) {
 		log.Debug("hasKvConflict is invalid", "addr", addr,
@@ -1238,6 +1238,8 @@ func (s *ParallelStateDB) getKVFromUnconfirmedDB(addr common.Address, key common
 			if obj.deleted || obj.selfDestructed {
 				return common.Hash{}, true
 			}
+			// The dirty object in unconfirmed DB will never be finalised and changed after execution.
+			// So no storageRecordsLock requried.
 			if val, exist := obj.dirtyStorage.GetValue(key); exist {
 				return val, true
 			}
@@ -1594,8 +1596,8 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 			if !s.isParallel || !s.parallel.isSlotDB {
 				obj.finalise(true) // Prefetch slots in the background
 			} else {
+				// don't do finalise() here as to keep dirtyObjects unchanged in dirtyStorages, which avoid contention issue.
 				obj.fixUpOriginAndResetPendingStorage()
-				obj.finalise(false)
 			}
 		}
 

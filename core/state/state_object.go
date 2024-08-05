@@ -861,8 +861,7 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	}
 
 	object.code = s.code
-
-	// The lock is unnecessary since deepCopy only invoked at global phase. No concurrent racing.
+	// The lock is unnecessary since deepCopy only invoked at global phase and with dirty object that never changed.
 	object.dirtyStorage = s.dirtyStorage.Copy()
 	object.originStorage = s.originStorage.Copy()
 	object.pendingStorage = s.pendingStorage.Copy()
@@ -883,6 +882,17 @@ func (s *stateObject) MergeSlotObject(db Database, dirtyObjs *stateObject, keys 
 		// But here, it should be ok, since the KV should be changed and valid in the SlotDB,
 		s.setState(key, dirtyObjs.GetState(key))
 	}
+
+	// The dirtyObject may have new state accessed from Snap and Trie, so merge the origins.
+	dirtyObjs.originStorage.Range(func(keyItf, valueItf interface{}) bool {
+		key := keyItf.(common.Hash)
+		value := valueItf.(common.Hash)
+		// Skip noop changes, persist actual changes
+		if _, ok := s.originStorage.GetValue(key); !ok {
+			s.originStorage.StoreValue(key, value)
+		}
+		return true
+	})
 }
 
 //
@@ -980,6 +990,87 @@ func (s *stateObject) Nonce() uint64 {
 
 func (s *stateObject) Root() common.Hash {
 	return s.data.Root
+}
+
+// GetStateNoUpdate retrieves a value from the account storage trie, but never update the stateDB cache
+func (s *stateObject) GetStateNoUpdate(key common.Hash) common.Hash {
+	// If we have a dirty value for this state entry, return it
+	value, dirty := s.dirtyStorage.GetValue(key)
+	if dirty {
+		return value
+	}
+	// Otherwise return the entry's original value
+	result := s.GetCommittedStateNoUpdate(key)
+	return result
+}
+
+// GetCommittedStateNoUpdate retrieves a value from the committed account storage trie, but never update the
+// stateDB cache (object.originStorage)
+func (s *stateObject) GetCommittedStateNoUpdate(key common.Hash) common.Hash {
+	// If we have a pending write or clean cached, return that
+	// if value, pending := s.pendingStorage[key]; pending {
+	if value, pending := s.pendingStorage.GetValue(key); pending {
+		return value
+	}
+	if value, cached := s.originStorage.GetValue(key); cached {
+		return value
+	}
+
+	// If the object was destructed in *this* block (and potentially resurrected),
+	// the storage has been cleared out, and we should *not* consult the previous
+	// database about any storage values. The only possible alternatives are:
+	//   1) resurrect happened, and new slot values were set -- those should
+	//      have been handles via pendingStorage above.
+	//   2) we don't have new values, and can deliver empty response back
+	//if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
+	s.db.stateObjectDestructLock.RLock()
+	if _, destructed := s.db.getStateObjectsDegetstruct(s.address); destructed { // fixme: use sync.Map, instead of RWMutex?
+		s.db.stateObjectDestructLock.RUnlock()
+		return common.Hash{}
+	}
+	s.db.stateObjectDestructLock.RUnlock()
+
+	// If no live objects are available, attempt to use snapshots
+	var (
+		enc   []byte
+		err   error
+		value common.Hash
+	)
+	if s.db.snap != nil {
+		start := time.Now()
+		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
+		if metrics.EnabledExpensive {
+			s.db.SnapshotStorageReads += time.Since(start)
+		}
+		if len(enc) > 0 {
+			_, content, _, err := rlp.Split(enc)
+			if err != nil {
+				s.db.setError(err)
+			}
+			value.SetBytes(content)
+		}
+	}
+	// If the snapshot is unavailable or reading from it fails, load from the database.
+	if s.db.snap == nil || err != nil {
+		start := time.Now()
+		tr, err := s.getTrie()
+		if err != nil {
+			s.db.setError(err)
+			return common.Hash{}
+		}
+		s.db.trieParallelLock.Lock()
+		val, err := tr.GetStorage(s.address, key.Bytes())
+		s.db.trieParallelLock.Unlock()
+		if metrics.EnabledExpensive {
+			s.db.StorageReads += time.Since(start)
+		}
+		if err != nil {
+			s.db.setError(err)
+			return common.Hash{}
+		}
+		value.SetBytes(val)
+	}
+	return value
 }
 
 // fixUpOriginAndResetPendingStorage is used for slot object only, the target is to fix up the origin storage of the

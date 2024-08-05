@@ -330,7 +330,7 @@ func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxR
 
 	on := txReq.tx.Nonce()
 	if txReq.msg.IsDepositTx && p.config.IsOptimismRegolith(vmenv.Context.Time) {
-		on = txReq.baseStateDB.GetNonce(txReq.msg.From)
+		on = slotDB.GetNonce(txReq.msg.From)
 	}
 
 	slotDB.SetTxContext(txReq.tx.Hash(), txReq.txIndex)
@@ -365,7 +365,7 @@ func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxR
 		conflictIndex = txReq.conflictIndex.Load()
 		if conflictIndex < mIndex {
 			if txReq.conflictIndex.CompareAndSwap(conflictIndex, mIndex) {
-				log.Debug("Update conflictIndex in execution because of error, new conflictIndex: %d", conflictIndex)
+				log.Debug(fmt.Sprintf("Update conflictIndex in execution because of error: %s, new conflictIndex: %d", err.Error(), conflictIndex))
 			}
 		}
 		atomic.CompareAndSwapInt32(&txReq.runnable, 0, 1)

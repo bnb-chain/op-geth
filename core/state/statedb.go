@@ -829,6 +829,15 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	return nil
 }
 
+// GetStateNoUpdate retrieves a value from the given account's storage trie, but do not update the db.stateObjects cache.
+func (s *StateDB) GetStateNoUpdate(addr common.Address, hash common.Hash) (ret common.Hash) {
+	object := s.getStateObjectNoUpdate(addr)
+	if object != nil {
+		return object.GetStateNoUpdate(hash)
+	}
+	return common.Hash{}
+}
+
 // getStateObjectNoUpdate is similar with getStateObject except that it does not
 // update stateObjects records.
 func (s *StateDB) getStateObjectNoUpdate(addr common.Address) *stateObject {
@@ -840,8 +849,6 @@ func (s *StateDB) getStateObjectNoUpdate(addr common.Address) *stateObject {
 }
 
 func (s *StateDB) getDeletedStateObjectNoUpdate(addr common.Address) *stateObject {
-	s.RecordRead(types.AccountStateKey(addr, types.AccountSelf), struct{}{})
-
 	// Prefer live objects if any is available
 	if obj, _ := s.getStateObjectFromStateObjects(addr); obj != nil {
 		return obj
@@ -851,7 +858,6 @@ func (s *StateDB) getDeletedStateObjectNoUpdate(addr common.Address) *stateObjec
 	if !ok {
 		return nil
 	}
-	// Insert into the live set
 	obj := newObject(s, s.isParallel, addr, data)
 	return obj
 }
@@ -2598,6 +2604,7 @@ func (s *StateDB) AddrPrefetch(slotDb *ParallelStateDB) {
 		if obj.deleted {
 			continue
 		}
+		obj.storageRecordsLock.RLock()
 		// copied from obj.finalise(true)
 		slotsToPrefetch := make([][]byte, 0, obj.dirtyStorage.Length())
 		obj.dirtyStorage.Range(func(key, value interface{}) bool {
@@ -2608,6 +2615,7 @@ func (s *StateDB) AddrPrefetch(slotDb *ParallelStateDB) {
 			}
 			return true
 		})
+		obj.storageRecordsLock.RUnlock()
 		if s.prefetcher != nil && len(slotsToPrefetch) > 0 {
 			s.prefetcher.prefetch(obj.addrHash, obj.data.Root, obj.address, slotsToPrefetch)
 		}
@@ -2624,8 +2632,6 @@ func (s *StateDB) AddrPrefetch(slotDb *ParallelStateDB) {
 // finalized(dirty -> pending) on execution slot, the execution results should be
 // merged back to the main StateDB.
 func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receipt, txIndex int, fees *DelayedGasFee) *StateDB {
-
-	s.SetTxContext(slotDb.thash, slotDb.txIndex)
 
 	for s.nextRevisionId < slotDb.nextRevisionId {
 		if len(slotDb.validRevisions) > 0 {
@@ -2828,7 +2834,7 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 			s.snapParallelLock.Unlock()
 		}
 	}
-
+	s.SetTxContext(slotDb.thash, slotDb.txIndex)
 	return s
 }
 

@@ -236,6 +236,7 @@ var (
 		CancunTime:  newUint64(1715754600), // May-15-2024 06:30 AM +UTC
 		EcotoneTime: newUint64(1715754600), // May-15-2024 06:30 AM +UTC
 		HaberTime:   newUint64(1717048800), // May-30-2024 06:00 AM +UTC
+		WrightTime:  newUint64(1723701600), // Aug-15-2024 06:00 AM +UTC
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{

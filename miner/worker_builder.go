@@ -179,7 +179,7 @@ func (w *worker) generateOrderedBundles(
 	// sort bundles according to gas price computed when received
 	slices.SortStableFunc(bundles, func(i, j *types.Bundle) int {
 		priceI, priceJ := i.Price, j.Price
-		return priceI.Cmp(priceJ)
+		return priceJ.Cmp(priceI)
 	})
 
 	// recompute bundle gas price based on the same state and current env
@@ -192,7 +192,7 @@ func (w *worker) generateOrderedBundles(
 	// sort bundles according to fresh gas price
 	slices.SortStableFunc(simulatedBundles, func(i, j *types.SimulatedBundle) int {
 		priceI, priceJ := i.BundleGasPrice, j.BundleGasPrice
-		return priceI.Cmp(priceJ)
+		return priceJ.Cmp(priceI)
 	})
 
 	// merge bundles based on iterative state

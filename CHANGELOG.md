@@ -20,7 +20,7 @@ Upgrading is optional.
 
 ## Docker Images
 
-ghcr.io/bnb-chain/op-geth:v0.4.2
+ghcr.io/bnb-chain/op-geth:v0.4.3
 
 **Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.2...v0.4.3
 

@@ -18,18 +18,18 @@ package tests
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
-
-	"github.com/ethereum/go-ethereum/core/rawdb"
-
-	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestBlockchainWithTxDAG(t *testing.T) {
+	//log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelInfo, true)))
 	bt := new(testMatcher)
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
 	// For speedier CI-runs, the line below can be uncommented, so those are skipped.
@@ -60,6 +60,18 @@ func TestBlockchainWithTxDAG(t *testing.T) {
 		}
 		execBlockTestWithTxDAG(t, bt, test)
 	})
+	//bt := new(testMatcher)
+	//path := filepath.Join(blockTestDir, "ValidBlocks", "bcEIP1559", "intrinsic.json")
+	//_, name := filepath.Split(path)
+	//t.Run(name, func(t *testing.T) {
+	//	bt.runTestFile(t, path, name, func(t *testing.T, name string, test *BlockTest) {
+	//		if runtime.GOARCH == "386" && runtime.GOOS == "windows" && rand.Int63()%2 == 0 {
+	//			t.Skip("test (randomly) skipped on 32-bit windows")
+	//		}
+	//		execBlockTestWithTxDAG(t, bt, test)
+	//		//execBlockTest(t, bt, test)
+	//	})
+	//})
 }
 func TestBlockchain(t *testing.T) {
 	bt := new(testMatcher)
@@ -109,8 +121,10 @@ func TestExecutionSpecBlocktests(t *testing.T) {
 	})
 }
 
+var txDAGFileCounter atomic.Uint64
+
 func execBlockTestWithTxDAG(t *testing.T, bt *testMatcher, test *BlockTest) {
-	txDAGFile := filepath.Join(os.TempDir(), fmt.Sprintf("test_txdag_%s.csv", t.Name()))
+	txDAGFile := filepath.Join(os.TempDir(), fmt.Sprintf("test_txdag_%v.csv", txDAGFileCounter.Add(1)))
 	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, false)); err != nil {
 		t.Errorf("test in path mode with snapshotter failed: %v", err)
 		return

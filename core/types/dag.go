@@ -19,8 +19,12 @@ const (
 )
 
 var (
-	TxDAGRelation0 uint8 = 0
-	TxDAGRelation1 uint8 = 1
+	// NonDependentRelFlag indicates that the txs described is non-dependent
+	// and is used to reduce storage when there are a large number of dependencies.
+	NonDependentRelFlag uint8 = 0x01
+	// ExcludedTxFlag indicates that the tx is excluded from TxDAG, user should execute them in sequence.
+	// These excluded transactions should be consecutive in the head or tail.
+	ExcludedTxFlag uint8 = 0x02
 )
 
 type TxDAG interface {
@@ -30,11 +34,11 @@ type TxDAG interface {
 	// Inner return inner instance
 	Inner() interface{}
 
-	// DelayGasDistribution check if delay the distribution of GasFee
-	DelayGasDistribution() bool
+	// DelayGasFeeDistribution check if delay the distribution of GasFee
+	DelayGasFeeDistribution() bool
 
 	// TxDep query TxDeps from TxDAG
-	TxDep(int) TxDep
+	TxDep(int) *TxDep
 
 	// TxCount return tx count
 	TxCount() int
@@ -92,15 +96,17 @@ func (d *EmptyTxDAG) Inner() interface{} {
 	return d
 }
 
-func (d *EmptyTxDAG) DelayGasDistribution() bool {
+func (d *EmptyTxDAG) DelayGasFeeDistribution() bool {
 	return false
 }
 
-func (d *EmptyTxDAG) TxDep(int) TxDep {
-	return TxDep{
+func (d *EmptyTxDAG) TxDep(int) *TxDep {
+	dep := TxDep{
 		TxIndexes: nil,
-		Relation:  &TxDAGRelation1,
+		Flags:     new(uint8),
 	}
+	dep.SetFlag(NonDependentRelFlag)
+	return &dep
 }
 
 func (d *EmptyTxDAG) TxCount() int {
@@ -112,7 +118,7 @@ func (d *EmptyTxDAG) SetTxDep(int, TxDep) error {
 }
 
 func (d *EmptyTxDAG) String() string {
-	return "None"
+	return "EmptyTxDAG"
 }
 
 // PlainTxDAG indicate how to use the dependency of txs, and delay the distribution of GasFee
@@ -129,12 +135,12 @@ func (d *PlainTxDAG) Inner() interface{} {
 	return d
 }
 
-func (d *PlainTxDAG) DelayGasDistribution() bool {
+func (d *PlainTxDAG) DelayGasFeeDistribution() bool {
 	return true
 }
 
-func (d *PlainTxDAG) TxDep(i int) TxDep {
-	return d.TxDeps[i]
+func (d *PlainTxDAG) TxDep(i int) *TxDep {
+	return &d.TxDeps[i]
 }
 
 func (d *PlainTxDAG) TxCount() int {
@@ -162,11 +168,11 @@ func NewPlainTxDAG(txLen int) *PlainTxDAG {
 func (d *PlainTxDAG) String() string {
 	builder := strings.Builder{}
 	for _, txDep := range d.TxDeps {
-		if txDep.Relation == nil || txDep.RelationEqual(TxDAGRelation0) {
-			builder.WriteString(fmt.Sprintf("%v\n", txDep.TxIndexes))
+		if txDep.Flags != nil {
+			builder.WriteString(fmt.Sprintf("%v|%v\n", txDep.TxIndexes, *txDep.Flags))
 			continue
 		}
-		builder.WriteString(fmt.Sprintf("%d: %v\n", *txDep.Relation, txDep.TxIndexes))
+		builder.WriteString(fmt.Sprintf("%v\n", txDep.TxIndexes))
 	}
 	return builder.String()
 }
@@ -181,13 +187,18 @@ func (d *PlainTxDAG) Size() int {
 
 // MergeTxDAGExecutionPaths will merge duplicate tx path for scheduling parallel.
 // Any tx cannot exist in >= 2 paths.
-func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
-	nd := convert2PlainTxDAGWithRelation0(d)
+func MergeTxDAGExecutionPaths(d TxDAG, from, to uint64) ([][]uint64, error) {
+	if from > to || to >= uint64(d.TxCount()) {
+		return nil, fmt.Errorf("input wrong from: %v, to: %v, txCnt:%v", from, to, d.TxCount())
+	}
+	nd := convert2PlainTxDAG(d)
 	mergeMap := make(map[uint64][]uint64, nd.TxCount())
 	txMap := make(map[uint64]uint64, nd.TxCount())
-	for i := nd.TxCount() - 1; i >= 0; i-- {
+	for i := int(to); i >= int(from); i-- {
 		index, merge := uint64(i), uint64(i)
 		deps := nd.TxDep(i).TxIndexes
+		// drop the out range txs
+		deps = depExcludeTxRange(deps, from, to)
 		if oldIdx, exist := findTxPathIndex(deps, index, txMap); exist {
 			merge = oldIdx
 		}
@@ -202,11 +213,14 @@ func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
 		if mergeMap[t] == nil {
 			mergeMap[t] = make([]uint64, 0)
 		}
+		if f < from || f > to {
+			continue
+		}
 		mergeMap[t] = append(mergeMap[t], f)
 	}
 	mergePaths := make([][]uint64, 0, len(mergeMap))
-	for i := 0; i < nd.TxCount(); i++ {
-		path, ok := mergeMap[uint64(i)]
+	for i := from; i <= to; i++ {
+		path, ok := mergeMap[i]
 		if !ok {
 			continue
 		}
@@ -214,7 +228,25 @@ func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
 		mergePaths = append(mergePaths, path)
 	}
 
-	return mergePaths
+	return mergePaths, nil
+}
+
+// depExcludeTxRange drop all from~to items, and deps is ordered.
+func depExcludeTxRange(deps []uint64, from uint64, to uint64) []uint64 {
+	if len(deps) == 0 {
+		return deps
+	}
+	start, end := 0, len(deps)-1
+	for start < len(deps) && deps[start] < from {
+		start++
+	}
+	for end >= 0 && deps[end] > to {
+		end--
+	}
+	if start > end {
+		return nil
+	}
+	return deps[start : end+1]
 }
 
 func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64, bool) {
@@ -233,7 +265,7 @@ func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64
 
 // travelTxDAGExecutionPaths will print all tx execution path
 func travelTxDAGExecutionPaths(d TxDAG) [][]uint64 {
-	nd := convert2PlainTxDAGWithRelation0(d)
+	nd := convert2PlainTxDAG(d)
 
 	exePaths := make([][]uint64, 0)
 	// travel tx deps with BFS
@@ -243,19 +275,21 @@ func travelTxDAGExecutionPaths(d TxDAG) [][]uint64 {
 	return exePaths
 }
 
-func convert2PlainTxDAGWithRelation0(d TxDAG) *PlainTxDAG {
+// convert2PlainTxDAG will convert to PlainTxDAG with dependency txs
+func convert2PlainTxDAG(d TxDAG) *PlainTxDAG {
 	if d.TxCount() == 0 {
 		return NewPlainTxDAG(0)
 	}
 	nd := NewPlainTxDAG(d.TxCount())
 	for i := 0; i < d.TxCount(); i++ {
 		dep := d.TxDep(i)
-		if dep.RelationEqual(TxDAGRelation0) {
-			nd.SetTxDep(i, dep)
+		if !dep.CheckFlag(NonDependentRelFlag) {
+			nd.SetTxDep(i, *dep)
 			continue
 		}
-		np := TxDep{}
-		// recover to relation 0
+		// recover to dependency relation txs
+		np := TxDep{Flags: dep.Flags}
+		np.ClearFlag(NonDependentRelFlag)
 		for j := 0; j < i; j++ {
 			if !dep.Exist(j) && j != i {
 				np.AppendDep(j)
@@ -269,10 +303,22 @@ func convert2PlainTxDAGWithRelation0(d TxDAG) *PlainTxDAG {
 // TxDep store the current tx dependency relation with other txs
 type TxDep struct {
 	TxIndexes []uint64
-	// It describes the Relation with below txs
-	// 0: this tx depends on below txs, it can be ignored and not be encoded in rlp encoder.
-	// 1: this transaction does not depend on below txs, all other previous txs depend on
-	Relation *uint8 `rlp:"optional"`
+	// Flags may has multi flag meaning, ref NonDependentRelFlag, ExcludedTxFlag.
+	Flags *uint8 `rlp:"optional"`
+}
+
+func NewTxDep(indexes []uint64, flags ...uint8) TxDep {
+	dep := TxDep{
+		TxIndexes: indexes,
+	}
+	if len(flags) == 0 {
+		return dep
+	}
+	dep.Flags = new(uint8)
+	for _, flag := range flags {
+		dep.SetFlag(flag)
+	}
+	return dep
 }
 
 func (d *TxDep) AppendDep(i int) {
@@ -300,11 +346,26 @@ func (d *TxDep) Last() int {
 	return int(d.TxIndexes[len(d.TxIndexes)-1])
 }
 
-func (d *TxDep) RelationEqual(rel uint8) bool {
-	if d.Relation == nil {
-		return TxDAGRelation0 == rel
+func (d *TxDep) CheckFlag(flag uint8) bool {
+	var flags uint8
+	if d.Flags != nil {
+		flags = *d.Flags
 	}
-	return *d.Relation == rel
+	return flags&flag == flag
+}
+
+func (d *TxDep) SetFlag(flag uint8) {
+	if d.Flags == nil {
+		d.Flags = new(uint8)
+	}
+	*d.Flags |= flag
+}
+
+func (d *TxDep) ClearFlag(flag uint8) {
+	if d.Flags == nil {
+		return
+	}
+	*d.Flags &= ^flag
 }
 
 var (

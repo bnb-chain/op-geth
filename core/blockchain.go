@@ -98,7 +98,6 @@ var (
 	innerExecutionTimer       = metrics.NewRegisteredTimer("chain/inner/execution", nil)
 
 	txDAGGenerateTimer = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
-	txDAGDispatchTimer = metrics.NewRegisteredTimer("chain/block/txdag/dispatch", nil)
 
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
@@ -2838,9 +2837,9 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string) {
 
 	// write handler
 	go func() {
-		writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
+		writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 		if err != nil {
-			log.Error("OpenFile when open the txDAG output file", "file", output)
+			log.Error("OpenFile when open the txDAG output file", "file", output, "err", err)
 			return
 		}
 		bc.txDAGWriteCh = make(chan TxDAGOutputItem, 10000)

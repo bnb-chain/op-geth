@@ -4723,12 +4723,15 @@ func TestEIP3651(t *testing.T) {
 
 func TestTxDAGFile_ReadWrite(t *testing.T) {
 	path := filepath.Join(os.TempDir(), "test.csv")
+	defer func() {
+		os.Remove(path)
+	}()
 	except := map[uint64]types.TxDAG{
 		0: types.NewEmptyTxDAG(),
 		1: makeEmptyPlainTxDAG(1),
-		2: makeEmptyPlainTxDAG(2),
+		2: makeEmptyPlainTxDAG(2, types.NonDependentRelFlag),
 	}
-	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	require.NoError(t, err)
 	for num, dag := range except {
 		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
@@ -4737,9 +4740,9 @@ func TestTxDAGFile_ReadWrite(t *testing.T) {
 
 	except2 := map[uint64]types.TxDAG{
 		3: types.NewEmptyTxDAG(),
-		4: makeEmptyPlainTxDAG(4),
+		4: makeEmptyPlainTxDAG(4, types.NonDependentRelFlag, types.ExcludedTxFlag),
 	}
-	writeFile, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, os.ModePerm)
+	writeFile, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	require.NoError(t, err)
 	for num, dag := range except2 {
 		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
@@ -4756,10 +4759,10 @@ func TestTxDAGFile_ReadWrite(t *testing.T) {
 	}
 }
 
-func makeEmptyPlainTxDAG(cnt int) *types.PlainTxDAG {
+func makeEmptyPlainTxDAG(cnt int, flags ...uint8) *types.PlainTxDAG {
 	dag := types.NewPlainTxDAG(cnt)
 	for i := range dag.TxDeps {
-		dag.TxDeps[i].TxIndexes = make([]uint64, 0)
+		dag.TxDeps[i] = types.NewTxDep(make([]uint64, 0), flags...)
 	}
 	return dag
 }

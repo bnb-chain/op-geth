@@ -267,7 +267,7 @@ func (p *ParallelStateProcessor) switchSlot(slotIndex int) {
 func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxRequest) *ParallelTxResult {
 	mIndex := p.mergedTxIndex.Load()
 	conflictIndex := txReq.conflictIndex.Load()
-	if mIndex <= conflictIndex {
+	if mIndex < conflictIndex {
 		// The conflicted TX has not been finished executing, skip execution.
 		// the transaction failed at check(nonce or balance), actually it has not been executed yet.
 		atomic.CompareAndSwapInt32(&txReq.runnable, 0, 1)
@@ -657,6 +657,19 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 	}
 	p.mergedTxIndex.Store(int32(resultTxIndex))
 
+	// trigger all slot to run left conflicted txs
+	for _, slot := range p.slotState {
+		var wakeupChan chan struct{}
+		if slot.activatedType == parallelPrimarySlot {
+			wakeupChan = slot.primaryWakeUpChan
+		} else {
+			wakeupChan = slot.shadowWakeUpChan
+		}
+		select {
+		case wakeupChan <- struct{}{}:
+		default:
+		}
+	}
 	return result
 }
 
@@ -724,28 +737,11 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		if txDAG == nil && len(p.bc.txDAGMapping) > 0 {
 			txDAG = p.bc.txDAGMapping[block.NumberU64()]
 		}
-		if txDAG != nil && txDAG.TxCount() != len(block.Transactions()) {
-			log.Warn("parallel process cannot apply the TxDAG with wrong txs length",
-				"block", block.NumberU64(), "txs", len(block.Transactions()), "txdag", txDAG.TxCount())
+		if err := types.ValidateTxDAG(txDAG, len(block.Transactions())); err != nil {
+			log.Warn("pevm cannot apply wrong txdag",
+				"block", block.NumberU64(), "txs", len(block.Transactions()), "err", err)
 			txDAG = nil
 		}
-		// TODO(galaio): check TxDAG validation & excludedTxs in head and continuous
-		// we only support this format
-		// convert to normal plain txdag
-		//parallelIndex := -1
-		//if txDAG != nil && txDAG.Type() == types.PlainTxDAGType {
-		//	for i := range allTxs {
-		//		if !txDAG.TxDep(i).CheckFlag(types.ExcludedTxFlag) {
-		//			if parallelIndex == -1 {
-		//				parallelIndex = i
-		//			}
-		//			continue
-		//		}
-		//		if i > 0 && !txDAG.TxDep(i-1).CheckFlag(types.ExcludedTxFlag) {
-		//			return nil, nil, 0, errors.New("cannot support non-continuous excludedTxs")
-		//		}
-		//	}
-		//}
 	}
 
 	txNum := len(allTxs)

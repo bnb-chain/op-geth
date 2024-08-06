@@ -99,8 +99,9 @@ type RWSet struct {
 	readSet  map[RWKey]*RWItem
 	writeSet map[RWKey]*RWItem
 
+	// some flags
 	rwRecordDone bool
-	mustSerial   bool
+	excludedTx   bool
 }
 
 func NewRWSet(ver StateVersion) *RWSet {
@@ -146,17 +147,9 @@ func (s *RWSet) WriteSet() map[RWKey]*RWItem {
 	return s.writeSet
 }
 
-func (s *RWSet) WithSerialFlag() *RWSet {
-	s.mustSerial = true
+func (s *RWSet) WithExcludedTxFlag() *RWSet {
+	s.excludedTx = true
 	return s
-}
-
-func (s *RWSet) RWRecordDone() bool {
-	return s.rwRecordDone
-}
-
-func (s *RWSet) SetRWRecordDone() {
-	s.rwRecordDone = true
 }
 
 func (s *RWSet) String() string {
@@ -403,10 +396,17 @@ func (s *MVStates) Finalise(index int) error {
 func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
 	s.depsCache[index] = NewTxDeps(0)
+	if rwSet.excludedTx {
+		return
+	}
 	for prev := 0; prev < index; prev++ {
 		// if there are some parallel execution or system txs, it will fulfill in advance
 		// it's ok, and try re-generate later
 		if _, ok := s.rwSets[prev]; !ok {
+			continue
+		}
+		// if prev tx is tagged ExcludedTxFlag, just skip the check
+		if s.rwSets[prev].excludedTx {
 			continue
 		}
 		// check if there has written op before i
@@ -461,8 +461,8 @@ func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (Tx
 			}
 		}
 		txDAG.TxDeps[i].TxIndexes = []uint64{}
-		if s.rwSets[i].mustSerial {
-			txDAG.TxDeps[i].Relation = &TxDAGRelation1
+		if s.rwSets[i].excludedTx {
+			txDAG.TxDeps[i].SetFlag(ExcludedTxFlag)
 			continue
 		}
 		if s.depsCache[i] == nil {
@@ -474,7 +474,7 @@ func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (Tx
 			continue
 		}
 		// if tx deps larger than half of txs, then convert to relation1
-		txDAG.TxDeps[i].Relation = &TxDAGRelation1
+		txDAG.TxDeps[i].SetFlag(NonDependentRelFlag)
 		for j := uint64(0); j < uint64(txCnt); j++ {
 			if !slices.Contains(deps, j) && j != uint64(i) {
 				txDAG.TxDeps[i].TxIndexes = append(txDAG.TxDeps[i].TxIndexes, j)

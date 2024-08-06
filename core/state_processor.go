@@ -109,6 +109,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
+		// if systemTx or depositTx, tag it
+		if tx.IsSystemTx() || tx.IsDepositTx() {
+			statedb.RecordSystemTxRWSet(i)
+		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 		if metrics.EnabledExpensive {

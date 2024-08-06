@@ -2412,7 +2412,7 @@ func (s *StateDB) RecordRead(key types.RWKey, val interface{}) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return
 	}
-	if s.rwSet == nil || s.rwSet.RWRecordDone() {
+	if s.rwSet == nil {
 		return
 	}
 	s.rwSet.RecordRead(key, types.StateVersion{
@@ -2424,7 +2424,7 @@ func (s *StateDB) RecordWrite(key types.RWKey, val interface{}) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return
 	}
-	if s.rwSet == nil || s.rwSet.RWRecordDone() {
+	if s.rwSet == nil {
 		return
 	}
 	s.rwSet.RecordWrite(key, val)
@@ -2442,9 +2442,11 @@ func (s *StateDB) FinaliseRWSet() error {
 	if s.isParallel && s.parallel.isSlotDB {
 		return nil
 	}
-	if s.rwSet == nil || s.rwSet.RWRecordDone() {
+	if s.rwSet == nil {
 		return nil
 	}
+	rwSet := s.rwSet
+	stat := s.stat
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) {
 			s.TxDAGGenerate += time.Since(start)
@@ -2453,7 +2455,7 @@ func (s *StateDB) FinaliseRWSet() error {
 	ver := types.StateVersion{
 		TxIndex: s.txIndex,
 	}
-	if ver != s.rwSet.Version() {
+	if ver != rwSet.Version() {
 		return errors.New("you finalize a wrong ver of RWSet")
 	}
 
@@ -2480,8 +2482,10 @@ func (s *StateDB) FinaliseRWSet() error {
 		}
 	}
 
-	s.rwSet.SetRWRecordDone()
-	return s.mvStates.FulfillRWSet(s.rwSet, s.stat)
+	// reset stateDB
+	s.rwSet = nil
+	s.stat = nil
+	return s.mvStates.FulfillRWSet(rwSet, stat)
 }
 
 func (s *StateDB) getStateObjectsDegetstruct(addr common.Address) (*types.StateAccount, bool) {
@@ -2554,7 +2558,7 @@ func (s *StateDB) RecordSystemTxRWSet(index int) {
 	}
 	s.mvStates.FulfillRWSet(types.NewRWSet(types.StateVersion{
 		TxIndex: index,
-	}).WithSerialFlag(), types.NewExeStat(index).WithSerialFlag())
+	}).WithExcludedTxFlag(), types.NewExeStat(index).WithSerialFlag())
 }
 
 // copySet returns a deep-copied set.

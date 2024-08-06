@@ -418,6 +418,10 @@ func (st *StateTransition) preCheck() error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
+	// start record rw set in here
+	if !st.msg.IsSystemTx && !st.msg.IsDepositTx {
+		st.state.BeforeTxTransition()
+	}
 	if mint := st.msg.Mint; mint != nil {
 		mintU256, overflow := uint256.FromBig(mint)
 		if overflow {
@@ -463,8 +467,6 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 }
 
 func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
-	// start record rw set in here
-	st.state.BeforeTxTransition()
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//

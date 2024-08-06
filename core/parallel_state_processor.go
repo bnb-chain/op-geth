@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -16,7 +15,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -49,7 +47,6 @@ type ParallelStateProcessor struct {
 	inConfirmStage2       bool
 	targetStage2Count     int // when executed txNUM reach it, enter stage2 RT confirm
 	nextStage2TxIndex     int
-	disableStealTx        bool
 	delayGasFee           bool // it is provided by TxDAG
 }
 
@@ -178,45 +175,6 @@ func (p *ParallelStateProcessor) resetState(txNum int, statedb *state.StateDB) {
 	p.txReqExecuteRecord = make(map[int]int, 200)
 	p.txReqExecuteCount = 0
 	p.nextStage2TxIndex = 0
-}
-
-// doStaticDispatchV2 could dispatch by TxDAG metadata
-// txReqs must order by TxIndex
-// txDAG must convert to dependency relation
-// 1. The TxDAG generates parallel execution merge paths that will ignore cross slot tx dep;
-// 2. It will dispatch the most hungry slot for every isolate execution path;
-// 3. TODO(galaio) it need to schedule the slow dep tx path properly;
-// 4. TODO(galaio) it is unfriendly for cross slot deps, maybe we can delay dispatch when tx cross in slots, it may increase PEVM parallelism;
-func (p *ParallelStateProcessor) doStaticDispatchV2(txReqs []*ParallelTxRequest, txDAG types.TxDAG) {
-	p.disableStealTx = false
-	p.delayGasFee = false
-	// only support PlainTxDAG dispatch now.
-	if txDAG == nil || txDAG.Type() != types.PlainTxDAGType {
-		p.doStaticDispatch(txReqs)
-		return
-	}
-
-	if metrics.EnabledExpensive {
-		defer func(start time.Time) {
-			txDAGDispatchTimer.Update(time.Since(start))
-		}(time.Now())
-	}
-	// resolve isolate execution paths from TxDAG, it indicates the tx dispatch
-	paths := types.MergeTxDAGExecutionPaths(txDAG)
-	log.Debug("doStaticDispatchV2 merge parallel execution paths", "slots", len(p.slotState), "paths", len(paths))
-
-	for _, path := range paths {
-		slotIndex := p.mostHungrySlot()
-		for _, index := range path {
-			txReqs[index].staticSlotIndex = slotIndex // txReq is better to be executed in this slot
-			slot := p.slotState[slotIndex]
-			slot.pendingTxReqList = append(slot.pendingTxReqList, txReqs[index])
-		}
-	}
-
-	// it's unnecessary to enable slot steal mechanism, opt the steal mechanism later;
-	p.disableStealTx = true
-	p.delayGasFee = true
 }
 
 // Benefits of StaticDispatch:
@@ -555,7 +513,7 @@ func (p *ParallelStateProcessor) runSlotLoop(slotIndex int, slotType int32) {
 			// fmt.Printf("Dav -- runInLoop, - loopbody tail - TxREQ: %d\n", txReq.txIndex)
 		}
 		// switched to the other slot.
-		if interrupted || p.disableStealTx {
+		if interrupted {
 			continue
 		}
 
@@ -742,11 +700,8 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 
 	misc.EnsureCreate2Deployer(p.config, block.Time(), statedb)
 
-	txNum := len(block.Transactions())
-	p.resetState(txNum, statedb)
-
-	// Iterate over and process the individual transactions
-	commonTxs := make([]*types.Transaction, 0, txNum)
+	allTxs := block.Transactions()
+	p.resetState(len(allTxs), statedb)
 
 	var (
 		// with parallel mode, vmenv will be created inside of slot
@@ -758,10 +713,47 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
 	}
-
 	statedb.MarkFullProcessed()
+
+	var (
+		txDAG types.TxDAG
+	)
+	if p.bc.enableTxDAG {
+		// TODO(galaio): load TxDAG from block
+		// or load cache txDAG from file
+		if txDAG == nil && len(p.bc.txDAGMapping) > 0 {
+			txDAG = p.bc.txDAGMapping[block.NumberU64()]
+		}
+		if txDAG != nil && txDAG.TxCount() != len(block.Transactions()) {
+			log.Warn("parallel process cannot apply the TxDAG with wrong txs length",
+				"block", block.NumberU64(), "txs", len(block.Transactions()), "txdag", txDAG.TxCount())
+			txDAG = nil
+		}
+		// TODO(galaio): check TxDAG validation & excludedTxs in head and continuous
+		// we only support this format
+		// convert to normal plain txdag
+		//parallelIndex := -1
+		//if txDAG != nil && txDAG.Type() == types.PlainTxDAGType {
+		//	for i := range allTxs {
+		//		if !txDAG.TxDep(i).CheckFlag(types.ExcludedTxFlag) {
+		//			if parallelIndex == -1 {
+		//				parallelIndex = i
+		//			}
+		//			continue
+		//		}
+		//		if i > 0 && !txDAG.TxDep(i-1).CheckFlag(types.ExcludedTxFlag) {
+		//			return nil, nil, 0, errors.New("cannot support non-continuous excludedTxs")
+		//		}
+		//	}
+		//}
+	}
+
+	txNum := len(allTxs)
+	latestExcludedTx := -1
+	// Iterate over and process the individual transactions
+	commonTxs := make([]*types.Transaction, 0, txNum)
 	// var txReqs []*ParallelTxRequest
-	for i, tx := range block.Transactions() {
+	for i, tx := range allTxs {
 		// can be moved it into slot for efficiency, but signer is not concurrent safe
 		// Parallel Execution 1.0&2.0 is for full sync mode, Nonce PreCheck is not necessary
 		// And since we will do out-of-order execution, the Nonce PreCheck could fail.
@@ -769,6 +761,15 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+		}
+
+		// find the latestDepTx from TxDAG or latestExcludedTx
+		latestDepTx := -1
+		if txDAG != nil && txDAG.TxDep(i).Count() > 0 {
+			latestDepTx = int(txDAG.TxDep(i).TxIndexes[txDAG.TxDep(i).Count()-1])
+		}
+		if latestDepTx < latestExcludedTx {
+			latestDepTx = latestExcludedTx
 		}
 
 		// parallel start, wrap an exec message, which will be dispatched to a slot
@@ -789,7 +790,13 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		}
 		txReq.executedNum.Store(0)
 		txReq.conflictIndex.Store(-2)
+		if latestDepTx >= 0 {
+			txReq.conflictIndex.Store(int32(latestDepTx))
+		}
 		p.allTxReqs = append(p.allTxReqs, txReq)
+		if txDAG != nil && txDAG.TxDep(i).CheckFlag(types.ExcludedTxFlag) {
+			latestExcludedTx = i
+		}
 	}
 	// set up stage2 enter criteria
 	p.targetStage2Count = len(p.allTxReqs)
@@ -799,18 +806,11 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		p.targetStage2Count = p.targetStage2Count - stage2AheadNum
 	}
 
-	var (
-		txDAG types.TxDAG
-	)
-	if p.bc.enableTxDAG {
-		// TODO(galaio): load TxDAG from block
-		// or load cache txDAG from file
-		if txDAG == nil && len(p.bc.txDAGMapping) > 0 {
-			txDAG = p.bc.txDAGMapping[block.NumberU64()]
-		}
+	p.delayGasFee = false
+	p.doStaticDispatch(p.allTxReqs)
+	if txDAG != nil && txDAG.DelayGasFeeDistribution() {
+		p.delayGasFee = true
 	}
-	// From now on, entering parallel execution.
-	p.doStaticDispatchV2(p.allTxReqs, txDAG) // todo: put txReqs in unit?
 
 	// after static dispatch, we notify the slot to work.
 	for _, slot := range p.slotState {

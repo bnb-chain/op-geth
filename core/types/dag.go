@@ -78,6 +78,42 @@ func DecodeTxDAG(enc []byte) (TxDAG, error) {
 	}
 }
 
+func ValidateTxDAG(d TxDAG, txCnt int) error {
+	if d == nil {
+		return nil
+	}
+
+	switch d.Type() {
+	case EmptyTxDAGType:
+		return nil
+	case PlainTxDAGType:
+		return ValidatePlainTxDAG(d, txCnt)
+	default:
+		return fmt.Errorf("unsupported TxDAG type: %v", d.Type())
+	}
+}
+
+func ValidatePlainTxDAG(d TxDAG, txCnt int) error {
+	if d.TxCount() != txCnt {
+		return fmt.Errorf("PlainTxDAG contains wrong txs count, expect: %v, actual: %v", txCnt, d.TxCount())
+	}
+	for i := 0; i < txCnt; i++ {
+		dep := d.TxDep(i)
+		if dep == nil {
+			return fmt.Errorf("PlainTxDAG contains nil txdep, tx: %v", i)
+		}
+		for j, tx := range dep.TxIndexes {
+			if tx >= uint64(i) || tx >= uint64(txCnt) {
+				return fmt.Errorf("PlainTxDAG contains the exceed range dependency, tx: %v", i)
+			}
+			if j > 0 && dep.TxIndexes[j] <= dep.TxIndexes[j-1] {
+				return fmt.Errorf("PlainTxDAG contains unordered dependency, tx: %v", i)
+			}
+		}
+	}
+	return nil
+}
+
 // EmptyTxDAG indicate that execute txs in sequence
 // It means no transactions or need timely distribute transaction fees
 // it only keep partial serial execution when tx cannot delay the distribution or just execute txs in sequence

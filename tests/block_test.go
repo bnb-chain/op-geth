@@ -69,7 +69,6 @@ func TestBlockchainWithTxDAG(t *testing.T) {
 	//			t.Skip("test (randomly) skipped on 32-bit windows")
 	//		}
 	//		execBlockTestWithTxDAG(t, bt, test)
-	//		//execBlockTest(t, bt, test)
 	//	})
 	//})
 }

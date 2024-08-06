@@ -2404,7 +2404,11 @@ func (s *StateDB) StopTxStat(usedGas uint64) {
 	}
 	// record stat first
 	if metrics.EnabledExpensive && s.stat != nil {
-		s.stat.Done().WithGas(usedGas).WithRead(len(s.rwSet.ReadSet()))
+		s.stat.Done().WithGas(usedGas)
+		rwSet := s.mvStates.RWSet(s.txIndex)
+		if rwSet != nil {
+			s.stat.WithRead(len(rwSet.ReadSet()))
+		}
 	}
 }
 

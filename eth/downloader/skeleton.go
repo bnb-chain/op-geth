@@ -82,6 +82,10 @@ var errChainGapped = errors.New("chain gapped")
 // of the current sync cycle is forked with the one advertised by consensus client.
 var errChainForked = errors.New("chain forked")
 
+// ErrForcedNeeded is a public error to signal that the header chain
+// of the current sync cycle needs a forced flag at startup.
+var ErrForcedNeeded = errors.New("forced head needed for startup")
+
 // maxBlockNumGapTolerance is the max gap tolerance by peer
 var maxBlockNumGapTolerance = uint64(30)
 
@@ -269,7 +273,7 @@ func (s *skeleton) startup() {
 			// New head announced, start syncing to it, looping every time a current
 			// cycle is terminated due to a chain event (head reorg, old chain merge).
 			if !event.force {
-				event.errc <- errors.New("forced head needed for startup")
+				event.errc <- ErrForcedNeeded
 				continue
 			}
 			event.errc <- nil // forced head accepted for startup

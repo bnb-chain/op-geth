@@ -20,11 +20,11 @@ import (
 	"bytes"
 	"context"
 	crand "crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -719,7 +719,7 @@ func TestEmptyBlocks(t *testing.T) {
 	payload := getNewPayload(t, api, commonAncestor, nil)
 
 	status, err := api.NewPayloadV1(*payload)
-	if err != nil && !strings.Contains(err.Error(), "forced head needed for startup") {
+	if err != nil && !errors.Is(err, downloader.ErrForcedNeeded) {
 		t.Fatal(err)
 	}
 	if status.Status != engine.VALID {
@@ -735,7 +735,7 @@ func TestEmptyBlocks(t *testing.T) {
 	payload = setBlockhash(payload)
 	// Now latestValidHash should be the common ancestor
 	status, err = api.NewPayloadV1(*payload)
-	if err != nil && !strings.Contains(err.Error(), "forced head needed for startup") {
+	if err != nil && !errors.Is(err, downloader.ErrForcedNeeded) {
 		t.Fatal(err)
 	}
 	if status.Status != engine.INVALID {
@@ -753,7 +753,7 @@ func TestEmptyBlocks(t *testing.T) {
 	payload = setBlockhash(payload)
 	// Now latestValidHash should be the common ancestor
 	status, err = api.NewPayloadV1(*payload)
-	if err != nil && !strings.Contains(err.Error(), "forced head needed for startup") {
+	if err != nil && !errors.Is(err, downloader.ErrForcedNeeded) {
 		t.Fatal(err)
 	}
 	if status.Status != engine.SYNCING {
@@ -865,7 +865,7 @@ func TestTrickRemoteBlockCache(t *testing.T) {
 	// feed the payloads to node B
 	for _, payload := range invalidChain {
 		status, err := apiB.NewPayloadV1(*payload)
-		if err != nil && !strings.Contains(err.Error(), "forced head needed for startup") {
+		if err != nil && !errors.Is(err, downloader.ErrForcedNeeded) {
 			panic(err)
 		}
 		if status.Status == engine.VALID {

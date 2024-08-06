@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 	"sync"
 	"time"
 
@@ -682,7 +681,7 @@ func (api *ConsensusAPI) delayPayloadImport(block *types.Block) (engine.PayloadS
 		// that the parent state is missing and the syncer rejected extending the
 		// current cycle with the new payload.
 		log.Warn("Ignoring payload with missing parent", "number", block.NumberU64(), "hash", block.Hash(), "parent", block.ParentHash(), "reason", err)
-		if strings.Contains(err.Error(), "forced head needed for startup") {
+		if errors.Is(err, downloader.ErrForcedNeeded) {
 			return engine.PayloadStatusV1{Status: engine.SYNCING}, err
 		}
 	} else {

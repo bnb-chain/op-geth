@@ -23,6 +23,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/objs"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -203,16 +204,22 @@ func newL1CostFuncEcotone(l1BaseFee, l1BlobBaseFee, l1BaseFeeScalar, l1BlobBaseF
 		//
 		//   calldataGas*(l1BaseFee*16*l1BaseFeeScalar + l1BlobBaseFee*l1BlobBaseFeeScalar)/16e6
 
-		calldataCostPerByte := new(big.Int).Set(l1BaseFee)
+		calldataCostPerByte := objs.BigIntPool.Get().(*big.Int)
+		calldataCostPerByte = calldataCostPerByte.Set(l1BaseFee)
 		calldataCostPerByte = calldataCostPerByte.Mul(calldataCostPerByte, sixteen)
 		calldataCostPerByte = calldataCostPerByte.Mul(calldataCostPerByte, l1BaseFeeScalar)
 
-		blobCostPerByte := new(big.Int).Set(l1BlobBaseFee)
+		blobCostPerByte := objs.BigIntPool.Get().(*big.Int)
+		blobCostPerByte = blobCostPerByte.Set(l1BlobBaseFee)
 		blobCostPerByte = blobCostPerByte.Mul(blobCostPerByte, l1BlobBaseFeeScalar)
 
 		fee = new(big.Int).Add(calldataCostPerByte, blobCostPerByte)
 		fee = fee.Mul(fee, calldataGasUsed)
 		fee = fee.Div(fee, ecotoneDivisor)
+
+		// recycle the two big.Int
+		objs.BigIntPool.Put(calldataCostPerByte)
+		objs.BigIntPool.Put(blobCostPerByte)
 
 		return fee, calldataGasUsed
 	}

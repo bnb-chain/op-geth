@@ -580,7 +580,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		}
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, amtU256)
 		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.Time) {
-			st.state.AddBalance(params.OptimismL1FeeRecipient, 0)
+			st.state.AddBalance(params.OptimismL1FeeRecipient, uint256.NewInt(0))
 		} else if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
 			amtU256, overflow = uint256.FromBig(l1Cost)
 			if overflow {

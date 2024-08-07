@@ -460,7 +460,7 @@ func effectiveGasTipValue(tx *Transaction, baseFee *big.Int) (*big.Int, func()) 
 	if tx.Type() == DepositTxType {
 		newInt := objs.BigIntPool.Get().(*big.Int)
 		newInt.SetUint64(0)
-		return new(big.Int), func() { objs.BigIntPool.Put(newInt) }
+		return newInt, func() { objs.BigIntPool.Put(newInt) }
 	}
 	if baseFee == nil {
 		return tx.inner.gasTipCap(), func() {}

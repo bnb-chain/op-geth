@@ -622,19 +622,7 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 	}
 
 	resultTxIndex := result.txReq.txIndex
-	delayGasFee := result.result.delayFees
-	// add delayed gas fee
-	if delayGasFee != nil {
-		if delayGasFee.TipFee != nil {
-			result.slotDB.AddBalance(delayGasFee.Coinbase, delayGasFee.TipFee)
-		}
-		if delayGasFee.BaseFee != nil {
-			result.slotDB.AddBalance(params.OptimismBaseFeeRecipient, delayGasFee.BaseFee)
-		}
-		if delayGasFee.L1Fee != nil {
-			result.slotDB.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
-		}
-	}
+
 	var root []byte
 	header := result.txReq.block.Header()
 
@@ -644,6 +632,20 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 
 	// merge slotDB into mainDB
 	statedb.MergeSlotDB(result.slotDB, result.receipt, resultTxIndex, result.result.delayFees)
+
+	delayGasFee := result.result.delayFees
+	// add delayed gas fee
+	if delayGasFee != nil {
+		if delayGasFee.TipFee != nil {
+			statedb.AddBalance(delayGasFee.Coinbase, delayGasFee.TipFee)
+		}
+		if delayGasFee.BaseFee != nil {
+			statedb.AddBalance(params.OptimismBaseFeeRecipient, delayGasFee.BaseFee)
+		}
+		if delayGasFee.L1Fee != nil {
+			statedb.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
+		}
+	}
 
 	// Do IntermediateRoot after mergeSlotDB.
 	if !isByzantium {

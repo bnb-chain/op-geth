@@ -363,11 +363,14 @@ func (tx *Transaction) IsSystemTx() bool {
 
 // Cost returns (gas * gasPrice) + (blobGas * blobGasPrice) + value.
 func (tx *Transaction) Cost() *big.Int {
-	total := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
+	gasPrice := tx.inner.gasPrice()
+	gas := objs.BigIntPool.Get().(*big.Int).SetUint64(tx.Gas())
+	total := new(big.Int).Mul(gasPrice, gas)
 	if tx.Type() == BlobTxType {
 		total.Add(total, new(big.Int).Mul(tx.BlobGasFeeCap(), new(big.Int).SetUint64(tx.BlobGas())))
 	}
-	total.Add(total, tx.Value())
+	objs.BigIntPool.Put(gas)
+	total.Add(total, tx.inner.value())
 	return total
 }
 

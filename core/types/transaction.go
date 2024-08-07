@@ -308,6 +308,17 @@ func (tx *Transaction) GasFeeCap() *big.Int { return new(big.Int).Set(tx.inner.g
 // Value returns the ether amount of the transaction.
 func (tx *Transaction) Value() *big.Int { return new(big.Int).Set(tx.inner.value()) }
 
+// Value returns the ether amount of the transaction.
+func (tx *Transaction) ValueRef() *big.Int { return tx.inner.value() }
+
+// GasTipCap returns the gasTipCap per gas of the transaction.
+func (tx *Transaction) GasTipCapRef() *big.Int { return tx.inner.gasTipCap() }
+
+// GasFeeCap returns the fee cap per gas of the transaction.
+func (tx *Transaction) GasFeeCapRef() *big.Int { return tx.inner.gasFeeCap() }
+
+func (tx *Transaction) GasPriceRef() *big.Int { return tx.inner.gasPrice() }
+
 // Nonce returns the sender account nonce of the transaction.
 func (tx *Transaction) Nonce() uint64 { return tx.inner.nonce() }
 

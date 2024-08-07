@@ -556,11 +556,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
 	}
 
-	if vmConfig.EnableParallelExec {
-		bc.EnableParallelProcessor(vmConfig.ParallelTxNum)
-	} else {
-		bc.processor = NewStateProcessor(chainConfig, bc, engine)
-	}
+	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	// Start future block processor.
 	bc.wg.Add(1)
@@ -1967,6 +1963,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
 
+			txsCount := block.Transactions().Len()
+			if bc.vmConfig.EnableParallelExec && txsCount > 4 /* todo: use a parallelTxNum */ {
+				bc.EnableParallelProcessor(bc.vmConfig.ParallelTxNum)
+				log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+			}
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
 			// parallel mode has a pipeline, similar to this prefetch, to save CPU we disable this prefetch for parallel

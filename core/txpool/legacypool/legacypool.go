@@ -270,8 +270,7 @@ type LegacyPool struct {
 	all     *lookup                      // All transactions to allow lookups
 	priced  *pricedList                  // All transactions sorted by price
 
-	pendingCacheDumper func(enforceTip bool) map[common.Address][]*txpool.LazyTransaction
-	pendingCache       *cacheForMiner //pending list cache for miner
+	pendingCache *cacheForMiner //pending list cache for miner
 
 	reqResetCh      chan *txpoolResetRequest
 	reqPromoteCh    chan *accountSet
@@ -349,11 +348,6 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserve txpool.A
 
 	// Set the basic pool parameters
 	pool.gasTip.Store(uint256.NewInt(gasTip))
-
-	// set dumper
-	pool.pendingCacheDumper = func(enforceTip bool) map[common.Address][]*txpool.LazyTransaction {
-		return pool.pendingCache.dump(pool, new(big.Int).SetUint64(gasTip), pool.gasTip.Load().ToBig(), enforceTip)
-	}
 
 	// Initialize the state with head block, or fallback to empty one in
 	// case the head state is not available (might occur when node is not
@@ -639,8 +633,6 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 	if filter.OnlyBlobTxs {
 		return nil
 	}
-	pool.mu.Lock()
-	defer pool.mu.Unlock()
 
 	// Convert the new uint256.Int types to the old big.Int ones used by the legacy pool
 	var (
@@ -654,8 +646,7 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 		baseFeeBig = filter.BaseFee.ToBig()
 	}
 	pending := make(map[common.Address][]*txpool.LazyTransaction, len(pool.pending))
-	for addr, list := range pool.pending {
-		txs := list.Flatten()
+	for addr, txs := range pool.pendingCache.dump() {
 
 		// If the miner requests tip enforcement, cap the lists now
 		if minTipBig != nil && !pool.locals.contains(addr) {
@@ -1463,10 +1454,6 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			} else {
 				pool.priced.Reheap()
 			}
-		}
-		gasTip, baseFee := pool.gasTip.Load(), pendingBaseFee
-		pool.pendingCacheDumper = func(enforceTip bool) map[common.Address][]*txpool.LazyTransaction {
-			return pool.pendingCache.dump(pool, gasTip.ToBig(), baseFee, enforceTip)
 		}
 		// Update all accounts to the latest known pending nonce
 		nonces := make(map[common.Address]uint64, len(pool.pending))

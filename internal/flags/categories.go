@@ -24,6 +24,7 @@ const (
 	DevCategory        = "DEVELOPER CHAIN"
 	StateCategory      = "STATE HISTORY MANAGEMENT"
 	TxPoolCategory     = "TRANSACTION POOL (EVM)"
+	BundlePoolCategory = "TRANSACTION POOL (BUNDLE)"
 	BlobPoolCategory   = "TRANSACTION POOL (BLOB)"
 	PerfCategory       = "PERFORMANCE TUNING"
 	AccountCategory    = "ACCOUNT"
@@ -38,6 +39,7 @@ const (
 	MiscCategory       = "MISC"
 	TestingCategory    = "TESTING"
 	DeprecatedCategory = "ALIASED (deprecated)"
+	MEVCategory        = "MEV"
 )
 
 func init() {

@@ -241,10 +241,11 @@ var (
 		CancunTime:  newUint64(1715754600), // May-15-2024 06:30 AM +UTC
 		EcotoneTime: newUint64(1715754600), // May-15-2024 06:30 AM +UTC
 		HaberTime:   newUint64(1717048800), // May-30-2024 06:00 AM +UTC
+		WrightTime:  newUint64(1723701600), // Aug-15-2024 06:00 AM +UTC
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(2484),
+		ChainID:                       big.NewInt(7180),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
 		EIP155Block:                   big.NewInt(0),
@@ -275,6 +276,7 @@ var (
 		CancunTime:  newUint64(1714995000), // May-06-2024 11:30 AM +UTC
 		EcotoneTime: newUint64(1714995000), // May-06-2024 11:30 AM +UTC
 		HaberTime:   newUint64(1716361200), // May-22-2024 07:00 AM +UTC
+		WrightTime:  newUint64(1721815200), // July-24-2024 10:00 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -517,6 +519,7 @@ type ChainConfig struct {
 	// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
 	EcotoneTime *uint64 `json:"ecotoneTime,omitempty"` // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
 	HaberTime   *uint64 `json:"haberTime,omitempty"`   // Haber switch time (nil = no fork, 0 = already on haber)
+	WrightTime  *uint64 `json:"wrightTime,omitempty"`  // Wright switch time (nil = no fork, 0 = already on wright)
 	FjordTime   *uint64 `json:"fjordTime,omitempty"`   // Fjord switch time (nil = no fork, 0 = already on Optimism Fjord)
 
 	InteropTime *uint64 `json:"interopTime,omitempty"` // Interop switch time (nil = no fork, 0 = already on optimism interop)
@@ -691,6 +694,9 @@ func (c *ChainConfig) Description() string {
 	if c.HaberTime != nil {
 		banner += fmt.Sprintf(" - Haber:                    @%-10v\n", *c.HaberTime)
 	}
+	if c.WrightTime != nil {
+		banner += fmt.Sprintf(" - Wright:                    @%-10v\n", *c.WrightTime)
+	}
 
 	return banner
 }
@@ -818,6 +824,10 @@ func (c *ChainConfig) IsFjord(time uint64) bool {
 
 func (c *ChainConfig) IsHaber(time uint64) bool {
 	return isTimestampForked(c.HaberTime, time)
+}
+
+func (c *ChainConfig) IsWright(time uint64) bool {
+	return isTimestampForked(c.WrightTime, time)
 }
 
 func (c *ChainConfig) IsInterop(time uint64) bool {
@@ -1204,6 +1214,7 @@ type Rules struct {
 	IsOptimismCanyon, IsOptimismFjord                       bool
 	IsFermat                                                bool
 	IsHaber                                                 bool
+	IsWright                                                bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1239,5 +1250,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		// OPBNB
 		IsFermat: c.IsFermat(num),
 		IsHaber:  c.IsHaber(timestamp),
+		IsWright: c.IsWright(timestamp),
 	}
 }

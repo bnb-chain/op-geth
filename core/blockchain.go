@@ -2601,3 +2601,30 @@ func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 func (bc *BlockChain) NoTries() bool {
 	return bc.stateCache.NoTries()
 }
+
+func createDelFn(bc *BlockChain) func(db ethdb.KeyValueWriter, hash common.Hash, num uint64) {
+	return func(db ethdb.KeyValueWriter, hash common.Hash, num uint64) {
+		// Ignore the error here since light client won't hit this path
+		frozen, _ := bc.db.Ancients()
+		if num+1 <= frozen {
+			log.Info("process data in freeze table")
+			// Truncate all relative data(header, total difficulty, body, receipt
+			// and canonical hash) from ancient store.
+			if _, err := bc.db.TruncateHead(num); err != nil {
+				log.Crit("Failed to truncate ancient data", "number", num, "err", err)
+			}
+			// Remove the hash <-> number mapping from the active store.
+			rawdb.DeleteHeaderNumber(db, hash)
+		} else {
+			// Remove relative body and receipts from the active store.
+			// The header, total difficulty and canonical hash will be
+			// removed in the hc.SetHead function.
+			rawdb.DeleteBody(db, hash, num)
+			rawdb.DeleteReceipts(db, hash, num)
+		}
+	}
+}
+
+func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
+	bc.hc.SetHead(headNumber, nil, createDelFn(bc))
+}

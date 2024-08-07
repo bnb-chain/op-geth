@@ -381,6 +381,13 @@ func (b *backendMock) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) eve
 	return nil
 }
 func (b *backendMock) SendTx(ctx context.Context, signedTx *types.Transaction) error { return nil }
+func (b *backendMock) SimulateGaslessBundle(bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+	panic("implement me")
+}
+func (b *backendMock) SendBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
+	return nil
+}
+func (b *backendMock) BundlePrice() *big.Int { return nil }
 func (b *backendMock) GetTransaction(ctx context.Context, txHash common.Hash) (bool, *types.Transaction, common.Hash, uint64, uint64, error) {
 	return false, nil, [32]byte{}, 0, 0, nil
 }

@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"math"
 	"math/big"
 	"net"
@@ -445,6 +446,13 @@ var (
 		Value:    ethconfig.Defaults.TxPool.ReannounceRemotes,
 		Category: flags.TxPoolCategory,
 	}
+	// bundle pool settings
+	BundlePoolGlobalSlotsFlag = &cli.Uint64Flag{
+		Name:     "bundlepool.globalslots",
+		Usage:    "Maximum number of executable bundle slots for all accounts",
+		Value:    ethconfig.Defaults.BundlePool.GlobalSlots,
+		Category: flags.BundlePoolCategory,
+	}
 	// Blob transaction pool settings
 	BlobPoolDataDirFlag = &cli.StringFlag{
 		Name:     "blobpool.datadir",
@@ -568,6 +576,22 @@ var (
 		Usage:    "Specify the maximum time allowance for creating a new payload",
 		Value:    ethconfig.Defaults.Miner.NewPayloadTimeout,
 		Category: flags.MinerCategory,
+	}
+	MevEnabledFlag = &cli.BoolFlag{
+		Name:     "mev.enable",
+		Usage:    "Enable mev",
+		Category: flags.MEVCategory,
+	}
+	MevBundleReceiverUrlFlag = &cli.StringFlag{
+		Name:     "mev.bundle.receiver.url",
+		Usage:    "Url of bundle receiver endpoint to use. Multiple urls are supported, separated by commas",
+		Category: flags.MEVCategory,
+	}
+	MevBundleGasPriceFloorFlag = &cli.Int64Flag{
+		Name:     "mev.bundle.gasprice.floor",
+		Usage:    "Minimum bundle gas price for mev",
+		Value:    ethconfig.Defaults.Miner.Mev.MevBundleGasPriceFloor,
+		Category: flags.MEVCategory,
 	}
 
 	// Account settings
@@ -1708,6 +1732,12 @@ func setTxPool(ctx *cli.Context, cfg *legacypool.Config) {
 	}
 }
 
+func setBundlePool(ctx *cli.Context, cfg *bundlepool.Config) {
+	if ctx.IsSet(BundlePoolGlobalSlotsFlag.Name) {
+		cfg.GlobalSlots = ctx.Uint64(BundlePoolGlobalSlotsFlag.Name)
+	}
+}
+
 func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.IsSet(MinerExtraDataFlag.Name) {
 		cfg.ExtraData = []byte(ctx.String(MinerExtraDataFlag.Name))
@@ -1729,6 +1759,16 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 	if ctx.IsSet(RollupComputePendingBlock.Name) {
 		cfg.RollupComputePendingBlock = ctx.Bool(RollupComputePendingBlock.Name)
+	}
+	if ctx.IsSet(MevEnabledFlag.Name) {
+		cfg.Mev.MevEnabled = ctx.Bool(MevEnabledFlag.Name)
+	}
+	if ctx.IsSet(MevBundleReceiverUrlFlag.Name) {
+		url := ctx.String(MevBundleReceiverUrlFlag.Name)
+		cfg.Mev.MevReceivers = strings.Split(url, ",")
+	}
+	if ctx.IsSet(MevBundleGasPriceFloorFlag.Name) {
+		cfg.Mev.MevBundleGasPriceFloor = ctx.Int64(MevBundleGasPriceFloorFlag.Name)
 	}
 }
 
@@ -1811,6 +1851,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setEtherbase(ctx, cfg)
 	setGPO(ctx, &cfg.GPO)
 	setTxPool(ctx, &cfg.TxPool)
+	setBundlePool(ctx, &cfg.BundlePool)
 	setMiner(ctx, &cfg.Miner)
 	setRequiredBlocks(ctx, cfg)
 	setLes(ctx, cfg)

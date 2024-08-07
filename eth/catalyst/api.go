@@ -374,8 +374,20 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			log.Warn("Safe block not in canonical chain")
 			return engine.STATUS_INVALID, engine.InvalidForkChoiceState.With(errors.New("safe block not in canonical chain"))
 		}
+		//reset safe
+		currentSafe := api.eth.BlockChain().CurrentSafeBlock()
+		currentHead := api.eth.BlockChain().CurrentBlock()
+
 		// Set the safe block
 		api.eth.BlockChain().SetSafe(safeBlock.Header())
+
+		if shouldDeleteData(currentSafe, currentHead, safeBlock) {
+			log.Warn("deleting data beyond safe")
+			api.eth.BlockChain().HeaderChainForceSetHead(currentHead.Number.Uint64())
+			api.eth.BlockChain().SetFinalized(currentHead)
+			api.eth.BlockChain().SetSafe(currentHead)
+		}
+
 	}
 	// If payload generation was requested, create a new block to be potentially
 	// sealed by the beacon client. The payload will be requested later, and we
@@ -649,6 +661,11 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	}
 	if !api.eth.BlockChain().HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
 		api.remoteBlocks.put(block.Hash(), block.Header())
+
+		if api.eth.BlockChain().TrieDB().Scheme() == rawdb.PathScheme {
+			log.Warn("State not available, missing trie node", "block", block.ParentHash().String())
+			return engine.PayloadStatusV1{Status: engine.INCONSISTENT}, nil
+		}
 		log.Warn("State not available, ignoring new payload")
 		return engine.PayloadStatusV1{Status: engine.ACCEPTED}, nil
 	}
@@ -933,4 +950,8 @@ func getBody(block *types.Block) *engine.ExecutionPayloadBodyV1 {
 		TransactionData: txs,
 		Withdrawals:     withdrawals,
 	}
+}
+
+func shouldDeleteData(currentSafe *types.Header, currentHead *types.Header, safeBlock *types.Block) bool {
+	return currentSafe != nil && currentSafe.Number.Uint64() > currentHead.Number.Uint64() && currentSafe.Number.Uint64() > safeBlock.NumberU64()
 }

@@ -51,7 +51,7 @@ type ParallelStateProcessor struct {
 	delayGasFee           bool // it is provided by TxDAG
 }
 
-func NewParallelStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine, parallelNum int) *ParallelStateProcessor {
+func newParallelStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine, parallelNum int) *ParallelStateProcessor {
 	processor := &ParallelStateProcessor{
 		StateProcessor: *NewStateProcessor(config, bc, engine),
 		parallelNum:    parallelNum,

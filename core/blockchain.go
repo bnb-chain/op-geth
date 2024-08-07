@@ -314,6 +314,8 @@ type BlockChain struct {
 	enableTxDAG       bool
 	txDAGWriteCh      chan TxDAGOutputItem
 	txDAGReader       *TxDAGFileReader
+	serialProcessor   Processor
+	parallelProcessor Processor
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -556,8 +558,12 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
 	}
 
-	bc.processor = NewStateProcessor(chainConfig, bc, engine)
-
+	if bc.vmConfig.EnableParallelExec {
+		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
+		bc.CreateSerialProcessor(chainConfig, bc, engine)
+	} else {
+		bc.processor = NewStateProcessor(chainConfig, bc, engine)
+	}
 	// Start future block processor.
 	bc.wg.Add(1)
 	go bc.updateFutureBlocks()
@@ -1963,10 +1969,16 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
 
-			txsCount := block.Transactions().Len()
-			if bc.vmConfig.EnableParallelExec && txsCount > 4 /* todo: use a parallelTxNum */ {
-				bc.EnableParallelProcessor(bc.vmConfig.ParallelTxNum)
-				log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+			if bc.vmConfig.EnableParallelExec {
+				txsCount := block.Transactions().Len()
+				threshold := min(bc.vmConfig.ParallelTxNum/2+2, 4)
+				if txsCount >= threshold {
+					bc.UseParallelProcessor()
+					log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+				} else {
+					bc.UseSerialProcessor()
+					log.Debug("Disable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+				}
 			}
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
@@ -2780,17 +2792,12 @@ func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 	return time.Duration(bc.flushInterval.Load())
 }
 
-func (bc *BlockChain) EnableParallelProcessor(parallelNum int) (*BlockChain, error) {
-	/*
-		if bc.snaps == nil {
-				// disable parallel processor if snapshot is not enabled to avoid concurrent issue for SecureTrie
-				log.Info("parallel processor is not enabled since snapshot is not enabled")
-				return bc, nil
-		}
-	*/
-	bc.parallelExecution = true
-	bc.processor = NewParallelStateProcessor(bc.Config(), bc, bc.engine, parallelNum)
-	return bc, nil
+func (bc *BlockChain) CreateParallelProcessor(parallelNum int) *BlockChain {
+	if bc.parallelProcessor == nil {
+		bc.parallelProcessor = newParallelStateProcessor(bc.Config(), bc, bc.engine, parallelNum)
+		bc.parallelExecution = true
+	}
+	return bc
 }
 
 func (bc *BlockChain) NoTries() bool {
@@ -2871,6 +2878,24 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 			}
 		}
 	}()
+}
+
+func (bc *BlockChain) UseParallelProcessor() {
+	if bc.parallelProcessor != nil {
+		bc.parallelExecution = true
+		bc.processor = bc.parallelProcessor
+	} else {
+		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
+	}
+}
+
+func (bc *BlockChain) UseSerialProcessor() {
+	if bc.serialProcessor != nil {
+		bc.parallelExecution = false
+		bc.processor = bc.serialProcessor
+	} else {
+		bc.CreateSerialProcessor(bc.chainConfig, bc, bc.engine)
+	}
 }
 
 type TxDAGOutputItem struct {

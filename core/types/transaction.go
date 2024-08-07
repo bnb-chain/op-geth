@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/objs"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -446,18 +447,27 @@ func (tx *Transaction) EffectiveGasTipCmp(other *Transaction, baseFee *big.Int) 
 	}
 	// the EffectiveGasTipValue() always copies two big.Int, which cost almost 90% cpu resource of the whole function,
 	// so we define an alternative function to improve the performance.
-	return effectiveGasTipValue(tx, baseFee).Cmp(effectiveGasTipValue(other, baseFee))
+	effTx, recycleTx := effectiveGasTipValue(tx, baseFee)
+	effOther, recycleOther := effectiveGasTipValue(other, baseFee)
+	defer func() {
+		recycleTx()
+		recycleOther()
+	}()
+	return effTx.Cmp(effOther)
 }
 
-func effectiveGasTipValue(tx *Transaction, baseFee *big.Int) *big.Int {
+func effectiveGasTipValue(tx *Transaction, baseFee *big.Int) (*big.Int, func()) {
 	if tx.Type() == DepositTxType {
-		return new(big.Int)
+		newInt := objs.BigIntPool.Get().(*big.Int)
+		newInt.SetUint64(0)
+		return new(big.Int), func() { objs.BigIntPool.Put(newInt) }
 	}
 	if baseFee == nil {
-		return tx.inner.gasTipCap()
+		return tx.inner.gasTipCap(), func() {}
 	}
 	gasFeeCap := tx.inner.gasFeeCap()
-	return math.BigMin(tx.inner.gasTipCap(), new(big.Int).Sub(gasFeeCap, baseFee))
+	temp := objs.BigIntPool.Get().(*big.Int).Sub(gasFeeCap, baseFee)
+	return math.BigMin(tx.inner.gasTipCap(), temp), func() { objs.BigIntPool.Put(temp) }
 }
 
 // EffectiveGasTipIntCmp compares the effective gasTipCap of a transaction to the given gasTipCap.

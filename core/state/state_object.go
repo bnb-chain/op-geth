@@ -386,7 +386,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	//   2) we don't have new values, and can deliver empty response back
 	//if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
 	s.db.stateObjectDestructLock.RLock()
-	if _, destructed := s.db.getStateObjectsDegetstruct(s.address); destructed { // fixme: use sync.Map, instead of RWMutex?
+	if _, destructed := s.db.getStateObjectsDestruct(s.address); destructed { // fixme: use sync.Map, instead of RWMutex?
 		s.db.stateObjectDestructLock.RUnlock()
 		return common.Hash{}
 	}
@@ -1025,7 +1025,7 @@ func (s *stateObject) GetCommittedStateNoUpdate(key common.Hash) common.Hash {
 	//   2) we don't have new values, and can deliver empty response back
 	//if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
 	s.db.stateObjectDestructLock.RLock()
-	if _, destructed := s.db.getStateObjectsDegetstruct(s.address); destructed { // fixme: use sync.Map, instead of RWMutex?
+	if _, destructed := s.db.getStateObjectsDestruct(s.address); destructed { // fixme: use sync.Map, instead of RWMutex?
 		s.db.stateObjectDestructLock.RUnlock()
 		return common.Hash{}
 	}

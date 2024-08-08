@@ -736,8 +736,8 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	if p.bc.enableTxDAG {
 		// TODO(galaio): load TxDAG from block
 		// or load cache txDAG from file
-		if txDAG == nil && len(p.bc.txDAGMapping) > 0 {
-			txDAG = p.bc.txDAGMapping[block.NumberU64()]
+		if txDAG == nil && p.bc.txDAGReader != nil {
+			txDAG = p.bc.txDAGReader.TxDAG(block.NumberU64())
 		}
 		if err := types.ValidateTxDAG(txDAG, len(block.Transactions())); err != nil {
 			log.Warn("pevm cannot apply wrong txdag",
@@ -763,8 +763,8 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 
 		// find the latestDepTx from TxDAG or latestExcludedTx
 		latestDepTx := -1
-		if txDAG != nil && txDAG.TxDep(i).Count() > 0 {
-			latestDepTx = int(txDAG.TxDep(i).TxIndexes[txDAG.TxDep(i).Count()-1])
+		if dep := types.TxDependency(txDAG, i); len(dep) > 0 {
+			latestDepTx = int(dep[len(dep)-1])
 		}
 		if latestDepTx < latestExcludedTx {
 			latestDepTx = latestExcludedTx

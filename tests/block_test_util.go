@@ -162,7 +162,7 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 	}
 	defer chain.Stop()
 	if len(dagFile) > 0 {
-		chain.SetupTxDAGGeneration(dagFile)
+		chain.SetupTxDAGGeneration(dagFile, enableParallel)
 	}
 	validBlocks, err := t.insertBlocks(chain)
 	if err != nil {

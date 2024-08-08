@@ -310,7 +310,7 @@ type BlockChain struct {
 	parallelExecution bool
 	enableTxDAG       bool
 	txDAGWriteCh      chan TxDAGOutputItem
-	txDAGMapping      map[uint64]types.TxDAG
+	txDAGReader       *TxDAGFileReader
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -1107,6 +1107,9 @@ func (bc *BlockChain) stopWithoutSaving() {
 // Stop stops the blockchain service. If any imports are currently in progress
 // it will abort them using the procInterrupt.
 func (bc *BlockChain) Stop() {
+	if bc.txDAGReader != nil {
+		bc.txDAGReader.Close()
+	}
 	bc.stopWithoutSaving()
 
 	// Ensure that the entirety of the state snapshot is journaled to disk.
@@ -2821,19 +2824,27 @@ func (bc *BlockChain) TxDAGEnabled() bool {
 	return bc.enableTxDAG
 }
 
-func (bc *BlockChain) SetupTxDAGGeneration(output string) {
+func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 	log.Info("node enable TxDAG feature", "output", output)
 	bc.enableTxDAG = true
 	if len(output) == 0 {
 		return
 	}
 	// read TxDAG file, and cache in mem
-	var err error
-	bc.txDAGMapping, err = readTxDAGMappingFromFile(output)
-	if err != nil {
-		log.Error("read TxDAG err", "err", err)
+	if readFile {
+		var err error
+		bc.txDAGReader, err = NewTxDAGFileReader(output)
+		if err != nil {
+			log.Error("read TxDAG err", "err", err)
+		}
+		// startup with latest block
+		curHeader := bc.CurrentHeader()
+		if curHeader != nil {
+			bc.txDAGReader.TxDAG(curHeader.Number.Uint64())
+		}
+		log.Info("load TxDAG from file", "output", output, "latest", bc.txDAGReader.Latest())
+		return
 	}
-	log.Info("load TxDAG from file", "output", output, "count", len(bc.txDAGMapping))
 
 	// write handler
 	go func() {
@@ -2877,34 +2888,98 @@ func writeTxDAGToFile(writeHandle *os.File, item TxDAGOutputItem) error {
 	return err
 }
 
-// TODO(galaio): support load with segments, every segment 100000 blocks?
-func readTxDAGMappingFromFile(output string) (map[uint64]types.TxDAG, error) {
+const TxDAGCacheSize = 200000
+
+type TxDAGFileReader struct {
+	file    *os.File
+	scanner *bufio.Scanner
+	cache   map[uint64]types.TxDAG
+	latest  uint64
+	lock    sync.RWMutex
+}
+
+func NewTxDAGFileReader(output string) (*TxDAGFileReader, error) {
 	file, err := os.Open(output)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-
-	mapping := make(map[uint64]types.TxDAG)
 	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		tokens := strings.Split(scanner.Text(), ",")
-		if len(tokens) != 2 {
-			return nil, errors.New("txDAG output contain wrong size")
-		}
-		num, err := strconv.Atoi(tokens[0])
-		if err != nil {
-			return nil, err
-		}
-		enc, err := hex.DecodeString(tokens[1])
-		if err != nil {
-			return nil, err
-		}
-		txDAG, err := types.DecodeTxDAG(enc)
-		if err != nil {
-			return nil, err
-		}
-		mapping[uint64(num)] = txDAG
+	return &TxDAGFileReader{
+		file:    file,
+		scanner: scanner,
+	}, nil
+}
+
+func (t *TxDAGFileReader) Close() {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.closeFile()
+}
+
+func (t *TxDAGFileReader) closeFile() {
+	if t.scanner != nil {
+		t.scanner = nil
 	}
-	return mapping, nil
+	if t.file != nil {
+		t.file.Close()
+		t.file = nil
+	}
+}
+
+func (t *TxDAGFileReader) Latest() uint64 {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return t.latest
+}
+
+func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	if t.cache != nil && t.latest >= expect {
+		return t.cache[expect]
+	}
+
+	t.cache = make(map[uint64]types.TxDAG, TxDAGCacheSize)
+	counter := 0
+	for t.scanner != nil && t.scanner.Scan() {
+		if counter > TxDAGCacheSize {
+			break
+		}
+		num, dag, err := readTxDAGItemFromLine(t.scanner.Text())
+		if err != nil {
+			log.Error("query TxDAG error found and read aborted", "err", err)
+			t.closeFile()
+			break
+		}
+		// skip lower blocks
+		if expect > num {
+			continue
+		}
+		t.cache[num] = dag
+		t.latest = num
+		counter++
+	}
+
+	return t.cache[expect]
+}
+
+func readTxDAGItemFromLine(line string) (uint64, types.TxDAG, error) {
+	tokens := strings.Split(line, ",")
+	if len(tokens) != 2 {
+		return 0, nil, errors.New("txDAG output contain wrong size")
+	}
+	num, err := strconv.Atoi(tokens[0])
+	if err != nil {
+		return 0, nil, err
+	}
+	enc, err := hex.DecodeString(tokens[1])
+	if err != nil {
+		return 0, nil, err
+	}
+	txDAG, err := types.DecodeTxDAG(enc)
+	if err != nil {
+		return 0, nil, err
+	}
+	return uint64(num), txDAG, nil
 }

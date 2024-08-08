@@ -2488,7 +2488,6 @@ func (s *StateDB) FinaliseRWSet() error {
 
 	// reset stateDB
 	s.rwSet = nil
-	s.stat = nil
 	return s.mvStates.FulfillRWSet(rwSet, stat)
 }
 
@@ -2562,7 +2561,7 @@ func (s *StateDB) RecordSystemTxRWSet(index int) {
 	}
 	s.mvStates.FulfillRWSet(types.NewRWSet(types.StateVersion{
 		TxIndex: index,
-	}).WithExcludedTxFlag(), types.NewExeStat(index).WithSerialFlag())
+	}).WithExcludedTxFlag(), types.NewExeStat(index).WithExcludedTxFlag())
 }
 
 // copySet returns a deep-copied set.

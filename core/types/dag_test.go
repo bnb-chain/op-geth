@@ -41,7 +41,7 @@ func TestEvaluateTxDAG(t *testing.T) {
 		stats[i].costTime = time.Duration(i)
 		txDep := dag.TxDep(i)
 		if txDep.CheckFlag(NonDependentRelFlag) {
-			stats[i].WithSerialFlag()
+			stats[i].WithExcludedTxFlag()
 		}
 	}
 	EvaluateTxDAGPerformance(dag, stats)

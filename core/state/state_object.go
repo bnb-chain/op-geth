@@ -334,7 +334,9 @@ func (s *stateObject) GetState(key common.Hash) common.Hash {
 		if s.db.parallel.kvReadsInSlot[addr] == nil {
 			s.db.parallel.kvReadsInSlot[addr] = newStorage(false)
 		}
-		s.db.parallel.kvReadsInSlot[addr].StoreValue(key, result)
+		if _, ok := s.db.parallel.kvReadsInSlot[addr].GetValue(key); !ok {
+			s.db.parallel.kvReadsInSlot[addr].StoreValue(key, result)
+		}
 	}
 	return result
 }

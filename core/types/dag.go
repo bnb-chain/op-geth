@@ -25,6 +25,7 @@ var (
 	// ExcludedTxFlag indicates that the tx is excluded from TxDAG, user should execute them in sequence.
 	// These excluded transactions should be consecutive in the head or tail.
 	ExcludedTxFlag uint8 = 0x02
+	TxDepFlagMask        = NonDependentRelFlag | ExcludedTxFlag
 )
 
 type TxDAG interface {
@@ -110,8 +111,35 @@ func ValidatePlainTxDAG(d TxDAG, txCnt int) error {
 				return fmt.Errorf("PlainTxDAG contains unordered dependency, tx: %v", i)
 			}
 		}
+		if dep.Flags != nil && *dep.Flags & ^TxDepFlagMask > 0 {
+			return fmt.Errorf("PlainTxDAG contains unknown flags, flags: %v", *dep.Flags)
+		}
 	}
 	return nil
+}
+
+func TxDependency(d TxDAG, i int) []uint64 {
+	if d == nil || i < 0 || i >= d.TxCount() {
+		return []uint64{}
+	}
+	dep := d.TxDep(i)
+	if dep.CheckFlag(ExcludedTxFlag) {
+		txs := make([]uint64, 0, i)
+		for j := 0; j < i; j++ {
+			txs = append(txs, uint64(j))
+		}
+		return txs
+	}
+	if dep.CheckFlag(NonDependentRelFlag) {
+		txs := make([]uint64, 0, d.TxCount()-dep.Count())
+		for j := 0; j < i; j++ {
+			if !dep.Exist(j) && j != i {
+				txs = append(txs, uint64(j))
+			}
+		}
+		return txs
+	}
+	return dep.TxIndexes
 }
 
 // EmptyTxDAG indicate that execute txs in sequence
@@ -438,7 +466,7 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 
 	totalTxMeter.Mark(int64(txCount))
 	for i, path := range paths {
-		if stats[i].mustSerial {
+		if stats[i].excludedTx {
 			continue
 		}
 		if len(path) <= 1 {
@@ -499,7 +527,7 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 		sPath []int
 	)
 	for i, stat := range stats {
-		if stat.mustSerial {
+		if stat.excludedTx {
 			continue
 		}
 		sPath = append(sPath, i)
@@ -512,13 +540,15 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 
 // travelTxDAGTargetPath will print target execution path
 func travelTxDAGTargetPath(deps []TxDep, from uint64) []uint64 {
-	queue := make([]uint64, 0, len(deps))
-	path := make([]uint64, 0, len(deps))
+	var (
+		queue []uint64
+		path  []uint64
+	)
 
 	queue = append(queue, from)
 	path = append(path, from)
 	for len(queue) > 0 {
-		next := make([]uint64, 0, len(deps))
+		var next []uint64
 		for _, i := range queue {
 			for _, dep := range deps[i].TxIndexes {
 				if !slices.Contains(path, dep) {
@@ -542,7 +572,7 @@ type ExeStat struct {
 	costTime  time.Duration
 
 	// some flags
-	mustSerial bool
+	excludedTx bool
 }
 
 func NewExeStat(txIndex int) *ExeStat {
@@ -561,8 +591,8 @@ func (s *ExeStat) Done() *ExeStat {
 	return s
 }
 
-func (s *ExeStat) WithSerialFlag() *ExeStat {
-	s.mustSerial = true
+func (s *ExeStat) WithExcludedTxFlag() *ExeStat {
+	s.excludedTx = true
 	return s
 }
 

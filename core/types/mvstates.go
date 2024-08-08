@@ -362,8 +362,13 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 			checkRWSetInconsistent(index, k, rwSet.readSet, rwSet.writeSet)
 		}
 	}
-	s.resolveDepsCache(index, rwSet)
 	s.rwSets[index] = rwSet
+	// async resolve dependency
+	go func() {
+		s.lock.Lock()
+		defer s.lock.Unlock()
+		s.resolveDepsCache(index, rwSet)
+	}()
 	return nil
 }
 
@@ -473,7 +478,7 @@ func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (Tx
 			txDAG.TxDeps[i].TxIndexes = deps
 			continue
 		}
-		// if tx deps larger than half of txs, then convert to relation1
+		// if tx deps larger than half of txs, then convert with NonDependentRelFlag
 		txDAG.TxDeps[i].SetFlag(NonDependentRelFlag)
 		for j := uint64(0); j < uint64(txCnt); j++ {
 			if !slices.Contains(deps, j) && j != uint64(i) {

@@ -200,7 +200,7 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 	}
 
 	for p.slots+numSlots(bundle) > p.config.GlobalSlots {
-		p.drop()
+		p.drop(bundle)
 	}
 	p.bundles[hash] = bundle
 	heap.Push(&p.bundleHeap, bundle)
@@ -397,14 +397,24 @@ func (p *BundlePool) deleteBundle(hash common.Hash) {
 }
 
 // drop removes the bundle with the lowest gas price from the pool.
-func (p *BundlePool) drop() {
+func (p *BundlePool) drop(bundle *types.Bundle) {
+	dropBundles := make([]*types.Bundle, 0, numSlots(bundle))
+	dropSlots := uint64(0)
 	for len(p.bundleHeap) > 0 {
+		if dropSlots >= numSlots(bundle) {
+			for _, dropBundle := range dropBundles {
+				p.deleteBundle(dropBundle.Hash())
+			}
+			break
+		}
 		// Pop the bundle with the lowest gas price
 		// the min element in the heap may not exist in the pool as it may be pruned
 		leastPriceBundleHash := heap.Pop(&p.bundleHeap).(*types.Bundle).Hash()
-		if _, ok := p.bundles[leastPriceBundleHash]; ok {
-			p.deleteBundle(leastPriceBundleHash)
-			break
+		leastPriceBundle, _ := p.bundles[leastPriceBundleHash]
+		if leastPriceBundle != nil && leastPriceBundle.Price.Cmp(bundle.Price) < 0 {
+			dropBundles = append(dropBundles, leastPriceBundle)
+			dropSlots = dropSlots + numSlots(leastPriceBundle)
+			continue
 		}
 	}
 }

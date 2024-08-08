@@ -417,7 +417,9 @@ func (s *ParallelStateDB) GetBalance(addr common.Address) *uint256.Int {
 		}
 		balance = blc
 	}
-	s.parallel.balanceReadsInSlot[addr] = balance
+	if _, ok := s.parallel.balanceReadsInSlot[addr]; !ok {
+		s.parallel.balanceReadsInSlot[addr] = balance
+	}
 
 	// fixup dirties
 	if dirtyObj != nil && dirtyObj.Balance() != balance {
@@ -462,8 +464,9 @@ func (s *ParallelStateDB) GetNonce(addr common.Address) uint64 {
 		}
 		nonce = nc
 	}
-	s.parallel.nonceReadsInSlot[addr] = nonce
-
+	if _, ok := s.parallel.nonceReadsInSlot[addr]; !ok {
+		s.parallel.nonceReadsInSlot[addr] = nonce
+	}
 	// fixup dirties
 	if dirtyObj != nil && dirtyObj.Nonce() < nonce {
 		dirtyObj.setNonce(nonce)
@@ -503,8 +506,9 @@ func (s *ParallelStateDB) GetCode(addr common.Address) []byte {
 			code = object.Code()
 		}
 	}
-	s.parallel.codeReadsInSlot[addr] = code
-
+	if _, ok := s.parallel.codeReadsInSlot[addr]; !ok {
+		s.parallel.codeReadsInSlot[addr] = code
+	}
 	// fixup dirties
 	if dirtyObj != nil && !bytes.Equal(dirtyObj.code, code) {
 		dirtyObj.code = code
@@ -550,7 +554,9 @@ func (s *ParallelStateDB) GetCodeSize(addr common.Address) int {
 		}
 		code = cc
 	}
-	s.parallel.codeReadsInSlot[addr] = code
+	if _, ok := s.parallel.codeReadsInSlot[addr]; !ok {
+		s.parallel.codeReadsInSlot[addr] = code
+	}
 	// fixup dirties
 	if dirtyObj != nil {
 		if !bytes.Equal(dirtyObj.code, code) {
@@ -597,7 +603,9 @@ func (s *ParallelStateDB) GetCodeHash(addr common.Address) common.Hash {
 			codeHash = common.BytesToHash(object.CodeHash())
 		}
 	}
-	s.parallel.codeHashReadsInSlot[addr] = codeHash
+	if _, ok := s.parallel.codeHashReadsInSlot[addr]; !ok {
+		s.parallel.codeHashReadsInSlot[addr] = codeHash
+	}
 
 	// fill slots in dirty if exist.
 	// A case for this:
@@ -702,6 +710,10 @@ func (s *ParallelStateDB) GetState(addr common.Address, hash common.Hash) common
 	if s.parallel.kvReadsInSlot[addr] == nil {
 		s.parallel.kvReadsInSlot[addr] = newStorage(false)
 	}
+	if _, ok := s.parallel.kvReadsInSlot[addr].GetValue(hash); !ok {
+		s.parallel.kvReadsInSlot[addr].StoreValue(hash, value) // update cache
+	}
+
 	return value
 }
 
@@ -734,8 +746,9 @@ func (s *ParallelStateDB) GetCommittedState(addr common.Address, hash common.Has
 	if s.parallel.kvReadsInSlot[addr] == nil {
 		s.parallel.kvReadsInSlot[addr] = newStorage(false)
 	}
-	s.parallel.kvReadsInSlot[addr].StoreValue(hash, value) // update cache
-
+	if _, ok := s.parallel.kvReadsInSlot[addr].GetValue(hash); !ok {
+		s.parallel.kvReadsInSlot[addr].StoreValue(hash, value) // update cache
+	}
 	return value
 }
 

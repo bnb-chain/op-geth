@@ -310,6 +310,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		trie:                      tr,
 		originalRoot:              root,
 		snaps:                     snaps,
+		snapDestructs:             make(map[common.Address]struct{}),
 		accounts:                  make(map[common.Hash][]byte),
 		storages:                  make(map[common.Hash]map[common.Hash][]byte),
 		accountsOrigin:            make(map[common.Address][]byte),
@@ -345,6 +346,7 @@ func NewStateDBByTrie(tr Trie, db Database, snaps *snapshot.Tree) (*StateDB, err
 		trie:                 tr,
 		originalRoot:         tr.Hash(),
 		snaps:                snaps,
+		snapDestructs:        make(map[common.Address]struct{}),
 		accounts:             make(map[common.Hash][]byte),
 		storages:             make(map[common.Hash]map[common.Hash][]byte),
 		accountsOrigin:       make(map[common.Address][]byte),
@@ -685,7 +687,7 @@ func (s *StateDB) SetStorage(addr common.Address, storage map[common.Hash]common
 	//
 	// TODO(rjl493456442) this function should only be supported by 'unwritable'
 	// state and all mutations made should all be discarded afterwards.
-	if _, ok := s.getStateObjectsDegetstruct(addr); !ok {
+	if _, ok := s.getStateObjectsDestruct(addr); !ok {
 		s.setStateObjectsDestruct(addr, nil)
 	}
 	stateObject := s.getOrNewStateObject(addr)
@@ -1031,7 +1033,7 @@ func (s *StateDB) createObject(addr common.Address) (newobj *stateObject) {
 		// be done here, otherwise the destruction event of "original account"
 		// will be lost.
 		s.stateObjectDestructLock.Lock()
-		_, prevdestruct := s.getStateObjectsDegetstruct(prev.address)
+		_, prevdestruct := s.getStateObjectsDestruct(prev.address)
 		if !prevdestruct {
 			s.setStateObjectsDestruct(prev.address, prev.origin)
 		}
@@ -1110,6 +1112,7 @@ func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 		db:                        s.db,
 		trie:                      s.db.CopyTrie(s.trie),
 		originalRoot:              s.originalRoot,
+		snapDestructs:             make(map[common.Address]struct{}),
 		accounts:                  make(map[common.Hash][]byte),
 		storages:                  make(map[common.Hash]map[common.Hash][]byte),
 		accountsOrigin:            make(map[common.Address][]byte),
@@ -1462,6 +1465,15 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 		return true
 	})
 	s.parallelStateAccessLock.Unlock()
+
+	// deep copy needed
+	state.snapDestructs = addressToStructPool.Get().(map[common.Address]struct{})
+	s.snapParallelLock.RLock()
+	for k, v := range s.snapDestructs {
+		state.snapDestructs[k] = v
+	}
+	s.snapParallelLock.RUnlock()
+
 	if s.snaps != nil {
 		// In order for the miner to be able to use and make additions
 		// to the snapshot tree, we need to copy that as well.
@@ -1469,13 +1481,6 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 		// and force the miner to operate trie-backed only
 		state.snaps = s.snaps
 		state.snap = s.snap
-		// deep copy needed
-		state.snapDestructs = addressToStructPool.Get().(map[common.Address]struct{})
-		s.snapParallelLock.RLock()
-		for k, v := range s.snapDestructs {
-			state.snapDestructs[k] = v
-		}
-		s.snapParallelLock.RUnlock()
 		// snapAccounts is useless in SlotDB, comment out and remove later
 		// state.snapAccounts = make(map[common.Address][]byte) // snapAccountPool.Get().(map[common.Address][]byte)
 		// for k, v := range s.snapAccounts {
@@ -2491,7 +2496,7 @@ func (s *StateDB) FinaliseRWSet() error {
 	return s.mvStates.FulfillRWSet(rwSet, stat)
 }
 
-func (s *StateDB) getStateObjectsDegetstruct(addr common.Address) (*types.StateAccount, bool) {
+func (s *StateDB) getStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool) {
 	if !(s.isParallel && s.parallel.isSlotDB) {
 		if acc, ok := s.stateObjectsDestructDirty[addr]; ok {
 			return acc, ok
@@ -2825,17 +2830,12 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 		s.accessList = slotDb.accessList.Copy()
 	}
 
-	if slotDb.snaps != nil {
-		for k := range slotDb.snapDestructs {
-			// There could be a race condition for parallel transaction execution
-			// One transaction add balance 0 to an empty address, will delete it(delete empty is enabled).
-			// While another concurrent transaction could add a none-zero balance to it, make it not empty
-			// We fixed it by add an addr state read record for add balance 0
-			s.snapParallelLock.Lock()
-			s.snapDestructs[k] = struct{}{}
-			s.snapParallelLock.Unlock()
-		}
+	for k := range slotDb.snapDestructs {
+		s.snapParallelLock.Lock()
+		s.snapDestructs[k] = struct{}{}
+		s.snapParallelLock.Unlock()
 	}
+
 	s.SetTxContext(slotDb.thash, slotDb.txIndex)
 	return s
 }

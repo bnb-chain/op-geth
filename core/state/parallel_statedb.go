@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -99,8 +100,7 @@ func hasKvConflict(slotDB *ParallelStateDB, addr common.Address, key common.Hash
 		log.Debug("hasKvConflict is invalid", "addr", addr,
 			"key", key, "valSlot", val,
 			"valMain", valMain, "SlotIndex", slotDB.parallel.SlotIndex,
-			"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex)
-
+			"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex, "mainDB.TxIndex", mainDB.TxIndex())
 		return true // return false, Range will be terminated.
 	}
 	return false
@@ -217,24 +217,50 @@ func (s *ParallelStateDB) getStateObjectNoSlot(addr common.Address) *stateObject
 //	b.if it is existed in SlotDB, `revert` will recover to the `prev` in SlotDB
 //	c.as `snapDestructs` it is the same
 func (s *ParallelStateDB) createObject(addr common.Address) (newobj *stateObject) {
-	prev := s.parallel.dirtiedStateObjectsInSlot[addr]
-	// TODO-dav: check
+	var prev *stateObject = nil
+	readFromDB := false
+	prevdestruct := false
+	if object, ok := s.parallel.dirtiedStateObjectsInSlot[addr]; ok {
+		prev = object
+	} else {
+		object, ok = s.getStateObjectFromUnconfirmedDB(addr)
+		if ok {
+			prev = object
+			readFromDB = true
+		} else {
+			object = s.getDeletedStateObject(addr) // try to get from base db
+			if object != nil {
+				prev = object
+				readFromDB = true
+			}
+		}
+	}
 	// There can be tx0 create an obj at addr0, tx1 destruct it, and tx2 recreate it use create2.
 	// so if tx0 is finalized, and tx1 is unconfirmed, we have to check the states of unconfirmed, otherwise there
 	// will be wrong behavior that we recreate an object that is already there. see. test "TestDeleteThenCreate"
-	var prevdestruct bool
 
-	if s.snap != nil && prev != nil {
-		s.snapParallelLock.Lock()
-		_, prevdestruct = s.snapDestructs[prev.address]
-		s.parallel.addrSnapDestructsReadsInSlot[addr] = prevdestruct
+	if prev != nil {
+		// check slot
+		_, prevdestruct = s.getStateObjectsDestruct(prev.address)
+
 		if !prevdestruct {
-			// To destroy the previous trie node first and update the trie tree
-			// with the new object on block commit.
-			s.snapDestructs[prev.address] = struct{}{}
+			// set Destruct so later accesses in this transaction will not touch the obsoleted state.
+			s.setStateObjectsDestruct(prev.address, prev.origin)
+			if readFromDB {
+				// check nonSlot
+				s.snapParallelLock.RLock()
+				_, prevdestruct = s.snapDestructs[prev.address]
+				s.parallel.addrSnapDestructsReadsInSlot[addr] = prevdestruct
+				s.snapParallelLock.RUnlock()
+			}
+			if !prevdestruct {
+				s.snapParallelLock.Lock()
+				s.snapDestructs[prev.address] = struct{}{}
+				s.snapParallelLock.Unlock()
+			}
 		}
-		s.snapParallelLock.Unlock()
 	}
+
 	newobj = newObject(s, s.isParallel, addr, nil)
 	newobj.setNonce(0) // sets the object to dirty
 	if prev == nil {
@@ -1459,7 +1485,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	}
 	// snapshot destructs check
 	for addr, destructRead := range slotDB.parallel.addrSnapDestructsReadsInSlot {
-		mainObj := mainDB.getStateObjectNoUpdate(addr)
+		mainObj := mainDB.getDeletedStateObjectNoUpdate(addr)
 		if mainObj == nil {
 			log.Debug("IsSlotDBReadsValid snapshot destructs read invalid, address should exist",
 				"addr", addr, "destruct", destructRead,
@@ -1494,6 +1520,12 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 	addressesToPrefetch := make([][]byte, 0, len(s.journal.dirties))
 
 	if s.TxIndex() == 0 && len(mainDB.journal.dirties) > 0 {
+		mainDB.stateObjectDestructLock.Lock()
+		for addr, acc := range mainDB.stateObjectsDestructDirty {
+			mainDB.stateObjectsDestruct[addr] = acc
+		}
+		mainDB.stateObjectsDestructDirty = make(map[common.Address]*types.StateAccount)
+		mainDB.stateObjectDestructLock.Unlock()
 		for addr := range mainDB.journal.dirties {
 			var obj *stateObject
 			var exist bool

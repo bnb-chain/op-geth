@@ -84,6 +84,10 @@ func hasKvConflict(slotDB *ParallelStateDB, addr common.Address, key common.Hash
 	mainDB := slotDB.parallel.baseStateDB
 
 	if isStage2 { // update slotDB's unconfirmed DB list and try
+		if slotDB.parallel.useDAG {
+			// DAG never reads from unconfirmedDB, skip check.
+			return false
+		}
 		if valUnconfirm, ok := slotDB.getKVFromUnconfirmedDB(addr, key); ok {
 			if !bytes.Equal(val.Bytes(), valUnconfirm.Bytes()) {
 				log.Debug("IsSlotDBReadsValid KV read is invalid in unconfirmed", "addr", addr,
@@ -124,14 +128,14 @@ func StartKvCheckLoop() {
 // NewSlotDB creates a new State DB based on the provided StateDB.
 // With parallel, each execution slot would have its own StateDB.
 // This method must be called after the baseDB call PrepareParallel()
-func NewSlotDB(db *StateDB, txIndex int, baseTxIndex int, unconfirmedDBs *sync.Map /*map[int]*ParallelStateDB*/) *ParallelStateDB {
+func NewSlotDB(db *StateDB, txIndex int, baseTxIndex int, unconfirmedDBs *sync.Map, useDAG bool) *ParallelStateDB {
 	slotDB := db.CopyForSlot()
 	slotDB.txIndex = txIndex
 	slotDB.originalRoot = db.originalRoot
 	slotDB.parallel.baseStateDB = db
 	slotDB.parallel.baseTxIndex = baseTxIndex
 	slotDB.parallel.unconfirmedDBs = unconfirmedDBs
-
+	slotDB.parallel.useDAG = useDAG
 	return slotDB
 }
 
@@ -304,7 +308,7 @@ func (s *ParallelStateDB) getDeletedStateObject(addr common.Address) *stateObjec
 }
 
 // GetOrNewStateObject retrieves a state object or create a new state object if nil.
-// dirtyInSlot -> Unconfirmed DB -> main DB -> snapshot, no? create one
+// dirtyInSlot -> Unconfirmed DB (if not DAG) -> main DB -> snapshot, no? create one
 func (s *ParallelStateDB) GetOrNewStateObject(addr common.Address) *stateObject {
 	var object *stateObject
 	var ok bool
@@ -1089,6 +1093,10 @@ func (s *ParallelStateDB) SubRefund(gas uint64) {
 //
 // Access from the unconfirmed DB with range&priority:  txIndex -1(previous tx) -> baseTxIndex + 1
 func (s *ParallelStateDB) getBalanceFromUnconfirmedDB(addr common.Address) *uint256.Int {
+	if s.parallel.useDAG {
+		// DAG never reads from unconfirmedDB, skip check.
+		return nil
+	}
 	for i := s.txIndex - 1; i >= 0 && i > s.BaseTxIndex(); i-- {
 		db_, ok := s.parallel.unconfirmedDBs.Load(i)
 		if !ok {
@@ -1119,6 +1127,11 @@ func (s *ParallelStateDB) getBalanceFromUnconfirmedDB(addr common.Address) *uint
 
 // Similar to getBalanceFromUnconfirmedDB
 func (s *ParallelStateDB) getNonceFromUnconfirmedDB(addr common.Address) (uint64, bool) {
+	if s.parallel.useDAG {
+		// DAG never reads from unconfirmedDB, skip check.
+		return 0, false
+	}
+
 	for i := s.txIndex - 1; i > s.BaseTxIndex(); i-- {
 		db_, ok := s.parallel.unconfirmedDBs.Load(i)
 		if !ok {
@@ -1158,6 +1171,10 @@ func (s *ParallelStateDB) getNonceFromUnconfirmedDB(addr common.Address) (uint64
 // Similar to getBalanceFromUnconfirmedDB
 // It is not only for code, but also codeHash and codeSize, we return the *stateObject for convenience.
 func (s *ParallelStateDB) getCodeFromUnconfirmedDB(addr common.Address) ([]byte, bool) {
+	if s.parallel.useDAG {
+		// DAG never reads from unconfirmedDB, skip check.
+		return nil, false
+	}
 	for i := s.txIndex - 1; i > s.BaseTxIndex(); i-- {
 		db_, ok := s.parallel.unconfirmedDBs.Load(i)
 		if !ok {
@@ -1196,6 +1213,10 @@ func (s *ParallelStateDB) getCodeFromUnconfirmedDB(addr common.Address) ([]byte,
 // Similar to getCodeFromUnconfirmedDB
 // but differ when address is deleted or not exist
 func (s *ParallelStateDB) getCodeHashFromUnconfirmedDB(addr common.Address) (common.Hash, bool) {
+	if s.parallel.useDAG {
+		// DAG never reads from unconfirmedDB, skip check.
+		return common.Hash{}, false
+	}
 	for i := s.txIndex - 1; i > s.BaseTxIndex(); i-- {
 		db_, ok := s.parallel.unconfirmedDBs.Load(i)
 		if !ok {
@@ -1236,6 +1257,10 @@ func (s *ParallelStateDB) getCodeHashFromUnconfirmedDB(addr common.Address) (com
 // Since the unconfirmed DB should have done Finalise() with `deleteEmptyObjects = true`
 // If the dirty address is empty or suicided, it will be marked as deleted, so we only need to return `deleted` or not.
 func (s *ParallelStateDB) getAddrStateFromUnconfirmedDB(addr common.Address, testEmpty bool) (bool, bool) {
+	if s.parallel.useDAG {
+		// DAG never reads from unconfirmedDB, skip check.
+		return false, false
+	}
 	// check the unconfirmed DB with range:  baseTxIndex -> txIndex -1(previous tx)
 	for i := s.txIndex - 1; i > s.BaseTxIndex(); i-- {
 		db_, ok := s.parallel.unconfirmedDBs.Load(i)
@@ -1265,6 +1290,10 @@ func (s *ParallelStateDB) getAddrStateFromUnconfirmedDB(addr common.Address, tes
 }
 
 func (s *ParallelStateDB) getKVFromUnconfirmedDB(addr common.Address, key common.Hash) (common.Hash, bool) {
+	if s.parallel.useDAG {
+		// DAG never reads from unconfirmedDB, skip check.
+		return common.Hash{}, false
+	}
 	// check the unconfirmed DB with range:  baseTxIndex -> txIndex -1(previous tx)
 	for i := s.txIndex - 1; i > s.BaseTxIndex(); i-- {
 		db_, ok := s.parallel.unconfirmedDBs.Load(i)
@@ -1292,6 +1321,10 @@ func (s *ParallelStateDB) GetStateObjectFromUnconfirmedDB(addr common.Address) (
 }
 
 func (s *ParallelStateDB) getStateObjectFromUnconfirmedDB(addr common.Address) (*stateObject, bool) {
+	if s.parallel.useDAG {
+		// DAG never reads from unconfirmedDB, skip check.
+		return nil, false
+	}
 	// check the unconfirmed DB with range:  baseTxIndex -> txIndex -1(previous tx)
 	for i := s.txIndex - 1; i > s.BaseTxIndex(); i-- {
 		db_, ok := s.parallel.unconfirmedDBs.Load(i)
@@ -1317,6 +1350,10 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	// for nonce
 	for addr, nonceSlot := range slotDB.parallel.nonceReadsInSlot {
 		if isStage2 { // update slotDB's unconfirmed DB list and try
+			if slotDB.parallel.useDAG {
+				// DAG never reads from unconfirmedDB, skip check.
+				return false
+			}
 			if nonceUnconfirm, ok := slotDB.getNonceFromUnconfirmedDB(addr); ok {
 				if nonceSlot != nonceUnconfirm {
 					log.Debug("IsSlotDBReadsValid nonce read is invalid in unconfirmed", "addr", addr,
@@ -1343,6 +1380,10 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	// balance
 	for addr, balanceSlot := range slotDB.parallel.balanceReadsInSlot {
 		if isStage2 { // update slotDB's unconfirmed DB list and try
+			if slotDB.parallel.useDAG {
+				// DAG never reads from unconfirmedDB, skip check.
+				return false
+			}
 			if balanceUnconfirm := slotDB.getBalanceFromUnconfirmedDB(addr); balanceUnconfirm != nil {
 				if balanceSlot.Cmp(balanceUnconfirm) == 0 {
 					continue

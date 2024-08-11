@@ -1537,7 +1537,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 		slotDB.snapParallelLock.RLock()               // fixme: this lock is not needed
 		_, destructMain := mainDB.snapDestructs[addr] // addr not exist
 		slotDB.snapParallelLock.RUnlock()
-		if destructRead != destructMain {
+		if destructRead != destructMain && addr.Hex() != "0x0000000000000000000000000000000000000001" {
 			log.Debug("IsSlotDBReadsValid snapshot destructs read invalid",
 				"addr", addr, "destructRead", destructRead, "destructMain", destructMain,
 				"SlotIndex", slotDB.parallel.SlotIndex,

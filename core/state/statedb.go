@@ -173,6 +173,7 @@ type ParallelState struct {
 
 	// we may need to redo for some specific reasons, like we read the wrong state and need to panic in sequential mode in SubRefund
 	needsRedo bool
+	useDAG    bool
 }
 
 // StateDB structs within the ethereum protocol are used to store anything

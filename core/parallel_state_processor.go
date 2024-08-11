@@ -108,6 +108,7 @@ type ParallelTxRequest struct {
 	executedNum     atomic.Int32
 	retryNum        int32
 	conflictIndex   atomic.Int32
+	useDAG          bool
 }
 
 // to create and start the execution slot goroutines
@@ -275,7 +276,7 @@ func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxR
 		return nil
 	}
 	execNum := txReq.executedNum.Add(1)
-	slotDB := state.NewSlotDB(txReq.baseStateDB, txReq.txIndex, int(mIndex), p.unconfirmedDBs)
+	slotDB := state.NewSlotDB(txReq.baseStateDB, txReq.txIndex, int(mIndex), p.unconfirmedDBs, txReq.useDAG)
 	blockContext := NewEVMBlockContext(txReq.block.Header(), p.bc, nil, p.config, slotDB) // can share blockContext within a block for efficiency
 	txContext := NewEVMTxContext(txReq.msg)
 	vmenv := vm.NewEVM(blockContext, txContext, slotDB, p.config, txReq.vmConfig)
@@ -786,6 +787,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 			systemAddrRedo:  false, // set to true, when systemAddr access is detected.
 			runnable:        1,     // 0: not runnable, 1: runnable
 			retryNum:        0,
+			useDAG:          txDAG != nil,
 		}
 		txReq.executedNum.Store(0)
 		txReq.conflictIndex.Store(-2)

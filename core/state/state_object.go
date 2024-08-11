@@ -362,17 +362,17 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		//			      Tx2 recreate account@addr2, setState(key0)  	-- executing
 		//			      TX2 GetState(addr2, key1) ---
 		//			 key1 is never set after recurrsect, and should not return state in trie as it destructed in unconfirmed
-		// TODO - dav: do we need try storages from unconfirmedDB? - currently not because conflict detection need it for get from mainDB.
-		obj, exist := s.dbItf.GetStateObjectFromUnconfirmedDB(s.address)
-		if exist {
-			if obj.deleted || obj.selfDestructed {
-				return common.Hash{}
+		if s.db.parallel.useDAG != true {
+			obj, exist := s.dbItf.GetStateObjectFromUnconfirmedDB(s.address)
+			if exist {
+				if obj.deleted || obj.selfDestructed {
+					return common.Hash{}
+				}
 			}
 		}
-
 		// also test whether the object is in mainDB and deleted.
 		pdb := s.db.parallel.baseStateDB
-		obj, exist = pdb.getStateObjectFromStateObjects(s.address)
+		obj, exist := pdb.getStateObjectFromStateObjects(s.address)
 		if exist {
 			if obj.deleted || obj.selfDestructed {
 				return common.Hash{}

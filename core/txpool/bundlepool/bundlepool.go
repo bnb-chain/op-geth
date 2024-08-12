@@ -175,8 +175,10 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if price.Cmp(p.minimalBundleGasPrice()) <= 0 && p.slots+numSlots(bundle) > p.config.GlobalSlots {
-		return ErrBundleGasPriceLow
+	if p.slots+numSlots(bundle) > p.config.GlobalSlots {
+		if !p.drop(bundle) {
+			return ErrBundleGasPriceLow
+		}
 	}
 	bundle.Price = price
 
@@ -199,9 +201,6 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 		bundleDeliverAll.Inc(1)
 	}
 
-	for p.slots+numSlots(bundle) > p.config.GlobalSlots {
-		p.drop(bundle)
-	}
 	p.bundles[hash] = bundle
 	heap.Push(&p.bundleHeap, bundle)
 	p.slots += numSlots(bundle)
@@ -397,7 +396,7 @@ func (p *BundlePool) deleteBundle(hash common.Hash) {
 }
 
 // drop removes the bundle with the lowest gas price from the pool.
-func (p *BundlePool) drop(bundle *types.Bundle) {
+func (p *BundlePool) drop(bundle *types.Bundle) bool {
 	dropBundles := make([]*types.Bundle, 0, numSlots(bundle))
 	dropSlots := uint64(0)
 	for len(p.bundleHeap) > 0 {
@@ -405,18 +404,26 @@ func (p *BundlePool) drop(bundle *types.Bundle) {
 			for _, dropBundle := range dropBundles {
 				p.deleteBundle(dropBundle.Hash())
 			}
-			break
+			return true
 		}
 		// Pop the bundle with the lowest gas price
 		// the min element in the heap may not exist in the pool as it may be pruned
 		leastPriceBundleHash := heap.Pop(&p.bundleHeap).(*types.Bundle).Hash()
 		leastPriceBundle, _ := p.bundles[leastPriceBundleHash]
-		if leastPriceBundle != nil && leastPriceBundle.Price.Cmp(bundle.Price) < 0 {
-			dropBundles = append(dropBundles, leastPriceBundle)
-			dropSlots = dropSlots + numSlots(leastPriceBundle)
-			continue
+		if _, ok := p.bundles[leastPriceBundleHash]; ok {
+			if leastPriceBundle.Price.Cmp(bundle.Price) < 0 {
+				dropBundles = append(dropBundles, leastPriceBundle)
+				dropSlots = dropSlots + numSlots(leastPriceBundle)
+				continue
+			} else {
+				for _, dropBundle := range dropBundles {
+					heap.Push(&p.bundleHeap, dropBundle)
+				}
+				return false
+			}
 		}
 	}
+	return false
 }
 
 // minimalBundleGasPrice return the lowest gas price from the pool.

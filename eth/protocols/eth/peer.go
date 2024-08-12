@@ -40,12 +40,12 @@ const (
 	// maxQueuedTxs is the maximum number of transactions to queue up before dropping
 	// older broadcasts.
 	// we need a higher limit to support 10k txs in a block
-	maxQueuedTxs = 65536
+	maxQueuedTxs = 98304
 
 	// maxQueuedTxAnns is the maximum number of transaction announcements to queue up
 	// before dropping older announcements.
 	// we need a higher limit to support 10k txs in a block
-	maxQueuedTxAnns = 65536
+	maxQueuedTxAnns = 98304
 
 	// maxQueuedBlocks is the maximum number of block propagations to queue up before
 	// dropping broadcasts. There's not much point in queueing stale blocks, so a few

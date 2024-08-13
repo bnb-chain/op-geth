@@ -1353,7 +1353,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 		if isStage2 { // update slotDB's unconfirmed DB list and try
 			if slotDB.parallel.useDAG {
 				// DAG never reads from unconfirmedDB, skip check.
-				return false
+				return true
 			}
 			if nonceUnconfirm, ok := slotDB.getNonceFromUnconfirmedDB(addr); ok {
 				if nonceSlot != nonceUnconfirm {
@@ -1384,7 +1384,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 		if isStage2 { // update slotDB's unconfirmed DB list and try
 			if slotDB.parallel.useDAG {
 				// DAG never reads from unconfirmedDB, skip check.
-				return false
+				return true
 			}
 			if balanceUnconfirm := slotDB.getBalanceFromUnconfirmedDB(addr); balanceUnconfirm != nil {
 				if balanceSlot.Cmp(balanceUnconfirm) == 0 {

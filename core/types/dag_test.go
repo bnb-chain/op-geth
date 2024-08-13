@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang/snappy"
+
 	"github.com/cometbft/cometbft/libs/rand"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -147,10 +149,33 @@ func TestMergeTxDAGExecutionPaths_Random(t *testing.T) {
 	require.Equal(t, dag.TxCount(), len(txMap))
 }
 
+func TestTxDAG_Compression(t *testing.T) {
+	dag := mockRandomDAG(10000)
+	enc, err := EncodeTxDAG(dag)
+	require.NoError(t, err)
+	encoded := snappy.Encode(nil, enc)
+	t.Log("enc", len(enc), "compressed", len(encoded), "ratio", 1-(float64(len(encoded))/float64(len(enc))))
+}
+
 func BenchmarkMergeTxDAGExecutionPaths(b *testing.B) {
 	dag := mockRandomDAG(100000)
 	for i := 0; i < b.N; i++ {
 		MergeTxDAGExecutionPaths(dag, 0, uint64(dag.TxCount()-1))
+	}
+}
+
+func BenchmarkTxDAG_Encode(b *testing.B) {
+	dag := mockRandomDAG(10000)
+	for i := 0; i < b.N; i++ {
+		EncodeTxDAG(dag)
+	}
+}
+
+func BenchmarkTxDAG_Decode(b *testing.B) {
+	dag := mockRandomDAG(10000)
+	enc, _ := EncodeTxDAG(dag)
+	for i := 0; i < b.N; i++ {
+		DecodeTxDAG(enc)
 	}
 }
 
@@ -162,7 +187,7 @@ func mockSimpleDAG() TxDAG {
 	dag.TxDeps[3].TxIndexes = []uint64{0}
 	dag.TxDeps[4].TxIndexes = []uint64{0}
 	dag.TxDeps[5].TxIndexes = []uint64{1, 2}
-	dag.TxDeps[6].TxIndexes = []uint64{2, 5}
+	dag.TxDeps[6].TxIndexes = []uint64{5}
 	dag.TxDeps[7].TxIndexes = []uint64{6}
 	dag.TxDeps[8].TxIndexes = []uint64{}
 	dag.TxDeps[9].TxIndexes = []uint64{8}
@@ -219,7 +244,7 @@ func mockSystemTxDAG() TxDAG {
 	dag.TxDeps[3].TxIndexes = []uint64{0}
 	dag.TxDeps[4].TxIndexes = []uint64{0}
 	dag.TxDeps[5].TxIndexes = []uint64{1, 2}
-	dag.TxDeps[6].TxIndexes = []uint64{2, 5}
+	dag.TxDeps[6].TxIndexes = []uint64{5}
 	dag.TxDeps[7].TxIndexes = []uint64{6}
 	dag.TxDeps[8].TxIndexes = []uint64{}
 	dag.TxDeps[9].TxIndexes = []uint64{8}
@@ -236,7 +261,7 @@ func mockSystemTxDAG2() TxDAG {
 	dag.TxDeps[3] = NewTxDep([]uint64{0})
 	dag.TxDeps[4] = NewTxDep([]uint64{0})
 	dag.TxDeps[5] = NewTxDep([]uint64{1, 2})
-	dag.TxDeps[6] = NewTxDep([]uint64{2, 5})
+	dag.TxDeps[6] = NewTxDep([]uint64{5})
 	dag.TxDeps[7] = NewTxDep([]uint64{6})
 	dag.TxDeps[8] = NewTxDep([]uint64{})
 	dag.TxDeps[9] = NewTxDep([]uint64{8})
@@ -253,11 +278,11 @@ func mockSystemTxDAGWithLargeDeps() TxDAG {
 	dag.TxDeps[3].TxIndexes = []uint64{0}
 	dag.TxDeps[4].TxIndexes = []uint64{0}
 	dag.TxDeps[5].TxIndexes = []uint64{1, 2}
-	dag.TxDeps[6].TxIndexes = []uint64{2, 5}
-	dag.TxDeps[7].TxIndexes = []uint64{0, 1, 3, 5, 6}
+	dag.TxDeps[6].TxIndexes = []uint64{5}
+	dag.TxDeps[7].TxIndexes = []uint64{3}
 	dag.TxDeps[8].TxIndexes = []uint64{}
-	//dag.TxDeps[9].TxIndexes = []uint64{0, 1, 2, 3, 4, 8}
-	dag.TxDeps[9] = NewTxDep([]uint64{5, 6, 7, 10, 11}, NonDependentRelFlag)
+	//dag.TxDeps[9].TxIndexes = []uint64{0, 1, 2, 6, 7, 8}
+	dag.TxDeps[9] = NewTxDep([]uint64{3, 4, 5, 10, 11}, NonDependentRelFlag)
 	dag.TxDeps[10] = NewTxDep([]uint64{}, ExcludedTxFlag)
 	dag.TxDeps[11] = NewTxDep([]uint64{}, ExcludedTxFlag)
 	return dag

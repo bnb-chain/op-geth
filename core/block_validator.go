@@ -156,6 +156,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	if ancestorErr != nil {
 		return ancestorErr
 	}
+
 	return nil
 }
 

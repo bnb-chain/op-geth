@@ -31,7 +31,6 @@ type StateDB interface {
 	SubBalance(common.Address, *big.Int)
 	AddBalance(common.Address, *big.Int)
 	GetBalance(common.Address) *big.Int
-	GetBalanceOpCode(common.Address) *big.Int
 
 	GetNonce(common.Address) uint64
 	SetNonce(common.Address, uint64)
@@ -79,10 +78,6 @@ type StateDB interface {
 
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
-
-	ParallelMakeUp(addr common.Address, input []byte)
-
-	// todo -dav : delete following
 	TxIndex() int
 
 	// parallel DAG related

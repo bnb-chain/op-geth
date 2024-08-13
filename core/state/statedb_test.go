@@ -46,7 +46,7 @@ import (
 )
 
 var (
-	systemAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+	testAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
 )
 
 // Tests that updating a state trie does not leak any database writes prior to
@@ -1382,7 +1382,7 @@ func TestSetAndGetBalance(t *testing.T) {
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
 
-	addr := systemAddress
+	addr := testAddress
 	state.SetBalance(addr, big.NewInt(1))
 	state.PrepareForParallel()
 	unconfirmedDBs := new(sync.Map)
@@ -1417,7 +1417,7 @@ func TestSubBalance(t *testing.T) {
 	memDb := rawdb.NewMemoryDatabase()
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
-	addr := systemAddress
+	addr := testAddress
 	state.SetBalance(addr, big.NewInt(2))
 
 	state.PrepareForParallel()
@@ -1452,7 +1452,7 @@ func TestAddBalance(t *testing.T) {
 	memDb := rawdb.NewMemoryDatabase()
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
-	addr := systemAddress
+	addr := testAddress
 	state.SetBalance(addr, big.NewInt(2))
 	state.PrepareForParallel()
 	unconfirmedDBs := new(sync.Map)
@@ -1486,7 +1486,7 @@ func TestEmpty(t *testing.T) {
 	memDb := rawdb.NewMemoryDatabase()
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
-	addr := systemAddress
+	addr := testAddress
 	state.SetBalance(addr, big.NewInt(2))
 	state.PrepareForParallel()
 
@@ -1507,7 +1507,7 @@ func TestExist(t *testing.T) {
 	memDb := rawdb.NewMemoryDatabase()
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
-	addr := systemAddress
+	addr := testAddress
 	state.SetBalance(addr, big.NewInt(2))
 	state.PrepareForParallel()
 	unconfirmedDBs := new(sync.Map)
@@ -1534,7 +1534,7 @@ func TestMergeSlotDB(t *testing.T) {
 
 	newSlotDb := NewSlotDB(state, 0, 0, unconfirmedDBs, false)
 
-	addr := systemAddress
+	addr := testAddress
 	newSlotDb.SetBalance(addr, big.NewInt(2))
 	newSlotDb.SetState(addr, common.BytesToHash([]byte("test key")), common.BytesToHash([]byte("test store")))
 	newSlotDb.SetCode(addr, []byte("test code"))

@@ -18,6 +18,7 @@ package vm
 
 import (
 	"errors"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/params"
@@ -36,7 +37,6 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			current = evm.StateDB.GetState(contract.Address(), slot)
 			cost    = uint64(0)
 		)
-
 		// Check slot presence in the access list
 		if addrPresent, slotPresent := evm.StateDB.SlotInAccessList(contract.Address(), slot); !slotPresent {
 			cost = params.ColdSloadCostEIP2929
@@ -50,6 +50,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			}
 		}
 		value := common.Hash(y.Bytes32())
+
 		if current == value { // noop (1)
 			// EIP 2200 original clause:
 			//		return params.SloadGasEIP2200, nil

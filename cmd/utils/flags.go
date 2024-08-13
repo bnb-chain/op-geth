@@ -2007,11 +2007,11 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(ParallelTxFlag.Name) {
 		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
-		// The best prallel num will be tuned later, we do a simple parallel num set here
+		// The best parallel num will be tuned later, we do a simple parallel num set here
 		numCpu := runtime.NumCPU()
 		var parallelNum int
 		if ctx.IsSet(ParallelTxNumFlag.Name) {
-			// first of all, we use "--parallel.num", but "--parallel.num 0" is not allowed
+			// Use value set by "--parallel.num", and "--parallel.num 0" is not allowed and be set to 1
 			parallelNum = ctx.Int(ParallelTxNumFlag.Name)
 			if parallelNum < 1 {
 				parallelNum = 1
@@ -2021,7 +2021,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		} else if numCpu < 10 {
 			parallelNum = numCpu - 1
 		} else {
-			parallelNum = 8 // we found concurrency 8 is slightly better than 15
+			parallelNum = 8
 		}
 		cfg.ParallelTxNum = parallelNum
 	}

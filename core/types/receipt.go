@@ -18,7 +18,6 @@ package types
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -588,12 +587,4 @@ func (rs Receipts) DeriveFields(config *params.ChainConfig, hash common.Hash, nu
 		}
 	}
 	return nil
-}
-
-// Debug PrettyPrint
-func (r Receipt) PrettyPrint() (string, error) {
-	b, err := r.MarshalJSON()
-	var prettyJSON bytes.Buffer
-	json.Indent(&prettyJSON, b, "", "\t")
-	return prettyJSON.String(), err
 }

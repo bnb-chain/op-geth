@@ -49,7 +49,6 @@ func newJournal() *journal {
 // append inserts a new modification entry to the end of the change journal.
 func (j *journal) append(entry journalEntry) {
 	j.entries = append(j.entries, entry)
-
 	if addr := entry.dirtied(); addr != nil {
 		j.dirties[*addr]++
 	}

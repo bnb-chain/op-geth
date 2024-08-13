@@ -98,7 +98,6 @@ func (s *StateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 	if s.isParallel {
 		// When a state object is stored into s.parallel.stateObjects,
 		// it belongs to base StateDB, it is confirmed and valid.
-		// TODO-dav: remove the lock/unlock?
 		s.parallelStateAccessLock.Lock()
 		s.parallel.stateObjects.StoreStateObject(addr, stateObject)
 		s.parallelStateAccessLock.Unlock()
@@ -121,20 +120,16 @@ func (s *StateDB) deleteStateObj(addr common.Address) {
 // ParallelState is for parallel mode only
 type ParallelState struct {
 	isSlotDB  bool // denotes StateDB is used in slot, we will try to remove it
-	SlotIndex int  // for debug, to be removed
+	SlotIndex int  // for debug
 	// stateObjects holds the state objects in the base slot db
-	// the reason for using stateObjects instead of stateObjects on the outside is
-	// we need a thread safe map to hold state objects since there are many slots will read
-	// state objects from it;
-	// And we will merge all the changes made by the concurrent slot into it.
 	stateObjects *StateObjectSyncMap
 
 	baseStateDB               *StateDB // for parallel mode, there will be a base StateDB in dispatcher routine.
 	baseTxIndex               int      // slotDB is created base on this tx index.
 	dirtiedStateObjectsInSlot map[common.Address]*stateObject
-	unconfirmedDBs            *sync.Map /*map[int]*ParallelStateDB*/ // do unconfirmed reference in same slot.
+	unconfirmedDBs            *sync.Map // do unconfirmed reference in same slot.
 
-	// we will record the read detail for conflict check and
+	// record the read detail for conflict check and
 	// the changed addr or key for object merge, the changed detail can be achieved from the dirty object
 	nonceChangesInSlot   map[common.Address]struct{}
 	nonceReadsInSlot     map[common.Address]uint64
@@ -160,17 +155,7 @@ type ParallelState struct {
 	storagesDeleteRecord       []common.Hash
 	accountsOriginDeleteRecord []common.Address
 	storagesOriginDeleteRecord []common.Address
-
-	createdObjectRecord map[common.Address]struct{}
-
-	// Transaction will pay gas fee to system address.
-	// Parallel execution will clear system address's balance at first, in order to maintain transaction's
-	// gas fee value. Normal transaction will access system address twice, otherwise it means the transaction
-	// needs real system address's balance, the transaction will be marked redo with keepSystemAddressBalance = true
-	// systemAddress            common.Address
-	// systemAddressOpsCount    int
-	// keepSystemAddressBalance bool
-
+	createdObjectRecord        map[common.Address]struct{}
 	// we may need to redo for some specific reasons, like we read the wrong state and need to panic in sequential mode in SubRefund
 	needsRedo bool
 	useDAG    bool
@@ -1409,7 +1394,6 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 		// handle tx1, so what thread1's slotDB see in the s.parallel.stateObjects might be the middle result of Thread2.
 		//
 		// We are not do simple copy (lightweight pointer copy) as the stateObject can be accessed by different thread.
-		// Todo-dav: remove lock guard of parallel.stateObject access.
 
 		stateObjects:                 &StateObjectSyncMap{}, // s.parallel.stateObjects,
 		codeReadsInSlot:              addressToBytesPool.Get().(map[common.Address][]byte),
@@ -1454,10 +1438,6 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 			parallel:             parallel,
 		},
 	}
-	// no need to copy preimages, comment out and remove later
-	// for hash, preimage := range s.preimages {
-	//	state.preimages[hash] = preimage
-	// }
 
 	// copy parallel stateObjects
 	s.parallelStateAccessLock.Lock()
@@ -1467,7 +1447,6 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 	})
 	s.parallelStateAccessLock.Unlock()
 
-	// deep copy needed
 	state.snapDestructs = addressToStructPool.Get().(map[common.Address]struct{})
 	s.snapParallelLock.RLock()
 	for k, v := range s.snapDestructs {
@@ -1476,31 +1455,8 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 	s.snapParallelLock.RUnlock()
 
 	if s.snaps != nil {
-		// In order for the miner to be able to use and make additions
-		// to the snapshot tree, we need to copy that as well.
-		// Otherwise, any block mined by ourselves will cause gaps in the tree,
-		// and force the miner to operate trie-backed only
 		state.snaps = s.snaps
 		state.snap = s.snap
-		// snapAccounts is useless in SlotDB, comment out and remove later
-		// state.snapAccounts = make(map[common.Address][]byte) // snapAccountPool.Get().(map[common.Address][]byte)
-		// for k, v := range s.snapAccounts {
-		//	state.snapAccounts[k] = v
-		// }
-
-		// snapStorage is useless in SlotDB either, it is updated on updateTrie, which is validation phase to update the snapshot of a finalized block.
-		// state.snapStorage = snapStoragePool.Get().(map[common.Address]map[string][]byte)
-		// for k, v := range s.snapStorage {
-		//	temp := snapStorageValuePool.Get().(map[string][]byte)
-		//	for kk, vv := range v {
-		//		temp[kk] = vv
-		//	}
-		//	state.snapStorage[k] = temp
-		// }
-
-		// trie prefetch should be done by dispatcher on StateObject Merge,
-		// disable it in parallel slot
-		// state.prefetcher = s.prefetcher
 	}
 
 	// Deep copy the state changes made in the scope of block
@@ -2843,8 +2799,4 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 
 	s.SetTxContext(slotDb.thash, slotDb.txIndex)
 	return s
-}
-
-func (s *StateDB) ParallelMakeUp(common.Address, []byte) {
-	// do nothing, this API is for parallel mode
 }

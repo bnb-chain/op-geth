@@ -369,6 +369,7 @@ func (t *Tree) Update(blockRoot common.Hash, parentRoot common.Hash, destructs m
 	// Save the new snapshot for later
 	t.lock.Lock()
 	defer t.lock.Unlock()
+
 	t.layers[snap.root] = snap
 	return nil
 }
@@ -411,6 +412,7 @@ func (t *Tree) Cap(root common.Hash, layers int) error {
 		diff.lock.RLock()
 		base := diffToDisk(diff.flatten().(*diffLayer))
 		diff.lock.RUnlock()
+
 		// Replace the entire snapshot tree with the flat base
 		t.layers = map[common.Hash]snapshot{base.root: base}
 		return nil
@@ -517,6 +519,7 @@ func (t *Tree) cap(diff *diffLayer, layers int) *diskLayer {
 	bottom.lock.RLock()
 	base := diffToDisk(bottom)
 	bottom.lock.RUnlock()
+
 	t.layers[base.root] = base
 	diff.parent = base
 	return base
@@ -749,7 +752,6 @@ func (t *Tree) Rebuild(root common.Hash) {
 	// Start generating a new snapshot from scratch on a background thread. The
 	// generator will run a wiper first if there's not one running right now.
 	log.Info("Rebuilding state snapshot")
-
 	t.layers = map[common.Hash]snapshot{
 		root: generateSnapshot(t.diskdb, t.triedb, t.config.CacheSize, root),
 	}
@@ -796,6 +798,7 @@ func (t *Tree) Verify(root common.Hash) error {
 			return common.Hash{}, err
 		}
 		defer storageIt.Release()
+
 		hash, err := generateTrieRoot(nil, "", storageIt, accountHash, stackTrieGenerate, nil, stat, false)
 		if err != nil {
 			return common.Hash{}, err

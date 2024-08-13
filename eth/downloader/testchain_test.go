@@ -64,6 +64,7 @@ func init() {
 	fsHeaderContCheck = 500 * time.Millisecond
 
 	testChainBase = newTestChain(blockCacheMaxItems+200, testGenesis)
+
 	var forkLen = int(fullMaxForkAncestry + 50)
 	var wg sync.WaitGroup
 

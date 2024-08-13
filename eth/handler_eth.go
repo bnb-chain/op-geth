@@ -170,7 +170,6 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, block *types.Block, td
 	if h.merger.PoSFinalized() {
 		return errors.New("disallowed block broadcast")
 	}
-
 	// Schedule the block for import
 	h.blockFetcher.Enqueue(peer.ID(), block)
 

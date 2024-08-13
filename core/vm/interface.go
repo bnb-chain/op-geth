@@ -28,7 +28,6 @@ import (
 // StateDB is an EVM database for full state querying.
 type StateDB interface {
 	CreateAccount(common.Address)
-
 	SubBalance(common.Address, *uint256.Int)
 	AddBalance(common.Address, *uint256.Int)
 	GetBalance(common.Address) *uint256.Int
@@ -79,10 +78,6 @@ type StateDB interface {
 
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
-
-	ParallelMakeUp(addr common.Address, input []byte)
-
-	// todo -dav : delete following
 	TxIndex() int
 
 	// parallel DAG related

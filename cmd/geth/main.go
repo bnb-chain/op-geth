@@ -171,6 +171,7 @@ var (
 		utils.ParallelTxNumFlag,
 		utils.ParallelTxDAGFlag,
 		utils.ParallelTxDAGFileFlag,
+		utils.ParallelTxDAGSenderPrivFlag,
 		configFileFlag,
 		utils.LogDebugFlag,
 		utils.LogBacktraceAtFlag,

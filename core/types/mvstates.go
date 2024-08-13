@@ -283,14 +283,30 @@ func (w *PendingWrites) FindLastWrite(txIndex int) *RWItem {
 	return nil
 }
 
+func (w *PendingWrites) FindPrevWrites(txIndex int) []*RWItem {
+	var i, _ = w.SearchTxIndex(txIndex)
+	for j := i - 1; j >= 0; j-- {
+		if w.list[j].TxIndex() < txIndex {
+			return w.list[:j+1]
+		}
+	}
+
+	return nil
+}
+
 type MVStates struct {
 	rwSets            map[int]*RWSet
 	pendingWriteSet   map[RWKey]*PendingWrites
 	nextFinaliseIndex int
 
 	// dependency map cache for generating TxDAG
-	// depsCache[i].exist(j) means j->i, and i > j
-	depsCache map[int]TxDepMap
+	// depMapCache[i].exist(j) means j->i, and i > j
+	depMapCache map[int]TxDepMap
+	depsCache   map[int][]uint64
+
+	// async dep analysis
+	depsGenChan chan int
+	stopChan    chan struct{}
 
 	// execution stat infos
 	stats map[int]*ExeStat
@@ -301,8 +317,35 @@ func NewMVStates(txCount int) *MVStates {
 	return &MVStates{
 		rwSets:          make(map[int]*RWSet, txCount),
 		pendingWriteSet: make(map[RWKey]*PendingWrites, txCount*8),
-		depsCache:       make(map[int]TxDepMap, txCount),
+		depMapCache:     make(map[int]TxDepMap, txCount),
+		depsCache:       make(map[int][]uint64, txCount),
 		stats:           make(map[int]*ExeStat, txCount),
+	}
+}
+
+func (s *MVStates) EnableAsyncDepGen() *MVStates {
+	s.depsGenChan = make(chan int, 100)
+	s.stopChan = make(chan struct{}, 1)
+	go s.asyncDepGenLoop()
+	return s
+}
+
+func (s *MVStates) stopAsyncDepGen() {
+	if s.stopChan != nil {
+		s.stopChan <- struct{}{}
+	}
+}
+
+func (s *MVStates) asyncDepGenLoop() {
+	for {
+		select {
+		case tx := <-s.depsGenChan:
+			s.lock.Lock()
+			s.resolveDepsCacheByWrites(tx, s.rwSets[tx])
+			s.lock.Unlock()
+		case <-s.stopChan:
+			return
+		}
 	}
 }
 
@@ -363,12 +406,6 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 		}
 	}
 	s.rwSets[index] = rwSet
-	// async resolve dependency
-	go func() {
-		s.lock.Lock()
-		defer s.lock.Unlock()
-		s.resolveDepsCache(index, rwSet)
-	}()
 	return nil
 }
 
@@ -395,36 +432,78 @@ func (s *MVStates) Finalise(index int) error {
 		s.pendingWriteSet[k].Append(v)
 	}
 	s.nextFinaliseIndex++
+	// async resolve dependency
+	if s.depsGenChan != nil {
+		s.depsGenChan <- index
+	}
 	return nil
+}
+
+func (s *MVStates) resolveDepsCacheByWrites(index int, rwSet *RWSet) {
+	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
+	s.depMapCache[index] = NewTxDeps(0)
+	if rwSet.excludedTx {
+		return
+	}
+	seen := make(map[int]struct{})
+	for key := range rwSet.readSet {
+		// check self destruct
+		if key.IsAccountSelf() {
+			key = AccountStateKey(key.Addr(), AccountSuicide)
+		}
+		writes := s.pendingWriteSet[key]
+		if writes == nil {
+			continue
+		}
+		items := writes.FindPrevWrites(index)
+		for _, item := range items {
+			seen[item.TxIndex()] = struct{}{}
+		}
+	}
+	for prev := 0; prev < index; prev++ {
+		if _, ok := seen[prev]; !ok {
+			continue
+		}
+		s.depMapCache[index].add(prev)
+		// clear redundancy deps compared with prev
+		for dep := range s.depMapCache[index] {
+			if s.depMapCache[prev].exist(dep) {
+				s.depMapCache[index].remove(dep)
+			}
+		}
+	}
+	s.depsCache[index] = s.depMapCache[index].toArray()
 }
 
 func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
-	s.depsCache[index] = NewTxDeps(0)
+	s.depMapCache[index] = NewTxDeps(0)
 	if rwSet.excludedTx {
 		return
 	}
 	for prev := 0; prev < index; prev++ {
 		// if there are some parallel execution or system txs, it will fulfill in advance
 		// it's ok, and try re-generate later
-		if _, ok := s.rwSets[prev]; !ok {
+		prevSet, ok := s.rwSets[prev]
+		if !ok {
 			continue
 		}
 		// if prev tx is tagged ExcludedTxFlag, just skip the check
-		if s.rwSets[prev].excludedTx {
+		if prevSet.excludedTx {
 			continue
 		}
 		// check if there has written op before i
-		if checkDependency(s.rwSets[prev].writeSet, rwSet.readSet) {
-			s.depsCache[index].add(prev)
+		if checkDependency(prevSet.writeSet, rwSet.readSet) {
+			s.depMapCache[index].add(prev)
 			// clear redundancy deps compared with prev
-			for dep := range s.depsCache[index] {
-				if s.depsCache[prev].exist(dep) {
-					s.depsCache[index].remove(dep)
+			for dep := range s.depMapCache[index] {
+				if s.depMapCache[prev].exist(dep) {
+					s.depMapCache[index].remove(dep)
 				}
 			}
 		}
 	}
+	s.depsCache[index] = s.depMapCache[index].toArray()
 }
 
 func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*RWItem, writeSet map[RWKey]*RWItem) bool {
@@ -452,13 +531,17 @@ func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*RWItem, write
 
 // ResolveTxDAG generate TxDAG from RWSets
 func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (TxDAG, error) {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	if len(s.rwSets) != txCnt {
 		return nil, fmt.Errorf("wrong rwSet count, expect: %v, actual: %v", txCnt, len(s.rwSets))
 	}
+	if txCnt != s.nextFinaliseIndex {
+		return nil, fmt.Errorf("resolve in wrong order, next: %d, input: %d", s.nextFinaliseIndex, txCnt)
+	}
+	s.stopAsyncDepGen()
 	txDAG := NewPlainTxDAG(len(s.rwSets))
-	for i := txCnt - 1; i >= 0; i-- {
+	for i := 0; i < txCnt; i++ {
 		// check if there are RW with gas fee receiver for gas delay calculation
 		for _, addr := range gasFeeReceivers {
 			if _, ok := s.rwSets[i].readSet[AccountStateKey(addr, AccountSelf)]; ok {
@@ -470,10 +553,10 @@ func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (Tx
 			txDAG.TxDeps[i].SetFlag(ExcludedTxFlag)
 			continue
 		}
-		if s.depsCache[i] == nil {
-			s.resolveDepsCache(i, s.rwSets[i])
+		if s.depMapCache[i] == nil {
+			s.resolveDepsCacheByWrites(i, s.rwSets[i])
 		}
-		deps := s.depsCache[i].toArray()
+		deps := s.depsCache[i]
 		if len(deps) <= (txCnt-1)/2 {
 			txDAG.TxDeps[i].TxIndexes = deps
 			continue

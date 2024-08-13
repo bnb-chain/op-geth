@@ -1130,6 +1130,13 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Usage:    "enable opcode optimization",
 		Category: flags.VMCategory,
 	}
+
+	ParallelTxDAGSenderPrivFlag = &cli.StringFlag{
+		Name:     "parallel.txdagsenderpriv",
+		Usage:    "private key of the sender who sends the TxDAG transactions",
+		Value:    "",
+		Category: flags.VMCategory,
+	}
 )
 
 var (
@@ -2042,6 +2049,13 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(ParallelTxDAGFileFlag.Name) {
 		cfg.ParallelTxDAGFile = ctx.String(ParallelTxDAGFileFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDAGSenderPrivFlag.Name) {
+		priHex := ctx.String(ParallelTxDAGSenderPrivFlag.Name)
+		if cfg.Miner.ParallelTxDAGSenderPriv, err = crypto.HexToECDSA(priHex); err != nil {
+			Fatalf("Failed to parse txdag private key of %s, err: %v", ParallelTxDAGSenderPrivFlag.Name, err)
+		}
 	}
 
 	if ctx.IsSet(VMOpcodeOptimizeFlag.Name) {

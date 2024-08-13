@@ -736,10 +736,17 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		txDAG types.TxDAG
 	)
 	if p.bc.enableTxDAG {
-		// TODO(galaio): load TxDAG from block
-		// or load cache txDAG from file
-		if txDAG == nil && p.bc.txDAGReader != nil {
+		var err error
+		if p.bc.txDAGReader != nil {
+			// load cache txDAG from file first
 			txDAG = p.bc.txDAGReader.TxDAG(block.NumberU64())
+
+		} else {
+			// load TxDAG from block
+			txDAG, err = types.GetTxDAG(block)
+			if err != nil {
+				log.Debug("pevm decode txdag failed", "block", block.NumberU64(), "err", err)
+			}
 		}
 		if err := types.ValidateTxDAG(txDAG, len(block.Transactions())); err != nil {
 			log.Warn("pevm cannot apply wrong txdag",

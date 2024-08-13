@@ -19,6 +19,7 @@ package miner
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"math/big"
@@ -109,6 +110,8 @@ type Config struct {
 	EffectiveGasCeil          uint64 // if non-zero, a gas ceiling to apply independent of the header's gaslimit value
 
 	Mev MevConfig // Mev configuration
+
+	ParallelTxDAGSenderPriv *ecdsa.PrivateKey // The private key for the parallel tx DAG sender
 }
 
 // DefaultConfig contains default settings for miner.

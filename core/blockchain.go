@@ -2835,6 +2835,10 @@ func (bc *BlockChain) TxDAGEnabled() bool {
 	return bc.enableTxDAG
 }
 
+func (bc *BlockChain) TxDAGFileOpened() bool {
+	return bc.txDAGWriteCh != nil
+}
+
 func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 	log.Info("node enable TxDAG feature", "output", output)
 	bc.enableTxDAG = true

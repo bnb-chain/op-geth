@@ -66,7 +66,6 @@ func (s StorageMap) Copy() Storage {
 	for key, value := range s {
 		cpy[key] = value
 	}
-
 	return cpy
 }
 
@@ -132,7 +131,6 @@ func (s *StorageSyncMap) Copy() Storage {
 		cpy.Store(key, value)
 		return true
 	})
-
 	return &cpy
 }
 
@@ -225,7 +223,7 @@ func (s *stateObject) empty() bool {
 	// since it could be invalid.
 	// e.g., AddBalance() to an address, we will do lightCopy to get a new StateObject, we did balance fixup to
 	// make sure object's Balance is reliable. But we did not fixup nonce or code, we only do nonce or codehash
-	// fixup on need, that's when we wanna to update the nonce or codehash.
+	// fixup on need, that's when we want to update the nonce or codehash.
 	// So nonce, balance
 	// Before the block is processed, addr_1 account: nonce = 0, emptyCodeHash, balance = 100
 	//   Slot 0 tx 0: no access to addr_1
@@ -240,7 +238,6 @@ func (s *stateObject) empty() bool {
 	}
 	codeHash := s.dbItf.GetCodeHash(s.address)
 	return bytes.Equal(codeHash.Bytes(), emptyCodeHash) // code is empty, the object is empty
-
 }
 
 // newObject creates a state object.
@@ -353,7 +350,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 
 	if s.db.isParallel && s.db.parallel.isSlotDB {
-		// Add-Dav:
 		// Need to confirm the object is not destructed in unconfirmed db and resurrected in this tx.
 		// otherwise there is an issue for cases like:
 		//	B0: TX0 --> createAccount @addr1	-- merged into DB
@@ -385,7 +381,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	//   1) resurrect happened, and new slot values were set -- those should
 	//      have been handles via pendingStorage above.
 	//   2) we don't have new values, and can deliver empty response back
-	//if _, destructed := s.db.stateObjectsDestruct[s.address]; destructed {
 	s.db.stateObjectDestructLock.RLock()
 	if _, destructed := s.db.getStateObjectsDestruct(s.address); destructed { // fixme: use sync.Map, instead of RWMutex?
 		s.db.stateObjectDestructLock.RUnlock()
@@ -459,7 +454,7 @@ func (s *stateObject) SetState(key, value common.Hash) {
 	})
 
 	if s.db.isParallel && s.db.parallel.isSlotDB {
-		s.db.parallel.kvChangesInSlot[s.address][key] = struct{}{} // should be moved to here, after `s.db.GetState()`
+		s.db.parallel.kvChangesInSlot[s.address][key] = struct{}{}
 	}
 	s.setState(key, value)
 }
@@ -483,7 +478,6 @@ func (s *stateObject) finalise(prefetch bool) {
 		}
 		return true
 	})
-
 	if s.dirtyNonce != nil {
 		s.data.Nonce = *s.dirtyNonce
 		s.dirtyNonce = nil
@@ -655,73 +649,6 @@ func (s *stateObject) updateTrie() (Trie, error) {
 
 	s.pendingStorage = newStorage(s.isParallel) // reset pending map
 	return tr, nil
-	/*
-		s.pendingStorage.Range(func(keyItf, valueItf interface{}) bool {
-			key := keyItf.(common.Hash)
-			value := valueItf.(common.Hash)
-			// Skip noop changes, persist actual changes
-			originalValue, _ := s.originStorage.GetValue(key)
-			if value == originalValue {
-				return true
-			}
-
-			prev, _ := s.originStorage.GetValue(key)
-			s.originStorage.StoreValue(key, value)
-
-			var encoded []byte // rlp-encoded value to be used by the snapshot
-			if (value == common.Hash{}) {
-				if err := tr.DeleteStorage(s.address, key[:]); err != nil {
-					maindb.setError(err)
-				}
-				maindb.StorageDeleted += 1
-			} else {
-				// Encoding []byte cannot fail, ok to ignore the error.
-				trimmed := common.TrimLeftZeroes(value[:])
-				encoded, _ = rlp.EncodeToBytes(trimmed)
-				if err := tr.UpdateStorage(s.address, key[:], trimmed); err != nil {
-					maindb.setError(err)
-				}
-				maindb.StorageUpdated += 1
-			}
-			// Cache the mutated storage slots until commit
-			if storage == nil {
-				if storage = maindb.storages[s.addrHash]; storage == nil {
-					storage = make(map[common.Hash][]byte)
-					maindb.storages[s.addrHash] = storage
-				}
-			}
-
-			khash := crypto.HashData(maindb.hasher, key[:])
-			storage[khash] = encoded // encoded will be nil if it's deleted
-
-			// Cache the original value of mutated storage slots
-			if origin == nil {
-				if origin = maindb.storagesOrigin[s.address]; origin == nil {
-					origin = make(map[common.Hash][]byte)
-					maindb.storagesOrigin[s.address] = origin
-				}
-			}
-			// Track the original value of slot only if it's mutated first time
-			if _, ok := origin[khash]; !ok {
-				if prev == (common.Hash{}) {
-					origin[khash] = nil // nil if it was not present previously
-				} else {
-					// Encoding []byte cannot fail, ok to ignore the error.
-					b, _ := rlp.EncodeToBytes(common.TrimLeftZeroes(prev[:]))
-					origin[khash] = b
-				}
-			}
-			// Cache the items for preloading
-			usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
-			return true
-		})
-		if maindb.prefetcher != nil {
-			maindb.prefetcher.used(s.addrHash, s.data.Root, usedStorage)
-		}
-		s.pendingStorage = newStorage(s.isParallel) // reset pending map
-
-		return tr, nil
-	*/
 }
 
 // updateRoot flushes all cached storage mutations to trie, recalculating the
@@ -729,7 +656,6 @@ func (s *stateObject) updateTrie() (Trie, error) {
 func (s *stateObject) updateRoot() {
 	// Flush cached storage mutations into trie, short circuit if any error
 	// is occurred or there is not change in the trie.
-	// TODO: The trieParallelLock seems heavy, can we remove it?
 	s.db.trieParallelLock.Lock()
 	defer s.db.trieParallelLock.Unlock()
 
@@ -765,10 +691,8 @@ func (s *stateObject) commit() (*trienode.NodeSet, error) {
 		return nil, err
 	}
 	s.data.Root = root
-
 	// Update original account data after commit
 	s.origin = s.data.Copy()
-
 	return nodes, nil
 }
 
@@ -863,7 +787,6 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	}
 
 	object.code = s.code
-	// The lock is unnecessary since deepCopy only invoked at global phase and with dirty object that never changed.
 	object.dirtyStorage = s.dirtyStorage.Copy()
 	object.originStorage = s.originStorage.Copy()
 	object.pendingStorage = s.pendingStorage.Copy()
@@ -873,7 +796,6 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	object.dirtyBalance = s.dirtyBalance
 	object.dirtyNonce = s.dirtyNonce
 	object.dirtyCodeHash = s.dirtyCodeHash
-
 	return object
 }
 

@@ -568,7 +568,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
 	// changing the sender's balance
 	var gasRefund uint64
-
 	if !rules.IsLondon {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
 		gasRefund = st.refundGas(params.RefundQuotient)

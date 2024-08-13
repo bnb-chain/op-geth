@@ -116,8 +116,6 @@ var (
 	errChainStopped         = errors.New("blockchain is stopped")
 	errInvalidOldChain      = errors.New("invalid old chain")
 	errInvalidNewChain      = errors.New("invalid new chain")
-
-	ParallelTxMode = false // parallel transaction execution
 )
 
 const (
@@ -304,12 +302,13 @@ type BlockChain struct {
 	stopping      atomic.Bool   // false if chain is running, true when stopped
 	procInterrupt atomic.Bool   // interrupt signaler for block processing
 
-	engine            consensus.Engine
-	validator         Validator // Block and state validator interface
-	prefetcher        Prefetcher
-	processor         Processor // Block transaction processor interface
-	forker            *ForkChoice
-	vmConfig          vm.Config
+	engine     consensus.Engine
+	validator  Validator // Block and state validator interface
+	prefetcher Prefetcher
+	processor  Processor // Block transaction processor interface
+	forker     *ForkChoice
+	vmConfig   vm.Config
+
 	parallelExecution bool
 	enableTxDAG       bool
 	txDAGWriteCh      chan TxDAGOutputItem
@@ -1645,7 +1644,6 @@ func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types
 // writeBlockAndSetHead is the internal implementation of WriteBlockAndSetHead.
 // This function expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
-
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
@@ -1687,7 +1685,6 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 	} else {
 		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 	}
-
 	return status, nil
 }
 
@@ -1962,9 +1959,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 
-			// TODO(galaio): load TxDAG from block, use txDAG in some accelerate scenarios, like state pre-fetcher.
-			//if bc.enableTxDAG {}
-
 			// Enable prefetching to pull in trie node paths while processing transactions
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
@@ -2012,7 +2006,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		ptime := time.Since(pstart)
 
 		vstart := time.Now()
-
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
 			bc.reportBlock(block, receipts, err)
 			followupInterrupt.Store(true)
@@ -2068,28 +2061,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if !setHead {
 			// Don't set the head, only insert the block
 			err = bc.writeBlockWithState(block, receipts, statedb)
-			if false {
-				fmt.Printf("Dav -- After writeBlockWithState: %d check balance\n", block.NumberU64())
-				actual := statedb.GetBalance(block.Coinbase())
-				fmt.Printf("Dav -- AfterwriteBlockWithState: %d balance: %d\n", block.NumberU64(), actual.Uint64())
-			}
 		} else {
 			status, err = bc.writeBlockAndSetHead(block, receipts, logs, statedb, false)
-			if false {
-				fmt.Printf("Dav -- After writeBlockAndSetHead: %d check balance\n", block.NumberU64())
-				actual := statedb.GetBalance(block.Coinbase())
-				fmt.Printf("Dav -- writeBlockAndSetHead: %d balance: %d\n", block.NumberU64(), actual.Uint64())
-
-				s, _ := bc.State()
-				bk := bc.CurrentBlock()
-				fmt.Printf("Dav -- writeBlockAndSetHead - currentBlock: %d root: %s\n", bk.Number.Uint64(), bk.Root)
-				obj, _ := s.GetStateObjectFromSnapshotOrTrie(block.Coinbase())
-
-				//obj, _ := statedb.GetStateObjectFromSnapshotOrTrie(block.Coinbase())
-
-				fmt.Printf("Dav -- writeBlockAndSetHead: %d obj from snap or trie: %p\n", block.NumberU64(), obj)
-
-			}
 		}
 		followupInterrupt.Store(true)
 		if err != nil {

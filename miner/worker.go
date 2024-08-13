@@ -1435,15 +1435,6 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		return &newPayloadResult{err: fmt.Errorf("empty block root")}
 	}
 
-	// TODO(galaio): fulfill TxDAG to mined block
-	//if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
-	//	txDAG, _ := work.state.ResolveTxDAG([]common.Address{work.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-	//	rawTxDAG, err := types.EncodeTxDAG(txDAG)
-	//	if err != nil {
-	//		return &newPayloadResult{err: err}
-	//	}
-	//}
-
 	assembleBlockTimer.UpdateSince(start)
 	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
@@ -1550,7 +1541,6 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		if err != nil {
 			return err
 		}
-
 		// If we're post merge, just ignore
 		if !w.isTTDReached(block.Header()) {
 			select {

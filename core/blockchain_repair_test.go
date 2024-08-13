@@ -1799,13 +1799,9 @@ func testRepairWithScheme(t *testing.T, tt *rewindTest, snapshots bool, scheme s
 	if err != nil {
 		t.Fatalf("Failed to create chain: %v", err)
 	}
-
-	// fmt.Printf("Dav -- test -- testRepairWithScheme -- chain after NewBlockChain processor: %v, parallel: %v, vmConfig: %v\n", chain.processor, chain.parallelExecution, chain.vmConfig)
-
 	// If sidechain blocks are needed, make a light chain and import it
 	var sideblocks types.Blocks
 	if tt.sidechainBlocks > 0 {
-		//fmt.Printf("Dav -- test -- testRepairWithScheme -- tt.sidechainBlocks: %d\n", tt.sidechainBlocks)
 		sideblocks, _ = GenerateChain(gspec.Config, gspec.ToBlock(), engine, rawdb.NewMemoryDatabase(), tt.sidechainBlocks, func(i int, b *BlockGen) {
 			b.SetCoinbase(common.Address{0x01})
 		})

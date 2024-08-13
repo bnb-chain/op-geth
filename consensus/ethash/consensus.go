@@ -514,16 +514,10 @@ func (ethash *Ethash) FinalizeAndAssemble(chain consensus.ChainHeaderReader, hea
 	}
 	// Finalize block
 	ethash.Finalize(chain, header, state, txs, uncles, nil)
-	/*
-		js, _ := header.MarshalJSON()
-		fmt.Printf("== Dav -- ethash FinalizeAndAssemble, before Root update, Root %s, header json: %s\n", header.Root, js)
-	*/
+
 	// Assign the final state root to header.
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
-	/*
-		js, _ = header.MarshalJSON()
-		fmt.Printf(" == Dav -- ethash FinalizeAndAssemble, after Root update, Root %s, header json: %s\n", header.Root, js)
-	*/
+
 	// Header seems complete, assemble into a block and return
 	return types.NewBlock(header, txs, uncles, receipts, trie.NewStackTrie(nil)), nil
 }

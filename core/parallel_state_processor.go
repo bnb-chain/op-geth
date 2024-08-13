@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/metrics"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -870,7 +871,11 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 			"len(commonTxs)", len(commonTxs),
 			"conflictNum", p.debugConflictRedoNum,
 			"redoRate(%)", 100*(p.debugConflictRedoNum)/len(commonTxs),
-			"txDAG", txDAG)
+			"txDAG", txDAG != nil)
+	}
+	if metrics.EnabledExpensive {
+		parallelTxNumMeter.Mark(int64(len(commonTxs)))
+		parallelConflictTxNumMeter.Mark(int64(p.debugConflictRedoNum))
 	}
 
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.

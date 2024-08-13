@@ -22,8 +22,6 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum/log"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -135,27 +133,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), withdrawals)
-
-	if p.bc.enableTxDAG {
-		// compare input TxDAG when it enable in consensus
-		dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-		if err == nil {
-			// TODO(galaio): check TxDAG correctness?
-			log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
-			if metrics.EnabledExpensive {
-				types.EvaluateTxDAGPerformance(dag, statedb.ResolveStats())
-			}
-			// try to write txDAG into file
-			if p.bc.txDAGWriteCh != nil && dag != nil {
-				p.bc.txDAGWriteCh <- TxDAGOutputItem{
-					blockNumber: block.NumberU64(),
-					txDAG:       dag,
-				}
-			}
-		} else {
-			log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
-		}
-	}
 	return receipts, allLogs, *usedGas, nil
 }
 

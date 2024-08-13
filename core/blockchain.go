@@ -2018,6 +2018,28 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			followupInterrupt.Store(true)
 			return it.index, err
 		}
+
+		if bc.enableTxDAG {
+			// compare input TxDAG when it enable in consensus
+			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+			if err == nil {
+				// TODO(galaio): check TxDAG correctness?
+				log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
+				if metrics.EnabledExpensive {
+					go types.EvaluateTxDAGPerformance(dag, statedb.ResolveStats())
+				}
+				// try to write txDAG into file
+				if bc.txDAGWriteCh != nil && dag != nil {
+					bc.txDAGWriteCh <- TxDAGOutputItem{
+						blockNumber: block.NumberU64(),
+						txDAG:       dag,
+					}
+				}
+			} else {
+				log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
+			}
+		}
+
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
@@ -2854,7 +2876,7 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 		}
 		// startup with latest block
 		curHeader := bc.CurrentHeader()
-		if curHeader != nil {
+		if curHeader != nil && bc.txDAGReader != nil {
 			bc.txDAGReader.TxDAG(curHeader.Number.Uint64())
 			log.Info("load TxDAG from file", "output", output, "block", curHeader.Number, "latest", bc.txDAGReader.Latest())
 		}

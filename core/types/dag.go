@@ -196,11 +196,7 @@ func TxDependency(d TxDAG, i int) []uint64 {
 	}
 	dep := d.TxDep(i)
 	if dep.CheckFlag(ExcludedTxFlag) {
-		txs := make([]uint64, 0, i)
-		for j := 0; j < i; j++ {
-			txs = append(txs, uint64(j))
-		}
-		return txs
+		return []uint64{}
 	}
 	if dep.CheckFlag(NonDependentRelFlag) {
 		txs := make([]uint64, 0, d.TxCount()-dep.Count())
@@ -327,12 +323,11 @@ func MergeTxDAGExecutionPaths(d TxDAG, from, to uint64) ([][]uint64, error) {
 	if from > to || to >= uint64(d.TxCount()) {
 		return nil, fmt.Errorf("input wrong from: %v, to: %v, txCnt:%v", from, to, d.TxCount())
 	}
-	nd := convert2PlainTxDAG(d)
-	mergeMap := make(map[uint64][]uint64, nd.TxCount())
-	txMap := make(map[uint64]uint64, nd.TxCount())
+	mergeMap := make(map[uint64][]uint64, d.TxCount())
+	txMap := make(map[uint64]uint64, d.TxCount())
 	for i := int(to); i >= int(from); i-- {
 		index, merge := uint64(i), uint64(i)
-		deps := nd.TxDep(i).TxIndexes
+		deps := TxDependency(d, i)
 		// drop the out range txs
 		deps = depExcludeTxRange(deps, from, to)
 		if oldIdx, exist := findTxPathIndex(deps, index, txMap); exist {
@@ -401,39 +396,12 @@ func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64
 
 // travelTxDAGExecutionPaths will print all tx execution path
 func travelTxDAGExecutionPaths(d TxDAG) [][]uint64 {
-	nd := convert2PlainTxDAG(d)
-
 	exePaths := make([][]uint64, 0)
 	// travel tx deps with BFS
-	for i := uint64(0); i < uint64(nd.TxCount()); i++ {
-		exePaths = append(exePaths, travelTxDAGTargetPath(nd.TxDeps, i))
+	for i := uint64(0); i < uint64(d.TxCount()); i++ {
+		exePaths = append(exePaths, travelTxDAGTargetPath(d, i))
 	}
 	return exePaths
-}
-
-// convert2PlainTxDAG will convert to PlainTxDAG with dependency txs
-func convert2PlainTxDAG(d TxDAG) *PlainTxDAG {
-	if d.TxCount() == 0 {
-		return NewPlainTxDAG(0)
-	}
-	nd := NewPlainTxDAG(d.TxCount())
-	for i := 0; i < d.TxCount(); i++ {
-		dep := d.TxDep(i)
-		if !dep.CheckFlag(NonDependentRelFlag) {
-			nd.SetTxDep(i, *dep)
-			continue
-		}
-		// recover to dependency relation txs
-		np := TxDep{Flags: dep.Flags}
-		np.ClearFlag(NonDependentRelFlag)
-		for j := 0; j < i; j++ {
-			if !dep.Exist(j) && j != i {
-				np.AppendDep(j)
-			}
-		}
-		nd.SetTxDep(i, np)
-	}
-	return nd
 }
 
 // TxDep store the current tx dependency relation with other txs
@@ -611,7 +579,7 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 }
 
 // travelTxDAGTargetPath will print target execution path
-func travelTxDAGTargetPath(deps []TxDep, from uint64) []uint64 {
+func travelTxDAGTargetPath(d TxDAG, from uint64) []uint64 {
 	var (
 		queue []uint64
 		path  []uint64
@@ -622,7 +590,7 @@ func travelTxDAGTargetPath(deps []TxDep, from uint64) []uint64 {
 	for len(queue) > 0 {
 		var next []uint64
 		for _, i := range queue {
-			for _, dep := range deps[i].TxIndexes {
+			for _, dep := range TxDependency(d, int(i)) {
 				if !slices.Contains(path, dep) {
 					path = append(path, dep)
 					next = append(next, dep)

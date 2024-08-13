@@ -2444,7 +2444,7 @@ func (s *StateDB) ResetMVStates(txCount int) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return
 	}
-	s.mvStates = types.NewMVStates(txCount)
+	s.mvStates = types.NewMVStates(txCount).EnableAsyncDepGen()
 	s.rwSet = nil
 }
 
@@ -2494,7 +2494,11 @@ func (s *StateDB) FinaliseRWSet() error {
 
 	// reset stateDB
 	s.rwSet = nil
-	return s.mvStates.FulfillRWSet(rwSet, stat)
+	if err := s.mvStates.FulfillRWSet(rwSet, stat); err != nil {
+		return err
+	}
+	// just Finalise rwSet in serial execution
+	return s.mvStates.Finalise(s.txIndex)
 }
 
 func (s *StateDB) getStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool) {

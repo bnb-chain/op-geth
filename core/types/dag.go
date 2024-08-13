@@ -7,10 +7,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/exp/slices"
 )
+
+const TxDAGAbiJson = `
+[
+  {
+    "type": "function",
+    "name": "setTxDAG",
+    "inputs": [
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  }
+]
+`
+
+var TxDAGABI abi.ABI
+
+func init() {
+	var err error
+	// must be able to register the TxDAGABI
+	TxDAGABI, err = abi.JSON(strings.NewReader(TxDAGAbiJson))
+	if err != nil {
+		panic(err)
+	}
+}
 
 // TxDAGType Used to extend TxDAG and customize a new DAG structure
 const (
@@ -46,6 +76,37 @@ type TxDAG interface {
 
 	// SetTxDep at the last one
 	SetTxDep(int, TxDep) error
+}
+
+func DecodeTxDAGCalldata(data []byte) (TxDAG, error) {
+	// trim the method id before unpack
+	if len(data) < 4 {
+		return nil, fmt.Errorf("invalid txDAG calldata, len(data)=%d", len(data))
+	}
+	calldata, err := TxDAGABI.Methods["setTxDAG"].Inputs.Unpack(data[4:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to call abi unpack, err: %v", err)
+	}
+	if len(calldata) <= 0 {
+		return nil, fmt.Errorf("invalid txDAG calldata, len(calldata)=%d", len(calldata))
+	}
+	data, ok := calldata[0].([]byte)
+	if !ok {
+		return nil, fmt.Errorf("invalid txDAG calldata parameter")
+	}
+	return DecodeTxDAG(data)
+}
+
+func EncodeTxDAGCalldata(dag TxDAG) ([]byte, error) {
+	data, err := EncodeTxDAG(dag)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode txDAG, err: %v", err)
+	}
+	data, err = TxDAGABI.Pack("setTxDAG", data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call abi pack, err: %v", err)
+	}
+	return data, nil
 }
 
 func EncodeTxDAG(dag TxDAG) ([]byte, error) {
@@ -116,6 +177,17 @@ func ValidatePlainTxDAG(d TxDAG, txCnt int) error {
 		}
 	}
 	return nil
+}
+
+// GetTxDAG return TxDAG bytes from block if there is any, or return nil if not exist
+// the txDAG is stored in the calldata of the last transaction of the block
+func GetTxDAG(block *Block) (TxDAG, error) {
+	txs := block.Transactions()
+	if txs.Len() <= 0 {
+		return nil, fmt.Errorf("no txdag found")
+	}
+	// get data from the last tx
+	return DecodeTxDAGCalldata(txs[txs.Len()-1].Data())
 }
 
 func TxDependency(d TxDAG, i int) []uint64 {

@@ -8,6 +8,7 @@ import (
 	"github.com/cometbft/cometbft/libs/rand"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -15,6 +16,19 @@ var (
 	mockAddr = common.HexToAddress("0x482bA86399ab6Dcbe54071f8d22258688B4509b1")
 	mockHash = common.HexToHash("0xdc13f8d7bdb8ec4de02cd4a50a1aa2ab73ec8814e0cdb550341623be3dd8ab7a")
 )
+
+func TestEncodeTxDAGCalldata(t *testing.T) {
+	tg := mockSimpleDAG()
+	data, err := EncodeTxDAGCalldata(tg)
+	assert.Equal(t, nil, err)
+	tg, err = DecodeTxDAGCalldata(data)
+	assert.Equal(t, nil, err)
+	assert.Equal(t, tg.TxDep(6).TxIndexes[0], uint64(2))
+	assert.Equal(t, tg.TxDep(6).TxIndexes[1], uint64(5))
+
+	_, err = DecodeTxDAGCalldata(nil)
+	assert.NotEqual(t, nil, err)
+}
 
 func TestTxDAG_SetTxDep(t *testing.T) {
 	dag := mockSimpleDAG()

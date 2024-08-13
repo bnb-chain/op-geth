@@ -99,6 +99,9 @@ var (
 
 	txDAGGenerateTimer = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
 
+	parallelTxNumMeter         = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
+	parallelConflictTxNumMeter = metrics.NewRegisteredMeter("chain/parallel/conflicttxs", nil)
+
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
 
@@ -2841,8 +2844,8 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 		curHeader := bc.CurrentHeader()
 		if curHeader != nil {
 			bc.txDAGReader.TxDAG(curHeader.Number.Uint64())
+			log.Info("load TxDAG from file", "output", output, "block", curHeader.Number, "latest", bc.txDAGReader.Latest())
 		}
-		log.Info("load TxDAG from file", "output", output, "latest", bc.txDAGReader.Latest())
 		return
 	}
 
@@ -2888,7 +2891,7 @@ func writeTxDAGToFile(writeHandle *os.File, item TxDAGOutputItem) error {
 	return err
 }
 
-const TxDAGCacheSize = 200000
+var TxDAGCacheSize = 10000
 
 type TxDAGFileReader struct {
 	file    *os.File
@@ -2904,6 +2907,7 @@ func NewTxDAGFileReader(output string) (*TxDAGFileReader, error) {
 		return nil, err
 	}
 	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 5*1024*1024), 5*1024*1024)
 	return &TxDAGFileReader{
 		file:    file,
 		scanner: scanner,
@@ -2939,18 +2943,21 @@ func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
 	if t.cache != nil && t.latest >= expect {
 		return t.cache[expect]
 	}
+	if t.scanner == nil {
+		return nil
+	}
 
+	logTime := time.Now()
 	t.cache = make(map[uint64]types.TxDAG, TxDAGCacheSize)
-	counter := 0
-	for t.scanner != nil && t.scanner.Scan() {
-		if counter > TxDAGCacheSize {
-			break
-		}
+	for t.scanner.Scan() {
 		num, dag, err := readTxDAGItemFromLine(t.scanner.Text())
 		if err != nil {
-			log.Error("query TxDAG error found and read aborted", "err", err)
-			t.closeFile()
-			break
+			log.Error("query TxDAG error", "latest", t.latest, "err", err)
+			continue
+		}
+		if time.Since(logTime) > 10*time.Second {
+			logTime = time.Now()
+			log.Info("try load TxDAG from file", "num", num, "expect", expect, "cached", len(t.cache))
 		}
 		// skip lower blocks
 		if expect > num {
@@ -2958,9 +2965,17 @@ func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
 		}
 		t.cache[num] = dag
 		t.latest = num
-		counter++
+		if len(t.cache) >= TxDAGCacheSize {
+			break
+		}
+	}
+	if t.scanner.Err() != nil {
+		log.Error("scan TxDAG file got err", "expect", expect, "err", t.scanner.Err())
 	}
 
+	if time.Since(logTime) > 10*time.Second {
+		log.Info("try load TxDAG from file", "expect", expect, "cached", len(t.cache))
+	}
 	return t.cache[expect]
 }
 

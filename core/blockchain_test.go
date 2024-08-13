@@ -4766,6 +4766,32 @@ func TestTxDAGFile_ReadWrite(t *testing.T) {
 	}
 }
 
+func TestTxDAGFile_LargeRead(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "test.csv")
+	defer func() {
+		os.Remove(path)
+	}()
+	TxDAGCacheSize = 10
+	totalSize := uint64(100)
+	except := map[uint64]types.TxDAG{}
+	for i := uint64(0); i < totalSize-1; i++ {
+		except[i] = makeEmptyPlainTxDAG(1)
+	}
+	except[totalSize-1] = makeEmptyPlainTxDAG(510 * 1024)
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	require.NoError(t, err)
+	for num := uint64(0); num < totalSize; num++ {
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: except[num]}))
+	}
+	writeFile.Close()
+
+	reader, err := NewTxDAGFileReader(path)
+	require.NoError(t, err)
+	for i := uint64(0); i < totalSize; i++ {
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
+}
+
 func makeEmptyPlainTxDAG(cnt int, flags ...uint8) *types.PlainTxDAG {
 	dag := types.NewPlainTxDAG(cnt)
 	for i := range dag.TxDeps {

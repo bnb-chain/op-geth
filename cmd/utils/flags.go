@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"math"
 	"math/big"
 	"net"
@@ -34,6 +33,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
@@ -1104,6 +1105,13 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Usage:    "enable opcode optimization",
 		Category: flags.VMCategory,
 	}
+
+	ParallelTxDAGSenderPrivFlag = &cli.StringFlag{
+		Name:     "parallel.txdagsenderpriv",
+		Usage:    "private key of the sender who sends the TxDAG transactions",
+		Value:    "",
+		Category: flags.VMCategory,
+	}
 )
 
 var (
@@ -1991,6 +1999,13 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {
 		cfg.EnableParallelTxDAG = ctx.Bool(ParallelTxDAGFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDAGSenderPrivFlag.Name) {
+		priHex := ctx.String(ParallelTxDAGSenderPrivFlag.Name)
+		if cfg.Miner.ParallelTxDAGSenderPriv, err = crypto.HexToECDSA(priHex); err != nil {
+			Fatalf("Failed to parse txdag private key of %s, err: %v", ParallelTxDAGSenderPrivFlag.Name, err)
+		}
 	}
 
 	if ctx.IsSet(VMOpcodeOptimizeFlag.Name) {

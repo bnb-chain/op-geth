@@ -248,8 +248,8 @@ type BlockChain struct {
 	flushInterval atomic.Int64                     // Time interval (processing time) after which to flush a state
 	triedb        *triedb.Database                 // The database handler for maintaining trie nodes.
 	stateCache    state.Database                   // State database to reuse between imports (contains state cache)
-	proofKeeper   *ProofKeeper
-	txIndexer     *txIndexer // Transaction indexer, might be nil if not enabled
+	proofKeeper   *ProofKeeper                     // Store/Query op-proposal proof to ensure consistent.
+	txIndexer     *txIndexer                       // Transaction indexer, might be nil if not enabled
 
 	hc            *HeaderChain
 	rmLogsFeed    event.Feed

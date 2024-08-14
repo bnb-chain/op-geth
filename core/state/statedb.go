@@ -2529,6 +2529,7 @@ func (s *StateDB) RecordSystemTxRWSet(index int) {
 	s.mvStates.FulfillRWSet(types.NewRWSet(types.StateVersion{
 		TxIndex: index,
 	}).WithExcludedTxFlag(), types.NewExeStat(index).WithExcludedTxFlag())
+	s.mvStates.Finalise(index)
 }
 
 // copySet returns a deep-copied set.

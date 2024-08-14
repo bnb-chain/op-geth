@@ -215,6 +215,8 @@ type Config struct {
 	RollupHaltOnIncompatibleProtocolVersion string
 
 	EnableOpcodeOptimizing bool
+
+	NoTxBroadcasting bool
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.

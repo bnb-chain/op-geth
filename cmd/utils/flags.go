@@ -440,6 +440,12 @@ var (
 		Value:    ethconfig.Defaults.TxPool.ReannounceRemotes,
 		Category: flags.TxPoolCategory,
 	}
+	TxPoolDisableBroadcastingFlag = &cli.BoolFlag{
+		Name:     "txpool.nobroadcasting",
+		Usage:    "disable the broadcasting of transactions to peers",
+		Value:    false,
+		Category: flags.TxPoolCategory,
+	}
 	// Blob transaction pool settings
 	BlobPoolDataDirFlag = &cli.StringFlag{
 		Name:     "blobpool.datadir",

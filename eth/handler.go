@@ -88,16 +88,17 @@ type txPool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	Database       ethdb.Database         // Database for direct sync insertions
-	Chain          *core.BlockChain       // Blockchain to serve data from
-	TxPool         txPool                 // Transaction pool to propagate from
-	Merger         *consensus.Merger      // The manager for eth1/2 transition
-	Network        uint64                 // Network identifier to advertise
-	Sync           downloader.SyncMode    // Whether to snap or full sync
-	BloomCache     uint64                 // Megabytes to alloc for snap sync bloom
-	EventMux       *event.TypeMux         // Legacy event mux, deprecate for `feed`
-	RequiredBlocks map[uint64]common.Hash // Hard coded map of required block hashes for sync challenges
-	NoTxGossip     bool                   // Disable P2P transaction gossip
+	Database         ethdb.Database         // Database for direct sync insertions
+	Chain            *core.BlockChain       // Blockchain to serve data from
+	TxPool           txPool                 // Transaction pool to propagate from
+	Merger           *consensus.Merger      // The manager for eth1/2 transition
+	Network          uint64                 // Network identifier to advertise
+	Sync             downloader.SyncMode    // Whether to snap or full sync
+	BloomCache       uint64                 // Megabytes to alloc for snap sync bloom
+	EventMux         *event.TypeMux         // Legacy event mux, deprecate for `feed`
+	RequiredBlocks   map[uint64]common.Hash // Hard coded map of required block hashes for sync challenges
+	NoTxGossip       bool                   // Disable P2P transaction gossip
+	NoTxBroadcasting bool                   // Disable transaction broadcasting
 }
 
 type handler struct {
@@ -112,7 +113,8 @@ type handler struct {
 	chain    *core.BlockChain
 	maxPeers int
 
-	noTxGossip bool
+	noTxGossip       bool
+	noTxBroadcasting bool
 
 	downloader   *downloader.Downloader
 	blockFetcher *fetcher.BlockFetcher
@@ -146,19 +148,20 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
 	}
 	h := &handler{
-		networkID:      config.Network,
-		forkFilter:     forkid.NewFilter(config.Chain),
-		eventMux:       config.EventMux,
-		database:       config.Database,
-		txpool:         config.TxPool,
-		noTxGossip:     config.NoTxGossip,
-		chain:          config.Chain,
-		peers:          newPeerSet(),
-		merger:         config.Merger,
-		requiredBlocks: config.RequiredBlocks,
-		quitSync:       make(chan struct{}),
-		handlerDoneCh:  make(chan struct{}),
-		handlerStartCh: make(chan struct{}),
+		networkID:        config.Network,
+		forkFilter:       forkid.NewFilter(config.Chain),
+		eventMux:         config.EventMux,
+		database:         config.Database,
+		txpool:           config.TxPool,
+		noTxGossip:       config.NoTxGossip,
+		noTxBroadcasting: config.NoTxBroadcasting,
+		chain:            config.Chain,
+		peers:            newPeerSet(),
+		merger:           config.Merger,
+		requiredBlocks:   config.RequiredBlocks,
+		quitSync:         make(chan struct{}),
+		handlerDoneCh:    make(chan struct{}),
+		handlerStartCh:   make(chan struct{}),
 	}
 	if config.Sync == downloader.FullSync {
 		// The database seems empty as the current block is the genesis. Yet the snap
@@ -717,7 +720,11 @@ func (h *handler) txBroadcastLoop() {
 	for {
 		select {
 		case event := <-h.txsCh:
-			h.BroadcastTransactions(event.Txs)
+			if !h.noTxBroadcasting {
+				h.BroadcastTransactions(event.Txs)
+			} else {
+				// just abandon the txs
+			}
 		case <-h.txsSub.Err():
 			return
 		}
@@ -730,7 +737,11 @@ func (h *handler) txReannounceLoop() {
 	for {
 		select {
 		case event := <-h.reannoTxsCh:
-			h.ReannounceTransactions(event.Txs)
+			if !h.noTxBroadcasting {
+				h.ReannounceTransactions(event.Txs)
+			} else {
+				// just abandon the txs
+			}
 		case <-h.reannoTxsSub.Err():
 			return
 		}

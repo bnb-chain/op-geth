@@ -85,6 +85,7 @@ var (
 		utils.TxPoolLifetimeFlag,
 		utils.TxPoolReannounceTimeFlag,
 		utils.TxPoolReannounceRemotesFlag,
+		utils.TxPoolDisableBroadcastingFlag,
 		utils.BlobPoolDataDirFlag,
 		utils.BlobPoolDataCapFlag,
 		utils.BlobPoolPriceBumpFlag,

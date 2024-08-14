@@ -88,7 +88,7 @@ func hasKvConflict(slotDB *ParallelStateDB, addr common.Address, key common.Hash
 		}
 		if valUnconfirm, ok := slotDB.getKVFromUnconfirmedDB(addr, key); ok {
 			if !bytes.Equal(val.Bytes(), valUnconfirm.Bytes()) {
-				log.Debug("IsSlotDBReadsValid KV read is invalid in unconfirmed", "addr", addr,
+				log.Warn("IsSlotDBReadsValid KV read is invalid in unconfirmed", "addr", addr,
 					"valSlot", val, "valUnconfirm", valUnconfirm,
 					"SlotIndex", slotDB.parallel.SlotIndex,
 					"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex)
@@ -99,7 +99,7 @@ func hasKvConflict(slotDB *ParallelStateDB, addr common.Address, key common.Hash
 	valMain := mainDB.GetStateNoUpdate(addr, key)
 
 	if !bytes.Equal(val.Bytes(), valMain.Bytes()) {
-		log.Debug("hasKvConflict is invalid", "addr", addr,
+		log.Warn("hasKvConflict is invalid", "addr", addr,
 			"key", key, "valSlot", val,
 			"valMain", valMain, "SlotIndex", slotDB.parallel.SlotIndex,
 			"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex,
@@ -1330,7 +1330,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			}
 			if nonceUnconfirm, ok := slotDB.getNonceFromUnconfirmedDB(addr); ok {
 				if nonceSlot != nonceUnconfirm {
-					log.Debug("IsSlotDBReadsValid nonce read is invalid in unconfirmed", "addr", addr,
+					log.Warn("IsSlotDBReadsValid nonce read is invalid in unconfirmed", "addr", addr,
 						"nonceSlot", nonceSlot, "nonceUnconfirm", nonceUnconfirm, "SlotIndex", slotDB.parallel.SlotIndex,
 						"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex)
 					return false
@@ -1343,7 +1343,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			nonceMain = mainObj.Nonce()
 		}
 		if nonceSlot != nonceMain {
-			log.Debug("IsSlotDBReadsValid nonce read is invalid", "addr", addr,
+			log.Warn("IsSlotDBReadsValid nonce read is invalid", "addr", addr,
 				"nonceSlot", nonceSlot, "nonceMain", nonceMain, "SlotIndex", slotDB.parallel.SlotIndex,
 				"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex,
 				"mainIndex", mainDB.txIndex)
@@ -1373,7 +1373,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 		}
 
 		if balanceSlot.Cmp(balanceMain) != 0 {
-			log.Debug("IsSlotDBReadsValid balance read is invalid", "addr", addr,
+			log.Warn("IsSlotDBReadsValid balance read is invalid", "addr", addr,
 				"balanceSlot", balanceSlot, "balanceMain", balanceMain, "SlotIndex", slotDB.parallel.SlotIndex,
 				"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex,
 				"mainIndex", mainDB.txIndex)
@@ -1464,7 +1464,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			codeMain = object.Code()
 		}
 		if !bytes.Equal(codeSlot, codeMain) {
-			log.Debug("IsSlotDBReadsValid code read is invalid", "addr", addr,
+			log.Warn("IsSlotDBReadsValid code read is invalid", "addr", addr,
 				"len codeSlot", len(codeSlot), "len codeMain", len(codeMain), "SlotIndex", slotDB.parallel.SlotIndex,
 				"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex,
 				"mainIndex", mainDB.txIndex)
@@ -1479,7 +1479,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			codeHashMain = common.BytesToHash(object.CodeHash())
 		}
 		if !bytes.Equal(codeHashSlot.Bytes(), codeHashMain.Bytes()) {
-			log.Debug("IsSlotDBReadsValid codehash read is invalid", "addr", addr,
+			log.Warn("IsSlotDBReadsValid codehash read is invalid", "addr", addr,
 				"codeHashSlot", codeHashSlot, "codeHashMain", codeHashMain, "SlotIndex", slotDB.parallel.SlotIndex,
 				"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex, "mainIndex", mainDB.txIndex)
 			return false
@@ -1492,7 +1492,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			stateMain = true // addr exist in main DB
 		}
 		if stateSlot != stateMain {
-			log.Debug("IsSlotDBReadsValid addrState read invalid(true: exist, false: not exist)",
+			log.Warn("IsSlotDBReadsValid addrState read invalid(true: exist, false: not exist)",
 				"addr", addr, "stateSlot", stateSlot, "stateMain", stateMain,
 				"SlotIndex", slotDB.parallel.SlotIndex,
 				"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex, "mainIndex", mainDB.txIndex)
@@ -1503,7 +1503,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	for addr, destructRead := range slotDB.parallel.addrSnapDestructsReadsInSlot {
 		mainObj := mainDB.getDeletedStateObjectNoUpdate(addr)
 		if mainObj == nil {
-			log.Debug("IsSlotDBReadsValid snapshot destructs read invalid, address should exist",
+			log.Warn("IsSlotDBReadsValid snapshot destructs read invalid, address should exist",
 				"addr", addr, "destruct", destructRead,
 				"SlotIndex", slotDB.parallel.SlotIndex,
 				"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex)
@@ -1513,7 +1513,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 		_, destructMain := mainDB.snapDestructs[addr] // addr not exist
 		slotDB.snapParallelLock.RUnlock()
 		if destructRead != destructMain && addr.Hex() != "0x0000000000000000000000000000000000000001" {
-			log.Debug("IsSlotDBReadsValid snapshot destructs read invalid",
+			log.Warn("IsSlotDBReadsValid snapshot destructs read invalid",
 				"addr", addr, "destructRead", destructRead, "destructMain", destructMain,
 				"SlotIndex", slotDB.parallel.SlotIndex,
 				"txIndex", slotDB.txIndex, "baseTxIndex", slotDB.parallel.baseTxIndex,

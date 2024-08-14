@@ -448,7 +448,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		}
 		// just record error tx here
 		if ferr := st.state.FinaliseRWSet(); ferr != nil {
-			log.Error("finalise error deposit tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+			log.Error("finalise error deposit tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
 		}
 		result = &ExecutionResult{
 			UsedGas:    gasUsed,
@@ -460,7 +460,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if err != nil {
 		// just record error tx here
 		if ferr := st.state.FinaliseRWSet(); ferr != nil {
-			log.Error("finalise error tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+			log.Error("finalise error tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
 		}
 	}
 	return result, err
@@ -545,7 +545,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 
 	// stop record rw set in here, skip gas fee distribution
 	if ferr := st.state.FinaliseRWSet(); ferr != nil {
-		log.Error("finalise tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+		log.Error("finalise tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
 	}
 
 	// if deposit: skip refunds, skip tipping coinbase

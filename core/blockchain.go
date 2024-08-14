@@ -912,6 +912,10 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.miningStateCache.Purge()
 	bc.futureBlocks.Purge()
 
+	if bc.txDAGReader != nil {
+		bc.txDAGReader.Reset(head)
+	}
+
 	// Clear safe block, finalized block if needed
 	if safe := bc.CurrentSafeBlock(); safe != nil && head < safe.Number.Uint64() {
 		log.Warn("SetHead invalidated safe block")
@@ -2012,7 +2016,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			return it.index, err
 		}
 
-		if bc.enableTxDAG {
+		if bc.enableTxDAG && !bc.parallelExecution {
 			// compare input TxDAG when it enable in consensus
 			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			if err == nil {
@@ -2916,9 +2920,10 @@ func writeTxDAGToFile(writeHandle *os.File, item TxDAGOutputItem) error {
 	return err
 }
 
-var TxDAGCacheSize = 10000
+var TxDAGCacheSize = uint64(10000)
 
 type TxDAGFileReader struct {
+	output  string
 	file    *os.File
 	scanner *bufio.Scanner
 	cache   map[uint64]types.TxDAG
@@ -2927,22 +2932,30 @@ type TxDAGFileReader struct {
 }
 
 func NewTxDAGFileReader(output string) (*TxDAGFileReader, error) {
-	file, err := os.Open(output)
+	reader := &TxDAGFileReader{output: output}
+	err := reader.openFile(output)
 	if err != nil {
 		return nil, err
 	}
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 5*1024*1024), 5*1024*1024)
-	return &TxDAGFileReader{
-		file:    file,
-		scanner: scanner,
-	}, nil
+	return reader, nil
 }
 
 func (t *TxDAGFileReader) Close() {
 	t.lock.Lock()
 	defer t.lock.Unlock()
 	t.closeFile()
+}
+
+func (t *TxDAGFileReader) openFile(output string) error {
+	file, err := os.Open(output)
+	if err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 5*1024*1024), 5*1024*1024)
+	t.file = file
+	t.scanner = scanner
+	return nil
 }
 
 func (t *TxDAGFileReader) closeFile() {
@@ -2990,7 +3003,7 @@ func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
 		}
 		t.cache[num] = dag
 		t.latest = num
-		if len(t.cache) >= TxDAGCacheSize {
+		if uint64(len(t.cache)) >= TxDAGCacheSize {
 			break
 		}
 	}
@@ -3002,6 +3015,21 @@ func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
 		log.Info("try load TxDAG from file", "expect", expect, "cached", len(t.cache))
 	}
 	return t.cache[expect]
+}
+
+func (t *TxDAGFileReader) Reset(number uint64) error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	if t.latest-TxDAGCacheSize <= number {
+		return nil
+	}
+	t.closeFile()
+	if err := t.openFile(t.output); err != nil {
+		return err
+	}
+	t.latest = 0
+	t.cache = nil
+	return nil
 }
 
 func readTxDAGItemFromLine(line string) (uint64, types.TxDAG, error) {

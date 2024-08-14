@@ -409,13 +409,13 @@ func (p *BundlePool) drop(bundle *types.Bundle) bool {
 		// Pop the bundle with the lowest gas price
 		// the min element in the heap may not exist in the pool as it may be pruned
 		leastPriceBundleHash := heap.Pop(&p.bundleHeap).(*types.Bundle).Hash()
-		leastPriceBundle, _ := p.bundles[leastPriceBundleHash]
-		if _, ok := p.bundles[leastPriceBundleHash]; ok {
+		if leastPriceBundle, ok := p.bundles[leastPriceBundleHash]; ok {
 			if leastPriceBundle.Price.Cmp(bundle.Price) < 0 {
 				dropBundles = append(dropBundles, leastPriceBundle)
 				dropSlots = dropSlots + numSlots(leastPriceBundle)
 				continue
 			} else {
+				heap.Push(&p.bundleHeap, leastPriceBundle)
 				for _, dropBundle := range dropBundles {
 					heap.Push(&p.bundleHeap, dropBundle)
 				}

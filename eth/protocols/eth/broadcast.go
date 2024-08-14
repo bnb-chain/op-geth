@@ -34,6 +34,8 @@ const (
 var (
 	txAnnounceAbandonMeter  = metrics.NewRegisteredMeter("eth/fetcher/transaction/announces/abandon", nil)
 	txBroadcastAbandonMeter = metrics.NewRegisteredMeter("eth/fetcher/transaction/broadcasts/abandon", nil)
+	txP2PAnnQueueGauge      = metrics.NewRegisteredGauge("eth/fetcher/transaction/p2p/ann/queue", nil)
+	txP2PBroadQueueGauge    = metrics.NewRegisteredGauge("eth/fetcher/transaction/p2p/broad/queue", nil)
 )
 
 // safeGetPeerIP
@@ -102,6 +104,8 @@ func (p *Peer) broadcastTransactions() {
 				hashesCount++
 			}
 			queue = queue[:copy(queue, queue[hashesCount:])]
+
+			txP2PBroadQueueGauge.Update(int64(len(queue)))
 
 			// If there's anything available to transfer, fire up an async writer
 			if len(txs) > 0 {
@@ -176,6 +180,8 @@ func (p *Peer) announceTransactions() {
 			}
 			// Shift and trim queue
 			queue = queue[:copy(queue, queue[count:])]
+
+			txP2PAnnQueueGauge.Update(int64(len(queue)))
 
 			// If there's anything available to transfer, fire up an async writer
 			if len(pending) > 0 {

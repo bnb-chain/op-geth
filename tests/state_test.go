@@ -163,7 +163,7 @@ const traceErrorLimit = 400000
 
 func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 	// Use config from command line arguments.
-	config := vm.Config{EnableParallelExec: true, ParallelTxNum: 1}
+	config := vm.Config{}
 	err := test(config)
 	if err == nil {
 		return
@@ -237,7 +237,7 @@ func runBenchmark(b *testing.B, t *StateTest) {
 		key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
 
 		b.Run(key, func(b *testing.B) {
-			vmconfig := vm.Config{EnableParallelExec: true, ParallelTxNum: 1}
+			vmconfig := vm.Config{}
 
 			config, eips, err := GetChainConfig(subtest.Fork)
 			if err != nil {

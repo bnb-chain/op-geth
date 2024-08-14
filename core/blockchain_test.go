@@ -4790,6 +4790,20 @@ func TestTxDAGFile_LargeRead(t *testing.T) {
 	for i := uint64(0); i < totalSize; i++ {
 		require.Equal(t, except[i], reader.TxDAG(i), i)
 	}
+
+	// test reset to genesis
+	err = reader.Reset(0)
+	require.NoError(t, err)
+	for i := uint64(0); i < totalSize; i++ {
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
+
+	// test reset skip
+	err = reader.Reset(totalSize - TxDAGCacheSize)
+	require.NoError(t, err)
+	for i := totalSize - TxDAGCacheSize; i < totalSize; i++ {
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
 }
 
 func makeEmptyPlainTxDAG(cnt int, flags ...uint8) *types.PlainTxDAG {

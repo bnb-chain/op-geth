@@ -236,8 +236,10 @@ func (p *ParallelStateProcessor) mostHungrySlot() int {
 func (p *ParallelStateProcessor) hasConflict(txResult *ParallelTxResult, isStage2 bool) bool {
 	slotDB := txResult.slotDB
 	if txResult.err != nil {
+		log.Info("HasConflict due to err", "err", txResult.err)
 		return true
 	} else if slotDB.NeedsRedo() {
+		log.Info("HasConflict needsRedo")
 		// if there is any reason that indicates this transaction needs to redo, skip the conflict check
 		return true
 	} else {
@@ -439,7 +441,7 @@ func (p *ParallelStateProcessor) toConfirmTxIndex(targetTxIndex int, isStage2 bo
 func (p *ParallelStateProcessor) toConfirmTxIndexResult(txResult *ParallelTxResult, isStage2 bool) bool {
 	txReq := txResult.txReq
 	if p.hasConflict(txResult, isStage2) {
-		log.Debug(fmt.Sprintf("HasConflict!! block: %d, txIndex: %d\n", txResult.txReq.block.NumberU64(), txResult.txReq.txIndex))
+		log.Warn(fmt.Sprintf("HasConflict!! block: %d, txIndex: %d\n", txResult.txReq.block.NumberU64(), txResult.txReq.txIndex))
 		return false
 	}
 	if isStage2 { // not its turn
@@ -802,7 +804,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		unconfirmedResult := <-p.txResultChan
 		unconfirmedTxIndex := unconfirmedResult.txReq.txIndex
 		if unconfirmedTxIndex <= int(p.mergedTxIndex.Load()) {
-			log.Warn("drop merged txReq", "unconfirmedTxIndex", unconfirmedTxIndex, "p.mergedTxIndex", p.mergedTxIndex)
+			log.Debug("drop merged txReq", "unconfirmedTxIndex", unconfirmedTxIndex, "p.mergedTxIndex", p.mergedTxIndex.Load())
 			continue
 		}
 		p.pendingConfirmResults[unconfirmedTxIndex] = append(p.pendingConfirmResults[unconfirmedTxIndex], unconfirmedResult)

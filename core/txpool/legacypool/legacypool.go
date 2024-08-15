@@ -1403,6 +1403,9 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 		reorgDurationTimer.Update(time.Since(t0))
 		if reset != nil {
 			reorgresetTimer.UpdateSince(t0)
+			if reset.newHead != nil {
+				log.Info("Transaction pool reorged", "from", reset.oldHead.Number.Uint64(), "to", reset.newHead.Number.Uint64())
+			}
 		}
 	}(time.Now())
 	defer close(done)

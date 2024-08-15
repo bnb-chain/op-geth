@@ -183,11 +183,7 @@ func (s *ParallelStateDB) getStateObject(addr common.Address) *stateObject {
 func (s *ParallelStateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 	// The object could be created in SlotDB, if it got the object from DB and
 	// update it to the `s.parallel.stateObjects`
-	stateObject.db.parallelStateAccessLock.Lock()
-	if _, ok := s.parallel.stateObjects.Load(addr); !ok {
-		s.parallel.stateObjects.Store(addr, stateObject)
-	}
-	stateObject.db.parallelStateAccessLock.Unlock()
+	s.parallel.stateObjects.Store(addr, stateObject)
 }
 
 func (s *ParallelStateDB) getStateObjectNoSlot(addr common.Address) *stateObject {

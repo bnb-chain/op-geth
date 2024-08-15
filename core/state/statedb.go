@@ -81,10 +81,15 @@ func (s *StateObjectSyncMap) StoreStateObject(addr common.Address, stateObject *
 
 // loadStateObj is the entry for loading state object from stateObjects in StateDB or stateObjects in parallel
 func (s *StateDB) loadStateObj(addr common.Address) (*stateObject, bool) {
-
 	if s.isParallel {
-		s.parallelStateAccessLock.Lock()
-		defer s.parallelStateAccessLock.Unlock()
+		if s.parallel.isSlotDB {
+			if ret, ok := s.parallel.stateObjects.LoadStateObject(addr); ok {
+				return ret, ok
+			} else {
+				ret, ok := s.parallel.baseStateDB.loadStateObj(addr)
+				return ret, ok
+			}
+		}
 		ret, ok := s.parallel.stateObjects.LoadStateObject(addr)
 		return ret, ok
 	}
@@ -96,11 +101,7 @@ func (s *StateDB) loadStateObj(addr common.Address) (*stateObject, bool) {
 // storeStateObj is the entry for storing state object to stateObjects in StateDB or stateObjects in parallel
 func (s *StateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 	if s.isParallel {
-		// When a state object is stored into s.parallel.stateObjects,
-		// it belongs to base StateDB, it is confirmed and valid.
-		s.parallelStateAccessLock.Lock()
 		s.parallel.stateObjects.StoreStateObject(addr, stateObject)
-		s.parallelStateAccessLock.Unlock()
 	} else {
 		s.stateObjects[addr] = stateObject
 	}
@@ -109,9 +110,7 @@ func (s *StateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 // deleteStateObj is the entry for deleting state object to stateObjects in StateDB or stateObjects in parallel
 func (s *StateDB) deleteStateObj(addr common.Address) {
 	if s.isParallel {
-		s.parallelStateAccessLock.Lock()
 		s.parallel.stateObjects.Delete(addr)
-		s.parallelStateAccessLock.Unlock()
 	} else {
 		delete(s.stateObjects, addr)
 	}
@@ -181,7 +180,6 @@ type StateDB struct {
 	snaps      *snapshot.Tree    // Nil if snapshot is not available
 	snap       snapshot.Snapshot // Nil if snapshot is not available
 
-	parallelStateAccessLock sync.RWMutex
 	snapParallelLock        sync.RWMutex // for parallel mode, for main StateDB, slot will read snapshot, while processor will write.
 	trieParallelLock        sync.Mutex   // for parallel mode of trie, mostly for get states/objects from trie, lock required to handle trie tracer.
 	stateObjectDestructLock sync.RWMutex // for parallel mode, used in mainDB for mergeSlot and conflict check.
@@ -976,9 +974,7 @@ func (s *StateDB) setStateObject(object *stateObject) {
 	if s.isParallel {
 		// When a state object is stored into s.parallel.stateObjects,
 		// it belongs to base StateDB, it is confirmed and valid.
-		s.parallelStateAccessLock.Lock()
 		s.parallel.stateObjects.Store(object.address, object)
-		s.parallelStateAccessLock.Unlock()
 	} else {
 		s.stateObjects[object.Address()] = object
 	}
@@ -1438,14 +1434,6 @@ func (s *StateDB) CopyForSlot() *ParallelStateDB {
 			parallel:             parallel,
 		},
 	}
-
-	// copy parallel stateObjects
-	s.parallelStateAccessLock.Lock()
-	s.parallel.stateObjects.Range(func(addr any, stateObj any) bool {
-		state.parallel.stateObjects.StoreStateObject(addr.(common.Address), stateObj.(*stateObject).lightCopy(state))
-		return true
-	})
-	s.parallelStateAccessLock.Unlock()
 
 	state.snapDestructs = addressToStructPool.Get().(map[common.Address]struct{})
 	s.snapParallelLock.RLock()

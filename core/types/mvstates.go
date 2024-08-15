@@ -32,6 +32,10 @@ const (
 	AccountSuicide
 )
 
+const (
+	asyncDepGenChanSize = 100
+)
+
 func AccountStateKey(account common.Address, state AccountState) RWKey {
 	var key RWKey
 	key[0] = AccountStatePrefix
@@ -324,7 +328,7 @@ func NewMVStates(txCount int) *MVStates {
 }
 
 func (s *MVStates) EnableAsyncDepGen() *MVStates {
-	s.depsGenChan = make(chan int, 100)
+	s.depsGenChan = make(chan int, asyncDepGenChanSize)
 	s.stopChan = make(chan struct{}, 1)
 	go s.asyncDepGenLoop()
 	return s
@@ -434,7 +438,9 @@ func (s *MVStates) Finalise(index int) error {
 	s.nextFinaliseIndex++
 	// async resolve dependency
 	if s.depsGenChan != nil {
-		s.depsGenChan <- index
+		go func() {
+			s.depsGenChan <- index
+		}()
 	}
 	return nil
 }

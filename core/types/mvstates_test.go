@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const mockRWSetSize = 10000
+const mockRWSetSize = 5000
 
 func TestMVStates_BasicUsage(t *testing.T) {
 	ms := NewMVStates(0)
@@ -89,6 +89,19 @@ func TestMVStates_AsyncDepGen_SimpleResolveTxDAG(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, mockSimpleDAG(), dag)
 	t.Log(dag)
+}
+
+func TestMVStates_ResolveTxDAG_Async(t *testing.T) {
+	txCnt := 10000
+	rwSets := mockRandomRWSet(txCnt)
+	ms1 := NewMVStates(txCnt).EnableAsyncDepGen()
+	for i := 0; i < txCnt; i++ {
+		require.NoError(t, ms1.FulfillRWSet(rwSets[i], nil))
+		require.NoError(t, ms1.Finalise(i))
+	}
+	time.Sleep(100 * time.Millisecond)
+	_, err := ms1.ResolveTxDAG(txCnt, nil)
+	require.NoError(t, err)
 }
 
 func TestMVStates_ResolveTxDAG_Compare(t *testing.T) {

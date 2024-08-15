@@ -171,20 +171,20 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 	if err != nil {
 		return err
 	}
+	bundle.Price = price
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	hash := bundle.Hash()
+	if _, ok := p.bundles[hash]; ok {
+		return ErrBundleAlreadyExist
+	}
 
 	if p.slots+numSlots(bundle) > p.config.GlobalSlots {
 		if !p.drop(bundle) {
 			return ErrBundleGasPriceLow
 		}
-	}
-	bundle.Price = price
-
-	hash := bundle.Hash()
-	if _, ok := p.bundles[hash]; ok {
-		return ErrBundleAlreadyExist
 	}
 
 	for url, cli := range p.bundleReceiverClients {

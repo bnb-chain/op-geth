@@ -2830,8 +2830,8 @@ func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 	bc.hc.SetHead(headNumber, nil, createDelFn(bc))
 }
 
-func (bc *BlockChain) TxDAGEnabled() bool {
-	return bc.enableTxDAG
+func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
+	return bc.enableTxDAG && bc.txDAGReader == nil
 }
 
 func (bc *BlockChain) TxDAGFileOpened() bool {

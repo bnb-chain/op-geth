@@ -87,6 +87,8 @@ func TestMVStates_AsyncDepGen_SimpleResolveTxDAG(t *testing.T) {
 
 	dag, err := ms.ResolveTxDAG(10, nil)
 	require.NoError(t, err)
+	time.Sleep(100 * time.Millisecond)
+	require.NoError(t, ms.Stop())
 	require.Equal(t, mockSimpleDAG(), dag)
 	t.Log(dag)
 }

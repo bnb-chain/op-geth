@@ -336,11 +336,21 @@ func (s *MVStates) EnableAsyncDepGen() *MVStates {
 	return s
 }
 
+func (s *MVStates) Stop() error {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.stopAsyncDepGen()
+	return nil
+}
+
 func (s *MVStates) stopAsyncDepGen() {
+	if s.asyncRunning {
+		return
+	}
+	s.asyncRunning = false
 	if s.stopChan != nil {
 		close(s.stopChan)
 	}
-	s.asyncRunning = false
 }
 
 func (s *MVStates) asyncDepGenLoop() {

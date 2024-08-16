@@ -2831,7 +2831,7 @@ func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 }
 
 func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
-	return bc.enableTxDAG && bc.txDAGReader == nil
+	return bc.enableTxDAG && bc.txDAGWriteCh == nil
 }
 
 func (bc *BlockChain) TxDAGFileOpened() bool {

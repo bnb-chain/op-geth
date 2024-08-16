@@ -2016,7 +2016,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			return it.index, err
 		}
 
-		if bc.enableTxDAG && !bc.parallelExecution {
+		vtime := time.Since(vstart)
+		proctime := time.Since(start) // processing + validation
+
+		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec {
 			// compare input TxDAG when it enable in consensus
 			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			if err == nil {
@@ -2036,9 +2039,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
 			}
 		}
-
-		vtime := time.Since(vstart)
-		proctime := time.Since(start) // processing + validation
 
 		// Update the metrics touched during block processing and validation
 		accountReadTimer.Update(statedb.AccountReads)                 // Account reads are complete(in processing)

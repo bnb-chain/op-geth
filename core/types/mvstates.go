@@ -7,8 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ethereum/go-ethereum/metrics"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/holiman/uint256"
@@ -33,7 +31,7 @@ const (
 )
 
 const (
-	asyncDepGenChanSize = 100
+	asyncDepGenChanSize = 10000
 )
 
 func AccountStateKey(account common.Address, state AccountState) RWKey {
@@ -111,8 +109,8 @@ type RWSet struct {
 func NewRWSet(ver StateVersion) *RWSet {
 	return &RWSet{
 		ver:      ver,
-		readSet:  make(map[RWKey]*RWItem),
-		writeSet: make(map[RWKey]*RWItem),
+		readSet:  make(map[RWKey]*RWItem, 64),
+		writeSet: make(map[RWKey]*RWItem, 32),
 	}
 }
 
@@ -242,7 +240,7 @@ type PendingWrites struct {
 
 func NewPendingWrites() *PendingWrites {
 	return &PendingWrites{
-		list: make([]*RWItem, 0),
+		list: make([]*RWItem, 0, 8),
 	}
 }
 
@@ -309,8 +307,9 @@ type MVStates struct {
 	depsCache   map[int][]uint64
 
 	// async dep analysis
-	depsGenChan chan int
-	stopChan    chan struct{}
+	depsGenChan  chan int
+	stopChan     chan struct{}
+	asyncRunning bool
 
 	// execution stat infos
 	stats map[int]*ExeStat
@@ -328,16 +327,20 @@ func NewMVStates(txCount int) *MVStates {
 }
 
 func (s *MVStates) EnableAsyncDepGen() *MVStates {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	s.depsGenChan = make(chan int, asyncDepGenChanSize)
-	s.stopChan = make(chan struct{}, 1)
+	s.stopChan = make(chan struct{})
+	s.asyncRunning = true
 	go s.asyncDepGenLoop()
 	return s
 }
 
 func (s *MVStates) stopAsyncDepGen() {
 	if s.stopChan != nil {
-		s.stopChan <- struct{}{}
+		close(s.stopChan)
 	}
+	s.asyncRunning = false
 }
 
 func (s *MVStates) asyncDepGenLoop() {
@@ -403,12 +406,12 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 		s.stats[index] = stat
 	}
 
-	if metrics.EnabledExpensive {
-		for k := range rwSet.writeSet {
-			// this action is only for testing, it runs when enable expensive metrics.
-			checkRWSetInconsistent(index, k, rwSet.readSet, rwSet.writeSet)
-		}
-	}
+	//if metrics.EnabledExpensive {
+	//	for k := range rwSet.writeSet {
+	//		// this action is only for testing, it runs when enable expensive metrics.
+	//		checkRWSetInconsistent(index, k, rwSet.readSet, rwSet.writeSet)
+	//	}
+	//}
 	s.rwSets[index] = rwSet
 	return nil
 }
@@ -417,14 +420,15 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 func (s *MVStates) Finalise(index int) error {
 	log.Debug("Finalise", "total", len(s.rwSets), "index", index)
 	s.lock.Lock()
-	defer s.lock.Unlock()
 
 	rwSet := s.rwSets[index]
 	if rwSet == nil {
+		s.lock.Unlock()
 		return fmt.Errorf("finalise a non-exist RWSet, index: %d", index)
 	}
 
 	if index != s.nextFinaliseIndex {
+		s.lock.Unlock()
 		return fmt.Errorf("finalise in wrong order, next: %d, input: %d", s.nextFinaliseIndex, index)
 	}
 
@@ -436,34 +440,50 @@ func (s *MVStates) Finalise(index int) error {
 		s.pendingWriteSet[k].Append(v)
 	}
 	s.nextFinaliseIndex++
-	// async resolve dependency
-	if s.depsGenChan != nil {
-		go func() {
-			s.depsGenChan <- index
-		}()
+	s.lock.Unlock()
+	// async resolve dependency, but non-block action
+	if s.asyncRunning && s.depsGenChan != nil {
+		s.depsGenChan <- index
 	}
 	return nil
 }
 
 func (s *MVStates) resolveDepsCacheByWrites(index int, rwSet *RWSet) {
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
-	s.depMapCache[index] = NewTxDeps(0)
+	s.depMapCache[index] = NewTxDeps(8)
 	if rwSet.excludedTx {
 		return
 	}
-	seen := make(map[int]struct{})
-	for key := range rwSet.readSet {
-		// check self destruct
-		if key.IsAccountSelf() {
-			key = AccountStateKey(key.Addr(), AccountSuicide)
+	seen := make(map[int]struct{}, 8)
+	// check tx dependency, only check key, skip version
+	if len(s.pendingWriteSet) > len(rwSet.readSet) {
+		for key := range rwSet.readSet {
+			// check self destruct
+			if key.IsAccountSelf() {
+				key = AccountStateKey(key.Addr(), AccountSuicide)
+			}
+			writes := s.pendingWriteSet[key]
+			if writes == nil {
+				continue
+			}
+			items := writes.FindPrevWrites(index)
+			for _, item := range items {
+				seen[item.TxIndex()] = struct{}{}
+			}
 		}
-		writes := s.pendingWriteSet[key]
-		if writes == nil {
-			continue
-		}
-		items := writes.FindPrevWrites(index)
-		for _, item := range items {
-			seen[item.TxIndex()] = struct{}{}
+	} else {
+		for k, w := range s.pendingWriteSet {
+			// check suicide, add read address flag, it only for check suicide quickly, and cannot for other scenarios.
+			if k.IsAccountSuicide() {
+				k = k.ToAccountSelf()
+			}
+			if _, ok := rwSet.readSet[k]; !ok {
+				continue
+			}
+			items := w.FindPrevWrites(index)
+			for _, item := range items {
+				seen[item.TxIndex()] = struct{}{}
+			}
 		}
 	}
 	for prev := 0; prev < index; prev++ {

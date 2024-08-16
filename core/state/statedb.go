@@ -2388,6 +2388,9 @@ func (s *StateDB) ResetMVStates(txCount int) {
 	if s.isParallel && s.parallel.isSlotDB {
 		return
 	}
+	if s.mvStates != nil {
+		s.mvStates.Stop()
+	}
 	s.mvStates = types.NewMVStates(txCount).EnableAsyncDepGen()
 	s.rwSet = nil
 }

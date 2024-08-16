@@ -108,7 +108,10 @@ func (pc *cacheForMiner) sync2cache(pool txpool.LazyResolver, filter func(txs ty
 				}
 			}
 			allLazy[addr] = lazies
-			filteredLazy[addr] = lazies[:len(filterd)]
+			filteredLazies := lazies[:len(filterd)]
+			if len(filteredLazies) > 0 {
+				filteredLazy[addr] = filteredLazies
+			}
 		}
 	}
 

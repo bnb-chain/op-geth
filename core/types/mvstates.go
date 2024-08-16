@@ -344,7 +344,7 @@ func (s *MVStates) Stop() error {
 }
 
 func (s *MVStates) stopAsyncDepGen() {
-	if s.asyncRunning {
+	if !s.asyncRunning {
 		return
 	}
 	s.asyncRunning = false

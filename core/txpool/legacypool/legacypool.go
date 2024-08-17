@@ -840,6 +840,16 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 	}
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(pool.all.Slots()+numSlots(tx)) > pool.config.GlobalSlots+pool.config.GlobalQueue {
+		currHead := pool.currentHead.Load()
+		if currHead != nil && currHead.BaseFee != nil && pool.priced.NeedReheap(currHead) {
+			if pool.chainconfig.IsLondon(new(big.Int).Add(currHead.Number, big.NewInt(1))) {
+				baseFee := eip1559.CalcBaseFee(pool.chainconfig, currHead, currHead.Time+1)
+				pool.priced.SetBaseFee(baseFee)
+			}
+			pool.priced.Reheap()
+			pool.priced.currHead = currHead
+		}
+
 		// If the new transaction is underpriced, don't accept it
 		if !isLocal && pool.priced.Underpriced(tx) {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "gasTipCap", tx.GasTipCap(), "gasFeeCap", tx.GasFeeCap())
@@ -1451,8 +1461,6 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
 				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
 				pool.priced.SetBaseFee(pendingBaseFee)
-			} else {
-				pool.priced.Reheap()
 			}
 		}
 		// Update all accounts to the latest known pending nonce

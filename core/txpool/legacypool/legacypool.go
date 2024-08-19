@@ -1104,7 +1104,9 @@ func (pool *LegacyPool) addRemoteSync(tx *types.Transaction) error {
 // to the add is finished. Only use this during tests for determinism!
 func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error {
 	defer func(t0 time.Time) {
-		addTimer.Update(time.Since(t0) / time.Duration(len(txs)))
+		if len(txs) > 0 {
+			addTimer.Update(time.Since(t0) / time.Duration(len(txs)))
+		}
 	}(time.Now())
 	// Do not treat as local if local transactions have been disabled
 	local = local && !pool.config.NoLocals
@@ -1141,7 +1143,9 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error 
 	pool.mu.Lock()
 	t0 := time.Now()
 	newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
-	addWithLockTimer.Update(time.Since(t0) / time.Duration(len(news)))
+	if len(news) > 0 {
+		addWithLockTimer.Update(time.Since(t0) / time.Duration(len(news)))
+	}
 	pool.mu.Unlock()
 
 	var nilSlot = 0

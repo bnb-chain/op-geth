@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -354,6 +355,7 @@ func (s *MVStates) stopAsyncDepGen() {
 }
 
 func (s *MVStates) asyncDepGenLoop() {
+	timeout := time.After(3 * time.Second)
 	for {
 		select {
 		case tx := <-s.depsGenChan:
@@ -361,6 +363,9 @@ func (s *MVStates) asyncDepGenLoop() {
 			s.resolveDepsCacheByWrites(tx, s.rwSets[tx])
 			s.lock.Unlock()
 		case <-s.stopChan:
+			return
+		case <-timeout:
+			log.Warn("asyncDepGenLoop exit by timeout")
 			return
 		}
 	}

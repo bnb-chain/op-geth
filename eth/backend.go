@@ -21,11 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"math/big"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
@@ -308,6 +309,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	// Permit the downloader to use the trie cache allowance during fast sync
 	cacheLimit := cacheConfig.TrieCleanLimit + cacheConfig.TrieDirtyLimit + cacheConfig.SnapshotLimit
 	if eth.handler, err = newHandler(&handlerConfig{
+		StaticNodes:    stack.Config().P2P.StaticNodes,
 		Database:       chainDb,
 		Chain:          eth.blockchain,
 		TxPool:         eth.txPool,

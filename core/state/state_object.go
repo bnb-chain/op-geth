@@ -411,14 +411,14 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	// If the snapshot is unavailable or reading from it fails, load from the database.
 	if s.db.snap == nil || err != nil {
 		start := time.Now()
+		s.db.trieParallelLock.Lock()
+		defer s.db.trieParallelLock.Unlock()
 		tr, err := s.getTrie()
 		if err != nil {
 			s.db.setError(err)
 			return common.Hash{}
 		}
-		s.db.trieParallelLock.Lock()
 		val, err := tr.GetStorage(s.address, key.Bytes())
-		s.db.trieParallelLock.Unlock()
 		if metrics.EnabledExpensive {
 			s.db.StorageReads += time.Since(start)
 		}
@@ -977,14 +977,14 @@ func (s *stateObject) GetCommittedStateNoUpdate(key common.Hash) common.Hash {
 	// If the snapshot is unavailable or reading from it fails, load from the database.
 	if s.db.snap == nil || err != nil {
 		start := time.Now()
+		s.db.trieParallelLock.Lock()
+		defer s.db.trieParallelLock.Unlock()
 		tr, err := s.getTrie()
 		if err != nil {
 			s.db.setError(err)
 			return common.Hash{}
 		}
-		s.db.trieParallelLock.Lock()
 		val, err := tr.GetStorage(s.address, key.Bytes())
-		s.db.trieParallelLock.Unlock()
 		if metrics.EnabledExpensive {
 			s.db.StorageReads += time.Since(start)
 		}

@@ -98,7 +98,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
 	}
 	statedb.MarkFullProcessed()
-	if p.bc.enableTxDAG {
+	if p.bc.enableTxDAG && !p.bc.vmConfig.EnableParallelExec {
 		statedb.ResetMVStates(len(block.Transactions()))
 	}
 	// Iterate over and process the individual transactions

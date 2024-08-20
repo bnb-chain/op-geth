@@ -22,6 +22,8 @@ import (
 	"sync"
 
 	"github.com/VictoriaMetrics/fastcache"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -29,7 +31,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
-	"golang.org/x/crypto/sha3"
 )
 
 // trienodebuffer is a collection of modified trie nodes to aggregate the disk
@@ -333,6 +334,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 			persistentID := rawdb.ReadPersistentStateID(dl.db.diskdb)
 			if limit >= persistentID {
 				log.Debug("No prune ancient under nodebufferlist, less than db config state history limit", "persistent_id", persistentID, "limit", limit)
+				bottom.cache.Remove(bottom)
 				return ndl, nil
 			}
 			targetOldest := persistentID - limit + 1
@@ -340,6 +342,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 			if err == nil && targetOldest <= realOldest {
 				log.Info("No prune ancient under nodebufferlist due to truncate oldest less than real oldest, which maybe happened in abnormal restart",
 					"tartget_oldest_id", targetOldest, "real_oldest_id", realOldest, "error", err)
+				bottom.cache.Remove(bottom)
 				return ndl, nil
 			}
 			oldest = targetOldest

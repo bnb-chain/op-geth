@@ -157,8 +157,10 @@ type ParallelState struct {
 	storagesOriginDeleteRecord []common.Address
 	createdObjectRecord        map[common.Address]struct{}
 	// we may need to redo for some specific reasons, like we read the wrong state and need to panic in sequential mode in SubRefund
-	needsRedo bool
-	useDAG    bool
+	needsRedo                     bool
+	useDAG                        bool
+	conflictCheckStateObjectCache *sync.Map
+	conflictCheckKVReadCache      *sync.Map
 }
 
 // StateDB structs within the ethereum protocol are used to store anything

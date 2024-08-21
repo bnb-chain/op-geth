@@ -1385,7 +1385,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 		})
 	}
 	readLen := len(units)
-	if readLen < 80000 || isStage2 {
+	if readLen < 8 || isStage2 {
 		for _, unit := range units {
 			if hasKvConflict(slotDB, unit.addr, unit.key, unit.val, isStage2) {
 				return false

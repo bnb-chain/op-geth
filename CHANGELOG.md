@@ -1,5 +1,85 @@
 # Changelog
 
+## v0.4.6
+
+This is a minor release for opBNB Mainnet and Testnet.
+Upgrading is optional.
+
+### What's Changed
+* perf: add DialOptions function for Dial by @constwz in https://github.com/bnb-chain/op-geth/pull/140
+* Fix: clear difflayer cache when truncate not triggered by @krish-nr in https://github.com/bnb-chain/op-geth/pull/141
+* fix addBundle issue by @redhdx in https://github.com/bnb-chain/op-geth/pull/143
+
+### New Contributors
+* @constwz made their first contribution in https://github.com/bnb-chain/op-geth/pull/140
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.4.6
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.5...v0.4.6
+
+## v0.4.5
+
+This is a hard fork release for the opBNB Mainnet called **Wright**. It will be activated on August 27, 2024, at 6 AM UTC.
+All **mainnet** op-geth nodes must upgrade to this release before the hard fork.
+
+The testnet hardfork will be activated on August 15, 2024, at 6 AM UTC.
+If you have upgraded your testnet op-geth to version 0.4.4, you can skip this version for the testnet. Otherwise, you can directly upgrade your testnet op-geth to version 0.4.5.
+
+### User Facing Changes
+
+To support gasless transactions on opBNB, the following features have been introduced:
+
+* The base fee is set to 0.
+* The bundle feature is supported.
+* When the gas price is set to 0, the L1 fee will also be set to 0.
+
+Combined with these features and a sponsor (paymaster), users can send transactions without holding BNB to pay gas fees.
+
+### Changelogs
+* perf: speedup pbss trienode read by @will-2012 in https://github.com/bnb-chain/op-geth/pull/122
+* pathdb: handle persistent id when using nodebufferlist by @sysvm in https://github.com/bnb-chain/op-geth/pull/121
+* feat: support auto recover when pbss meet unclean shutdown by @krish-nr in https://github.com/bnb-chain/op-geth/pull/125
+* fix: ignore truncation target range as flush not operated on time by @krish-nr in https://github.com/bnb-chain/op-geth/pull/131
+* feature(op-geth): add opbnb gasless solution by @redhdx in https://github.com/bnb-chain/op-geth/pull/130
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.4.5
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.3...v0.4.5
+
+## v0.4.4
+
+This is a hard fork release for the opBNB Testnet called **Wright**. It will be activated on August 15, 2024, at 6 AM UTC.
+All **testnet** nodes must upgrade to this release before the hard fork.
+
+Upgrading for mainnet nodes is optional.
+
+### User Facing Changes
+
+To support gasless transactions on opBNB, the following features have been introduced:
+
+* The base fee is set to 0.
+* The bundle feature is supported.
+* When the gas price is set to 0, the L1 fee will also be set to 0.
+
+Combined with these features and a sponsor (paymaster), users can send transactions without holding BNB to pay gas fees.
+
+### Changelogs
+* perf: speedup pbss trienode read by @will-2012 in https://github.com/bnb-chain/op-geth/pull/122
+* pathdb: handle persistent id when using nodebufferlist by @sysvm in https://github.com/bnb-chain/op-geth/pull/121
+* feat: support auto recover when pbss meet unclean shutdown by @krish-nr in https://github.com/bnb-chain/op-geth/pull/125
+* fix: ignore truncation target range as flush not operated on time by @krish-nr in https://github.com/bnb-chain/op-geth/pull/131
+* feature(op-geth): add opbnb gasless solution by @redhdx in https://github.com/bnb-chain/op-geth/pull/130
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.4.4
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.3...v0.4.4
+
 ## 0.4.3
 
 This is a minor release for opBNB Mainnet and Testnet.

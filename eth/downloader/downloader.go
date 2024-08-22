@@ -1846,3 +1846,7 @@ func (d *Downloader) reportSnapSyncProgress(force bool) {
 	log.Info("Syncing: chain download in progress", "synced", progress, "chain", syncedBytes, "headers", headers, "bodies", bodies, "receipts", receipts, "eta", common.PrettyDuration(eta))
 	d.syncLogTime = time.Now()
 }
+
+func (d *Downloader) GetAllPeers() []*peerConnection {
+	return d.peers.AllPeers()
+}

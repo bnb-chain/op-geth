@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -261,6 +262,38 @@ func (payload *Payload) stopBuilding() {
 	})
 }
 
+// fix attempts to recover and repair the block and its associated data (such as MPT)
+// either from the local blockchain or from peers.
+//
+// In most cases, the block can be recovered from the local node's data. However,
+// there is a corner case where this may not be possible: If the sequencer
+// broadcasts a block but the local node crashes before fully writing the block to its local
+// storage, the local chain might be lagging behind by one block compared to peers.
+// In such cases, we need to recover the missing block data from peers.
+//
+// The function first tries to recover the block using the local blockchain via the
+// fixManager.RecoverFromLocal method. If local recovery fails (e.g., due to the node
+// missing the block), it attempts to retrieve the block header from peers and triggers
+//
+// blockHash: The hash of the latest block that needs to be recovered and fixed.
+func (w *worker) fix(blockHash common.Hash) {
+	log.Info("Fix operation started")
+
+	err := w.fixManager.RecoverFromLocal(w, blockHash)
+	if err != nil {
+		log.Warn("Local recovery failed, trying to recover from peers", "err", err)
+
+		err = w.fixManager.RecoverFromPeer(blockHash)
+		if err != nil {
+			log.Error("Failed to recover from peers", "err", err)
+			return
+		}
+	}
+
+	log.Info("Fix operation completed")
+
+}
+
 // buildPayload builds the payload according to the provided parameters.
 func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	if args.NoTxPool { // don't start the background payload updating job if there is no tx pool to pull from
@@ -348,8 +381,17 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			start := time.Now()
 			// getSealingBlock is interrupted by shared interrupt
 			r := w.getSealingBlock(fullParams)
+
+			// if state missing, init fixing routine
+			if r.err != nil && strings.Contains(r.err.Error(), "missing trie node") {
+				log.Info("step into fixing")
+				w.StartFix(payload.id, fullParams.parentHash)
+				return 0
+			}
+
 			dur := time.Since(start)
 			// update handles error case
+
 			payload.update(r, dur, func() {
 				w.cacheMiningBlock(r.block, r.env)
 			})
@@ -390,6 +432,47 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 		}
 	}()
 	return payload, nil
+}
+
+// retryPayloadUpdate retries the payload update process after a fix operation.
+//
+// This function reconstructs the block using the provided BuildPayloadArgs and
+// attempts to update the payload in the system. It performs validation of the
+// block parameters and updates the payload if the block is successfully built.
+func (w *worker) retryPayloadUpdate(args *BuildPayloadArgs, payload *Payload) {
+	fullParams := &generateParams{
+		timestamp:   args.Timestamp,
+		forceTime:   true,
+		parentHash:  args.Parent,
+		coinbase:    args.FeeRecipient,
+		random:      args.Random,
+		withdrawals: args.Withdrawals,
+		beaconRoot:  args.BeaconRoot,
+		noTxs:       false,
+		txs:         args.Transactions,
+		gasLimit:    args.GasLimit,
+	}
+
+	// Since we skip building the empty block when using the tx pool, we need to explicitly
+	// validate the BuildPayloadArgs here.
+	_, err := w.validateParams(fullParams)
+	if err != nil {
+		return
+	}
+
+	// set shared interrupt
+	fullParams.interrupt = payload.interrupt
+
+	r := w.getSealingBlock(fullParams)
+	if r.err != nil {
+		log.Error("Failed to build full payload after fix", "id", payload.id, "err", r.err)
+		return
+	}
+
+	payload.update(r, 0, func() {
+		w.cacheMiningBlock(r.block, r.env)
+	})
+	log.Info("Successfully updated payload after fix", "id", payload.id)
 }
 
 func (w *worker) cacheMiningBlock(block *types.Block, env *environment) {

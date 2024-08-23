@@ -113,13 +113,14 @@ type ParallelTxRequest struct {
 func (p *ParallelStateProcessor) init() {
 	log.Info("Parallel execution mode is enabled", "Parallel Num", p.parallelNum,
 		"CPUNum", runtime.NumCPU())
-	p.txResultChan = make(chan *ParallelTxResult, 200)
+	p.txResultChan = make(chan *ParallelTxResult, 20000)
 	p.stopSlotChan = make(chan struct{}, 1)
 	p.stopConfirmChan = make(chan struct{}, 1)
 	p.stopConfirmStage2Chan = make(chan struct{}, 1)
 
 	p.slotState = make([]*SlotState, p.parallelNum)
-	for i := 0; i < p.parallelNum; i++ {
+	quickMergeNum := p.parallelNum / 2
+	for i := 0; i < p.parallelNum-quickMergeNum; i++ {
 		p.slotState[i] = &SlotState{
 			primaryWakeUpChan: make(chan struct{}, 1),
 			shadowWakeUpChan:  make(chan struct{}, 1),
@@ -137,7 +138,22 @@ func (p *ParallelStateProcessor) init() {
 		go func(slotIndex int) {
 			p.runSlotLoop(slotIndex, parallelShadowSlot)
 		}(i)
+	}
 
+	for i := p.parallelNum - quickMergeNum; i < p.parallelNum; i++ {
+		// init a quick merge slot
+		p.slotState[i] = &SlotState{
+			primaryWakeUpChan: make(chan struct{}, 1),
+			shadowWakeUpChan:  make(chan struct{}, 1),
+			primaryStopChan:   make(chan struct{}, 1),
+			shadowStopChan:    make(chan struct{}, 1),
+		}
+		go func(slotIndex int) {
+			p.runQuickMergeSlotLoop(slotIndex, parallelPrimarySlot)
+		}(i)
+		go func(slotIndex int) {
+			p.runQuickMergeSlotLoop(slotIndex, parallelShadowSlot)
+		}(i)
 	}
 
 	p.confirmStage2Chan = make(chan int, 10)
@@ -456,9 +472,8 @@ func (p *ParallelStateProcessor) toConfirmTxIndexResult(txResult *ParallelTxResu
 	}
 
 	// ok, time to do finalize, stage2 should not be parallel
-	header := txReq.block.Header()
 	txResult.receipt, txResult.err = applyTransactionStageFinalization(txResult.evm, txResult.result,
-		*txReq.msg, p.config, txResult.slotDB, header,
+		*txReq.msg, p.config, txResult.slotDB, txReq.block,
 		txReq.tx, txReq.usedGas, txResult.originalNonce)
 	return true
 }
@@ -526,6 +541,49 @@ func (p *ParallelStateProcessor) runSlotLoop(slotIndex int, slotType int32) {
 				continue
 			}
 			p.txResultChan <- res
+		}
+	}
+}
+
+func (p *ParallelStateProcessor) runQuickMergeSlotLoop(slotIndex int, slotType int32) {
+	curSlot := p.slotState[slotIndex]
+	var wakeupChan chan struct{}
+	var stopChan chan struct{}
+
+	if slotType == parallelPrimarySlot {
+		wakeupChan = curSlot.primaryWakeUpChan
+		stopChan = curSlot.primaryStopChan
+	} else {
+		wakeupChan = curSlot.shadowWakeUpChan
+		stopChan = curSlot.shadowStopChan
+	}
+	for {
+		select {
+		case <-stopChan:
+			p.stopSlotChan <- struct{}{}
+			continue
+		case <-wakeupChan:
+		}
+
+		next := int(p.mergedTxIndex.Load()) + 1
+		for i := next; i < len(p.allTxReqs); i++ {
+			txReq := p.allTxReqs[next]
+			if txReq.txIndex <= int(p.mergedTxIndex.Load()) {
+				continue
+			}
+
+			if txReq.txIndex != next {
+				log.Warn("query next txReq wrong", "slot", slotIndex, "next", next, "actual", txReq.txIndex)
+				break
+			}
+			if !atomic.CompareAndSwapInt32(&txReq.runnable, 1, 0) {
+				continue
+			}
+			res := p.executeInSlot(slotIndex, txReq)
+			if res != nil {
+				p.txResultChan <- res
+			}
+			break
 		}
 	}
 }
@@ -645,6 +703,18 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 		case wakeupChan <- struct{}{}:
 		default:
 		}
+	}
+	// schedule prefetch once only when unconfirmedResult is valid
+	if result.err == nil {
+		if _, ok := p.txReqExecuteRecord[resultTxIndex]; !ok {
+			p.txReqExecuteRecord[resultTxIndex] = 0
+			p.txReqExecuteCount++
+			statedb.AddrPrefetch(result.slotDB)
+			if !p.inConfirmStage2 && p.txReqExecuteCount == p.targetStage2Count {
+				p.inConfirmStage2 = true
+			}
+		}
+		p.txReqExecuteRecord[resultTxIndex]++
 	}
 	return result
 }
@@ -809,19 +879,6 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		}
 		p.pendingConfirmResults[unconfirmedTxIndex] = append(p.pendingConfirmResults[unconfirmedTxIndex], unconfirmedResult)
 
-		// schedule prefetch once only when unconfirmedResult is valid
-		if unconfirmedResult.err == nil {
-			if _, ok := p.txReqExecuteRecord[unconfirmedTxIndex]; !ok {
-				p.txReqExecuteRecord[unconfirmedTxIndex] = 0
-				p.txReqExecuteCount++
-				statedb.AddrPrefetch(unconfirmedResult.slotDB)
-				if !p.inConfirmStage2 && p.txReqExecuteCount == p.targetStage2Count {
-					p.inConfirmStage2 = true
-				}
-			}
-			p.txReqExecuteRecord[unconfirmedTxIndex]++
-		}
-
 		for {
 			result := p.confirmTxResults(statedb, gp)
 			if result == nil {
@@ -894,9 +951,7 @@ func applyTransactionStageExecution(msg *Message, gp *GasPool, statedb *state.Pa
 	return evm, result, err
 }
 
-func applyTransactionStageFinalization(evm *vm.EVM, result *ExecutionResult, msg Message,
-	config *params.ChainConfig, statedb *state.ParallelStateDB, header *types.Header,
-	tx *types.Transaction, usedGas *uint64, nonce *uint64) (*types.Receipt, error) {
+func applyTransactionStageFinalization(evm *vm.EVM, result *ExecutionResult, msg Message, config *params.ChainConfig, statedb *state.ParallelStateDB, block *types.Block, tx *types.Transaction, usedGas *uint64, nonce *uint64) (*types.Receipt, error) {
 
 	*usedGas += result.UsedGas
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
@@ -929,10 +984,10 @@ func applyTransactionStageFinalization(evm *vm.EVM, result *ExecutionResult, msg
 		receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, *nonce)
 	}
 	// Set the receipt logs and create the bloom filter.
-	receipt.Logs = statedb.GetLogs(tx.Hash(), header.Number.Uint64(), header.Hash())
+	receipt.Logs = statedb.GetLogs(tx.Hash(), block.NumberU64(), block.Hash())
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	receipt.BlockHash = header.Hash()
-	receipt.BlockNumber = header.Number
+	receipt.BlockHash = block.Hash()
+	receipt.BlockNumber = block.Number()
 	receipt.TransactionIndex = uint(statedb.TxIndex())
 	return receipt, nil
 }

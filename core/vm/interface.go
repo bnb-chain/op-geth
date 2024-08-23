@@ -81,6 +81,7 @@ type StateDB interface {
 
 	TxIndex() int
 
+	// parallel DAG related
 	BeforeTxTransition()
 	FinaliseRWSet() error
 }

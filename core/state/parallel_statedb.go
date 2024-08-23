@@ -1275,6 +1275,10 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	})
 
 	mainDB := slotDB.parallel.baseStateDB
+	if isStage2 && slotDB.txIndex < mainDB.TxIndex() {
+		// already merged, no need to check
+		return true
+	}
 	// for nonce
 	for addr, nonceSlot := range slotDB.parallel.nonceReadsInSlot {
 		if isStage2 { // update slotDB's unconfirmed DB list and try

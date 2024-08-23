@@ -7,10 +7,40 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/exp/slices"
 )
+
+const TxDAGAbiJson = `
+[
+  {
+    "type": "function",
+    "name": "setTxDAG",
+    "inputs": [
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  }
+]
+`
+
+var TxDAGABI abi.ABI
+
+func init() {
+	var err error
+	// must be able to register the TxDAGABI
+	TxDAGABI, err = abi.JSON(strings.NewReader(TxDAGAbiJson))
+	if err != nil {
+		panic(err)
+	}
+}
 
 // TxDAGType Used to extend TxDAG and customize a new DAG structure
 const (
@@ -19,8 +49,13 @@ const (
 )
 
 var (
-	TxDAGRelation0 uint8 = 0
-	TxDAGRelation1 uint8 = 1
+	// NonDependentRelFlag indicates that the txs described is non-dependent
+	// and is used to reduce storage when there are a large number of dependencies.
+	NonDependentRelFlag uint8 = 0x01
+	// ExcludedTxFlag indicates that the tx is excluded from TxDAG, user should execute them in sequence.
+	// These excluded transactions should be consecutive in the head or tail.
+	ExcludedTxFlag uint8 = 0x02
+	TxDepFlagMask        = NonDependentRelFlag | ExcludedTxFlag
 )
 
 type TxDAG interface {
@@ -30,17 +65,48 @@ type TxDAG interface {
 	// Inner return inner instance
 	Inner() interface{}
 
-	// DelayGasDistribution check if delay the distribution of GasFee
-	DelayGasDistribution() bool
+	// DelayGasFeeDistribution check if delay the distribution of GasFee
+	DelayGasFeeDistribution() bool
 
 	// TxDep query TxDeps from TxDAG
-	TxDep(int) TxDep
+	TxDep(int) *TxDep
 
 	// TxCount return tx count
 	TxCount() int
 
 	// SetTxDep at the last one
 	SetTxDep(int, TxDep) error
+}
+
+func DecodeTxDAGCalldata(data []byte) (TxDAG, error) {
+	// trim the method id before unpack
+	if len(data) < 4 {
+		return nil, fmt.Errorf("invalid txDAG calldata, len(data)=%d", len(data))
+	}
+	calldata, err := TxDAGABI.Methods["setTxDAG"].Inputs.Unpack(data[4:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to call abi unpack, err: %v", err)
+	}
+	if len(calldata) <= 0 {
+		return nil, fmt.Errorf("invalid txDAG calldata, len(calldata)=%d", len(calldata))
+	}
+	data, ok := calldata[0].([]byte)
+	if !ok {
+		return nil, fmt.Errorf("invalid txDAG calldata parameter")
+	}
+	return DecodeTxDAG(data)
+}
+
+func EncodeTxDAGCalldata(dag TxDAG) ([]byte, error) {
+	data, err := EncodeTxDAG(dag)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode txDAG, err: %v", err)
+	}
+	data, err = TxDAGABI.Pack("setTxDAG", data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call abi pack, err: %v", err)
+	}
+	return data, nil
 }
 
 func EncodeTxDAG(dag TxDAG) ([]byte, error) {
@@ -74,6 +140,76 @@ func DecodeTxDAG(enc []byte) (TxDAG, error) {
 	}
 }
 
+func ValidateTxDAG(d TxDAG, txCnt int) error {
+	if d == nil {
+		return nil
+	}
+
+	switch d.Type() {
+	case EmptyTxDAGType:
+		return nil
+	case PlainTxDAGType:
+		return ValidatePlainTxDAG(d, txCnt)
+	default:
+		return fmt.Errorf("unsupported TxDAG type: %v", d.Type())
+	}
+}
+
+func ValidatePlainTxDAG(d TxDAG, txCnt int) error {
+	if d.TxCount() != txCnt {
+		return fmt.Errorf("PlainTxDAG contains wrong txs count, expect: %v, actual: %v", txCnt, d.TxCount())
+	}
+	for i := 0; i < txCnt; i++ {
+		dep := d.TxDep(i)
+		if dep == nil {
+			return fmt.Errorf("PlainTxDAG contains nil txdep, tx: %v", i)
+		}
+		for j, tx := range dep.TxIndexes {
+			if tx >= uint64(i) || tx >= uint64(txCnt) {
+				return fmt.Errorf("PlainTxDAG contains the exceed range dependency, tx: %v", i)
+			}
+			if j > 0 && dep.TxIndexes[j] <= dep.TxIndexes[j-1] {
+				return fmt.Errorf("PlainTxDAG contains unordered dependency, tx: %v", i)
+			}
+		}
+		if dep.Flags != nil && *dep.Flags & ^TxDepFlagMask > 0 {
+			return fmt.Errorf("PlainTxDAG contains unknown flags, flags: %v", *dep.Flags)
+		}
+	}
+	return nil
+}
+
+// GetTxDAG return TxDAG bytes from block if there is any, or return nil if not exist
+// the txDAG is stored in the calldata of the last transaction of the block
+func GetTxDAG(block *Block) (TxDAG, error) {
+	txs := block.Transactions()
+	if txs.Len() <= 0 {
+		return nil, fmt.Errorf("no txdag found")
+	}
+	// get data from the last tx
+	return DecodeTxDAGCalldata(txs[txs.Len()-1].Data())
+}
+
+func TxDependency(d TxDAG, i int) []uint64 {
+	if d == nil || i < 0 || i >= d.TxCount() {
+		return []uint64{}
+	}
+	dep := d.TxDep(i)
+	if dep.CheckFlag(ExcludedTxFlag) {
+		return []uint64{}
+	}
+	if dep.CheckFlag(NonDependentRelFlag) {
+		txs := make([]uint64, 0, d.TxCount()-dep.Count())
+		for j := 0; j < i; j++ {
+			if !dep.Exist(j) && j != i {
+				txs = append(txs, uint64(j))
+			}
+		}
+		return txs
+	}
+	return dep.TxIndexes
+}
+
 // EmptyTxDAG indicate that execute txs in sequence
 // It means no transactions or need timely distribute transaction fees
 // it only keep partial serial execution when tx cannot delay the distribution or just execute txs in sequence
@@ -92,15 +228,17 @@ func (d *EmptyTxDAG) Inner() interface{} {
 	return d
 }
 
-func (d *EmptyTxDAG) DelayGasDistribution() bool {
+func (d *EmptyTxDAG) DelayGasFeeDistribution() bool {
 	return false
 }
 
-func (d *EmptyTxDAG) TxDep(int) TxDep {
-	return TxDep{
+func (d *EmptyTxDAG) TxDep(int) *TxDep {
+	dep := TxDep{
 		TxIndexes: nil,
-		Relation:  &TxDAGRelation1,
+		Flags:     new(uint8),
 	}
+	dep.SetFlag(NonDependentRelFlag)
+	return &dep
 }
 
 func (d *EmptyTxDAG) TxCount() int {
@@ -112,7 +250,7 @@ func (d *EmptyTxDAG) SetTxDep(int, TxDep) error {
 }
 
 func (d *EmptyTxDAG) String() string {
-	return "None"
+	return "EmptyTxDAG"
 }
 
 // PlainTxDAG indicate how to use the dependency of txs, and delay the distribution of GasFee
@@ -129,12 +267,12 @@ func (d *PlainTxDAG) Inner() interface{} {
 	return d
 }
 
-func (d *PlainTxDAG) DelayGasDistribution() bool {
+func (d *PlainTxDAG) DelayGasFeeDistribution() bool {
 	return true
 }
 
-func (d *PlainTxDAG) TxDep(i int) TxDep {
-	return d.TxDeps[i]
+func (d *PlainTxDAG) TxDep(i int) *TxDep {
+	return &d.TxDeps[i]
 }
 
 func (d *PlainTxDAG) TxCount() int {
@@ -162,11 +300,11 @@ func NewPlainTxDAG(txLen int) *PlainTxDAG {
 func (d *PlainTxDAG) String() string {
 	builder := strings.Builder{}
 	for _, txDep := range d.TxDeps {
-		if txDep.Relation == nil || txDep.RelationEqual(TxDAGRelation0) {
-			builder.WriteString(fmt.Sprintf("%v\n", txDep.TxIndexes))
+		if txDep.Flags != nil {
+			builder.WriteString(fmt.Sprintf("%v|%v\n", txDep.TxIndexes, *txDep.Flags))
 			continue
 		}
-		builder.WriteString(fmt.Sprintf("%d: %v\n", *txDep.Relation, txDep.TxIndexes))
+		builder.WriteString(fmt.Sprintf("%v\n", txDep.TxIndexes))
 	}
 	return builder.String()
 }
@@ -181,13 +319,17 @@ func (d *PlainTxDAG) Size() int {
 
 // MergeTxDAGExecutionPaths will merge duplicate tx path for scheduling parallel.
 // Any tx cannot exist in >= 2 paths.
-func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
-	nd := convert2PlainTxDAGWithRelation0(d)
-	mergeMap := make(map[uint64][]uint64, nd.TxCount())
-	txMap := make(map[uint64]uint64, nd.TxCount())
-	for i := nd.TxCount() - 1; i >= 0; i-- {
+func MergeTxDAGExecutionPaths(d TxDAG, from, to uint64) ([][]uint64, error) {
+	if from > to || to >= uint64(d.TxCount()) {
+		return nil, fmt.Errorf("input wrong from: %v, to: %v, txCnt:%v", from, to, d.TxCount())
+	}
+	mergeMap := make(map[uint64][]uint64, d.TxCount())
+	txMap := make(map[uint64]uint64, d.TxCount())
+	for i := int(to); i >= int(from); i-- {
 		index, merge := uint64(i), uint64(i)
-		deps := nd.TxDep(i).TxIndexes
+		deps := TxDependency(d, i)
+		// drop the out range txs
+		deps = depExcludeTxRange(deps, from, to)
 		if oldIdx, exist := findTxPathIndex(deps, index, txMap); exist {
 			merge = oldIdx
 		}
@@ -202,11 +344,14 @@ func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
 		if mergeMap[t] == nil {
 			mergeMap[t] = make([]uint64, 0)
 		}
+		if f < from || f > to {
+			continue
+		}
 		mergeMap[t] = append(mergeMap[t], f)
 	}
 	mergePaths := make([][]uint64, 0, len(mergeMap))
-	for i := 0; i < nd.TxCount(); i++ {
-		path, ok := mergeMap[uint64(i)]
+	for i := from; i <= to; i++ {
+		path, ok := mergeMap[i]
 		if !ok {
 			continue
 		}
@@ -214,7 +359,25 @@ func MergeTxDAGExecutionPaths(d TxDAG) [][]uint64 {
 		mergePaths = append(mergePaths, path)
 	}
 
-	return mergePaths
+	return mergePaths, nil
+}
+
+// depExcludeTxRange drop all from~to items, and deps is ordered.
+func depExcludeTxRange(deps []uint64, from uint64, to uint64) []uint64 {
+	if len(deps) == 0 {
+		return deps
+	}
+	start, end := 0, len(deps)-1
+	for start < len(deps) && deps[start] < from {
+		start++
+	}
+	for end >= 0 && deps[end] > to {
+		end--
+	}
+	if start > end {
+		return nil
+	}
+	return deps[start : end+1]
 }
 
 func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64, bool) {
@@ -233,46 +396,33 @@ func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64
 
 // travelTxDAGExecutionPaths will print all tx execution path
 func travelTxDAGExecutionPaths(d TxDAG) [][]uint64 {
-	nd := convert2PlainTxDAGWithRelation0(d)
-
 	exePaths := make([][]uint64, 0)
 	// travel tx deps with BFS
-	for i := uint64(0); i < uint64(nd.TxCount()); i++ {
-		exePaths = append(exePaths, travelTxDAGTargetPath(nd.TxDeps, i))
+	for i := uint64(0); i < uint64(d.TxCount()); i++ {
+		exePaths = append(exePaths, travelTxDAGTargetPath(d, i))
 	}
 	return exePaths
-}
-
-func convert2PlainTxDAGWithRelation0(d TxDAG) *PlainTxDAG {
-	if d.TxCount() == 0 {
-		return NewPlainTxDAG(0)
-	}
-	nd := NewPlainTxDAG(d.TxCount())
-	for i := 0; i < d.TxCount(); i++ {
-		dep := d.TxDep(i)
-		if dep.RelationEqual(TxDAGRelation0) {
-			nd.SetTxDep(i, dep)
-			continue
-		}
-		np := TxDep{}
-		// recover to relation 0
-		for j := 0; j < i; j++ {
-			if !dep.Exist(j) && j != i {
-				np.AppendDep(j)
-			}
-		}
-		nd.SetTxDep(i, np)
-	}
-	return nd
 }
 
 // TxDep store the current tx dependency relation with other txs
 type TxDep struct {
 	TxIndexes []uint64
-	// It describes the Relation with below txs
-	// 0: this tx depends on below txs, it can be ignored and not be encoded in rlp encoder.
-	// 1: this transaction does not depend on below txs, all other previous txs depend on
-	Relation *uint8 `rlp:"optional"`
+	// Flags may has multi flag meaning, ref NonDependentRelFlag, ExcludedTxFlag.
+	Flags *uint8 `rlp:"optional"`
+}
+
+func NewTxDep(indexes []uint64, flags ...uint8) TxDep {
+	dep := TxDep{
+		TxIndexes: indexes,
+	}
+	if len(flags) == 0 {
+		return dep
+	}
+	dep.Flags = new(uint8)
+	for _, flag := range flags {
+		dep.SetFlag(flag)
+	}
+	return dep
 }
 
 func (d *TxDep) AppendDep(i int) {
@@ -300,11 +450,26 @@ func (d *TxDep) Last() int {
 	return int(d.TxIndexes[len(d.TxIndexes)-1])
 }
 
-func (d *TxDep) RelationEqual(rel uint8) bool {
-	if d.Relation == nil {
-		return TxDAGRelation0 == rel
+func (d *TxDep) CheckFlag(flag uint8) bool {
+	var flags uint8
+	if d.Flags != nil {
+		flags = *d.Flags
 	}
-	return *d.Relation == rel
+	return flags&flag == flag
+}
+
+func (d *TxDep) SetFlag(flag uint8) {
+	if d.Flags == nil {
+		d.Flags = new(uint8)
+	}
+	*d.Flags |= flag
+}
+
+func (d *TxDep) ClearFlag(flag uint8) {
+	if d.Flags == nil {
+		return
+	}
+	*d.Flags &= ^flag
 }
 
 var (
@@ -341,7 +506,7 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 
 	totalTxMeter.Mark(int64(txCount))
 	for i, path := range paths {
-		if stats[i].mustSerial {
+		if stats[i].excludedTx {
 			continue
 		}
 		if len(path) <= 1 {
@@ -402,7 +567,7 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 		sPath []int
 	)
 	for i, stat := range stats {
-		if stat.mustSerial {
+		if stat.excludedTx {
 			continue
 		}
 		sPath = append(sPath, i)
@@ -414,16 +579,18 @@ func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
 }
 
 // travelTxDAGTargetPath will print target execution path
-func travelTxDAGTargetPath(deps []TxDep, from uint64) []uint64 {
-	queue := make([]uint64, 0, len(deps))
-	path := make([]uint64, 0, len(deps))
+func travelTxDAGTargetPath(d TxDAG, from uint64) []uint64 {
+	var (
+		queue []uint64
+		path  []uint64
+	)
 
 	queue = append(queue, from)
 	path = append(path, from)
 	for len(queue) > 0 {
-		next := make([]uint64, 0, len(deps))
+		var next []uint64
 		for _, i := range queue {
-			for _, dep := range deps[i].TxIndexes {
+			for _, dep := range TxDependency(d, int(i)) {
 				if !slices.Contains(path, dep) {
 					path = append(path, dep)
 					next = append(next, dep)
@@ -445,7 +612,7 @@ type ExeStat struct {
 	costTime  time.Duration
 
 	// some flags
-	mustSerial bool
+	excludedTx bool
 }
 
 func NewExeStat(txIndex int) *ExeStat {
@@ -464,8 +631,8 @@ func (s *ExeStat) Done() *ExeStat {
 	return s
 }
 
-func (s *ExeStat) WithSerialFlag() *ExeStat {
-	s.mustSerial = true
+func (s *ExeStat) WithExcludedTxFlag() *ExeStat {
+	s.excludedTx = true
 	return s
 }
 

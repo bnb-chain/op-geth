@@ -1138,9 +1138,6 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	}
 
 	start := time.Now()
-	if w.chain.TxDAGEnabled() {
-		env.state.ResetMVStates(0)
-	}
 	pending := w.eth.TxPool().Pending(true)
 	packFromTxpoolTimer.UpdateSince(start)
 	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
@@ -1199,12 +1196,18 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
 
 	start := time.Now()
+	if w.chain.TxDAGEnabledWhenMine() {
+		work.state.ResetMVStates(0)
+	}
 	for _, tx := range genParams.txs {
 		from, _ := types.Sender(work.signer, tx)
 		work.state.SetTxContext(tx.Hash(), work.tcount)
 		_, err := w.commitTransaction(work, tx)
 		if err != nil {
 			return &newPayloadResult{err: fmt.Errorf("failed to force-include tx: %s type: %d sender: %s nonce: %d, err: %w", tx.Hash(), tx.Type(), from, tx.Nonce(), err)}
+		}
+		if tx.IsSystemTx() || tx.IsDepositTx() {
+			work.state.RecordSystemTxRWSet(work.tcount)
 		}
 		work.tcount++
 	}
@@ -1259,6 +1262,9 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
 		return &newPayloadResult{err: errInterruptedUpdate}
 	}
+	// TODO(galaio): fulfill TxDAG to mined block
+	//if w.chain.TxDAGEnabledWhenMine() {
+	//}
 
 	start = time.Now()
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)
@@ -1268,15 +1274,6 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	if block.Root() == (common.Hash{}) {
 		return &newPayloadResult{err: fmt.Errorf("empty block root")}
 	}
-
-	// TODO(galaio): fulfill TxDAG to mined block
-	//if w.chain.TxDAGEnabled() && w.chainConfig.Optimism != nil {
-	//	txDAG, _ := work.state.ResolveTxDAG([]common.Address{work.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-	//	rawTxDAG, err := types.EncodeTxDAG(txDAG)
-	//	if err != nil {
-	//		return &newPayloadResult{err: err}
-	//	}
-	//}
 
 	assembleBlockTimer.UpdateSince(start)
 	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)

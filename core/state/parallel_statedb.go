@@ -54,7 +54,7 @@ func hasKvConflict(slotDB *ParallelStateDB, addr common.Address, key common.Hash
 			}
 		}
 	}
-	valMain := mainDB.GetStateNoUpdate(addr, key)
+	valMain := slotDB.getStateFromMainNoUpdate(addr, key) // mainDB.GetStateNoUpdate(addr, key)
 
 	if !bytes.Equal(val.Bytes(), valMain.Bytes()) {
 		log.Debug("hasKvConflict is invalid", "addr", addr,
@@ -1267,6 +1267,45 @@ func (s *ParallelStateDB) getStateObjectFromUnconfirmedDB(addr common.Address) (
 	return nil, false
 }
 
+func (s *ParallelStateDB) getStateObjectFromMainDBNoUpdate(addr common.Address) *stateObject {
+	var mainObj *stateObject
+
+	if m, ok := s.parallel.conflictCheckStateObjectCache.Load(addr); ok {
+		mainObj = m.(*stateObject)
+		return mainObj
+	} else {
+		mainDB := s.parallel.baseStateDB
+		mainObj = mainDB.getStateObjectNoUpdate(addr)
+		s.parallel.conflictCheckStateObjectCache.Store(addr, mainObj)
+	}
+	return mainObj
+}
+
+// GetStateNoUpdate retrieves a value from the given account's storage trie, but do not update the db.stateObjects cache.
+func (s *ParallelStateDB) getStateFromMainNoUpdate(addr common.Address, key common.Hash) (ret common.Hash) {
+
+	if kvPair, ok := s.parallel.conflictCheckKVReadCache.Load(addr); !ok {
+		s.parallel.conflictCheckKVReadCache.Store(addr, newStorage(true))
+	} else {
+		st := kvPair.(*StorageSyncMap)
+		if val, ok := st.GetValue(key); ok {
+			return val
+		}
+	}
+	val := common.Hash{}
+	object := s.getStateObjectFromMainDBNoUpdate(addr)
+	if object != nil {
+		val = object.GetStateNoUpdate(key)
+	}
+	if kvPair, ok := s.parallel.conflictCheckKVReadCache.Load(addr); ok {
+		st := kvPair.(*StorageSyncMap)
+		st.StoreValue(key, val)
+		s.parallel.conflictCheckKVReadCache.Store(addr, st)
+	}
+
+	return val
+}
+
 // IsParallelReadsValid If stage2 is true, it is a likely conflict check,
 // to detect these potential conflict results in advance and schedule redo ASAP.
 func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
@@ -1275,6 +1314,10 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	})
 
 	mainDB := slotDB.parallel.baseStateDB
+
+	slotDB.parallel.conflictCheckStateObjectCache = new(sync.Map)
+	slotDB.parallel.conflictCheckKVReadCache = new(sync.Map)
+
 	if isStage2 && slotDB.txIndex < mainDB.TxIndex() {
 		// already merged, no need to check
 		return true
@@ -1296,7 +1339,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 			}
 		}
 		var nonceMain uint64 = 0
-		mainObj := mainDB.getStateObjectNoUpdate(addr)
+		mainObj := slotDB.getStateObjectFromMainDBNoUpdate(addr)
 		if mainObj != nil {
 			nonceMain = mainObj.Nonce()
 		}
@@ -1325,7 +1368,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 		}
 
 		balanceMain := common.Big0
-		mainObj := mainDB.getStateObjectNoUpdate(addr)
+		mainObj := slotDB.getStateObjectFromMainDBNoUpdate(addr)
 		if mainObj != nil {
 			balanceMain = mainObj.Balance()
 		}
@@ -1347,7 +1390,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 		})
 	}
 	readLen := len(units)
-	if readLen < 80000 || isStage2 {
+	if readLen < 8 || isStage2 {
 		for _, unit := range units {
 			if hasKvConflict(slotDB, unit.addr, unit.key, unit.val, isStage2) {
 				return false
@@ -1417,7 +1460,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	// check code
 	for addr, codeSlot := range slotDB.parallel.codeReadsInSlot {
 		var codeMain []byte = nil
-		object := mainDB.getStateObjectNoUpdate(addr)
+		object := slotDB.getStateObjectFromMainDBNoUpdate(addr)
 		if object != nil {
 			codeMain = object.Code()
 		}
@@ -1432,7 +1475,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	// check codeHash
 	for addr, codeHashSlot := range slotDB.parallel.codeHashReadsInSlot {
 		codeHashMain := common.Hash{}
-		object := mainDB.getStateObjectNoUpdate(addr)
+		object := slotDB.getStateObjectFromMainDBNoUpdate(addr)
 		if object != nil {
 			codeHashMain = common.BytesToHash(object.CodeHash())
 		}
@@ -1446,7 +1489,7 @@ func (slotDB *ParallelStateDB) IsParallelReadsValid(isStage2 bool) bool {
 	// addr state check
 	for addr, stateSlot := range slotDB.parallel.addrStateReadsInSlot {
 		stateMain := false // addr not exist
-		if mainDB.getStateObjectNoUpdate(addr) != nil {
+		if slotDB.getStateObjectFromMainDBNoUpdate(addr) != nil {
 			stateMain = true // addr exist in main DB
 		}
 		if stateSlot != stateMain {

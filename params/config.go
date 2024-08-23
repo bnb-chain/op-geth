@@ -278,8 +278,7 @@ var (
 		EcotoneTime: newUint64(0),
 		HaberTime:   newUint64(0),
 		WrightTime:  newUint64(0),
-		// TODO update FjordTime
-		// FjordTime: nil,
+		FjordTime:   newUint64(1724392800), // Aug-23-2024 06:00 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

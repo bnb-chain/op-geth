@@ -1714,12 +1714,16 @@ func (s *StateDB) StopTxStat(usedGas uint64) {
 	}
 	// record stat first
 	if metrics.EnabledExpensive && s.stat != nil {
-		s.stat.Done().WithGas(usedGas).WithRead(len(s.rwSet.ReadSet()))
+		s.stat.Done().WithGas(usedGas)
+		rwSet := s.mvStates.RWSet(s.txIndex)
+		if rwSet != nil {
+			s.stat.WithRead(len(rwSet.ReadSet()))
+		}
 	}
 }
 
 func (s *StateDB) RecordRead(key types.RWKey, val interface{}) {
-	if s.rwSet == nil || s.rwSet.RWRecordDone() {
+	if s.rwSet == nil {
 		return
 	}
 	s.rwSet.RecordRead(key, types.StateVersion{
@@ -1728,21 +1732,26 @@ func (s *StateDB) RecordRead(key types.RWKey, val interface{}) {
 }
 
 func (s *StateDB) RecordWrite(key types.RWKey, val interface{}) {
-	if s.rwSet == nil || s.rwSet.RWRecordDone() {
+	if s.rwSet == nil {
 		return
 	}
 	s.rwSet.RecordWrite(key, val)
 }
 
 func (s *StateDB) ResetMVStates(txCount int) {
-	s.mvStates = types.NewMVStates(txCount)
+	if s.mvStates != nil {
+		s.mvStates.Stop()
+	}
+	s.mvStates = types.NewMVStates(txCount).EnableAsyncDepGen()
 	s.rwSet = nil
 }
 
 func (s *StateDB) FinaliseRWSet() error {
-	if s.rwSet == nil || s.rwSet.RWRecordDone() {
+	if s.rwSet == nil {
 		return nil
 	}
+	rwSet := s.rwSet
+	stat := s.stat
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) {
 			s.TxDAGGenerate += time.Since(start)
@@ -1751,7 +1760,7 @@ func (s *StateDB) FinaliseRWSet() error {
 	ver := types.StateVersion{
 		TxIndex: s.txIndex,
 	}
-	if ver != s.rwSet.Version() {
+	if ver != rwSet.Version() {
 		return errors.New("you finalize a wrong ver of RWSet")
 	}
 
@@ -1778,8 +1787,13 @@ func (s *StateDB) FinaliseRWSet() error {
 		}
 	}
 
-	s.rwSet.SetRWRecordDone()
-	return s.mvStates.FulfillRWSet(s.rwSet, s.stat)
+	// reset stateDB
+	s.rwSet = nil
+	if err := s.mvStates.FulfillRWSet(rwSet, stat); err != nil {
+		return err
+	}
+	// just Finalise rwSet in serial execution
+	return s.mvStates.Finalise(s.txIndex)
 }
 
 func (s *StateDB) getStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool) {
@@ -1829,7 +1843,8 @@ func (s *StateDB) RecordSystemTxRWSet(index int) {
 	}
 	s.mvStates.FulfillRWSet(types.NewRWSet(types.StateVersion{
 		TxIndex: index,
-	}).WithSerialFlag(), types.NewExeStat(index).WithSerialFlag())
+	}).WithExcludedTxFlag(), types.NewExeStat(index).WithExcludedTxFlag())
+	s.mvStates.Finalise(index)
 }
 
 // copySet returns a deep-copied set.

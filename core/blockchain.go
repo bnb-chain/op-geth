@@ -1920,6 +1920,20 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
+		if bc.enableTxDAG {
+			// compare input TxDAG when it enable in consensus
+			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+			if err == nil {
+				// TODO(galaio): check TxDAG correctness?
+				log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
+				if metrics.EnabledExpensive {
+					go types.EvaluateTxDAGPerformance(dag, statedb.ResolveStats())
+				}
+			} else {
+				log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
+			}
+		}
+
 		// Update the metrics touched during block processing and validation
 		accountReadTimer.Update(statedb.AccountReads)                 // Account reads are complete(in processing)
 		storageReadTimer.Update(statedb.StorageReads)                 // Storage reads are complete(in processing)
@@ -2635,10 +2649,11 @@ func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 	bc.hc.SetHead(headNumber, nil, createDelFn(bc))
 }
 
-func (bc *BlockChain) TxDAGEnabled() bool {
+func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
 	return bc.enableTxDAG
 }
 
 func (bc *BlockChain) SetupTxDAGGeneration() {
+	log.Info("node enable TxDAG feature")
 	bc.enableTxDAG = true
 }

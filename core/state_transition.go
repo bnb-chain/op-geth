@@ -409,6 +409,10 @@ func (st *StateTransition) preCheck() error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
+	// start record rw set in here
+	if !st.msg.IsSystemTx && !st.msg.IsDepositTx {
+		st.state.BeforeTxTransition()
+	}
 	if mint := st.msg.Mint; mint != nil {
 		mintU256, overflow := uint256.FromBig(mint)
 		if overflow {
@@ -435,7 +439,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		}
 		// just record error tx here
 		if ferr := st.state.FinaliseRWSet(); ferr != nil {
-			log.Error("finalise error deposit tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+			log.Error("finalise error deposit tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
 		}
 		result = &ExecutionResult{
 			UsedGas:    gasUsed,
@@ -447,15 +451,13 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if err != nil {
 		// just record error tx here
 		if ferr := st.state.FinaliseRWSet(); ferr != nil {
-			log.Error("finalise error tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+			log.Error("finalise error tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
 		}
 	}
 	return result, err
 }
 
 func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
-	// start record rw set in here
-	st.state.BeforeTxTransition()
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
@@ -534,7 +536,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 
 	// stop record rw set in here, skip gas fee distribution
 	if ferr := st.state.FinaliseRWSet(); ferr != nil {
-		log.Error("finalise tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex())
+		log.Error("finalise tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
 	}
 
 	// if deposit: skip refunds, skip tipping coinbase

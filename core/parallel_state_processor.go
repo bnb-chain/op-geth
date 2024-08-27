@@ -26,6 +26,10 @@ const (
 	stage2AheadNum      = 3  // enter ConfirmStage2 in advance to avoid waiting for Fat Tx
 )
 
+var (
+	FallbackToSerialProcessorErr = errors.New("fallback to serial processor")
+)
+
 type ParallelStateProcessor struct {
 	StateProcessor
 	parallelNum           int          // leave a CPU to dispatcher
@@ -571,11 +575,6 @@ func (p *ParallelStateProcessor) runQuickMergeSlotLoop(slotIndex int, slotType i
 			if txReq.txIndex <= int(p.mergedTxIndex.Load()) {
 				continue
 			}
-
-			if txReq.txIndex != next {
-				log.Warn("query next txReq wrong", "slot", slotIndex, "next", next, "actual", txReq.txIndex)
-				break
-			}
 			if !atomic.CompareAndSwapInt32(&txReq.runnable, 1, 0) {
 				continue
 			}
@@ -773,29 +772,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
 	}
 	statedb.MarkFullProcessed()
-
-	var (
-		txDAG types.TxDAG
-	)
-	if p.bc.enableTxDAG {
-		var err error
-		if p.bc.txDAGReader != nil {
-			// load cache txDAG from file first
-			txDAG = p.bc.txDAGReader.TxDAG(block.NumberU64())
-
-		} else {
-			// load TxDAG from block
-			txDAG, err = types.GetTxDAG(block)
-			if err != nil {
-				log.Debug("pevm decode txdag failed", "block", block.NumberU64(), "err", err)
-			}
-		}
-		if err := types.ValidateTxDAG(txDAG, len(block.Transactions())); err != nil {
-			log.Warn("pevm cannot apply wrong txdag",
-				"block", block.NumberU64(), "txs", len(block.Transactions()), "err", err)
-			txDAG = nil
-		}
-	}
+	txDAG := cfg.TxDAG
 
 	txNum := len(allTxs)
 	latestExcludedTx := -1

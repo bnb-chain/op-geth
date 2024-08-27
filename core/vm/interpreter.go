@@ -34,7 +34,7 @@ type Config struct {
 	EnablePreimageRecording     bool                // Enables recording of SHA3/keccak preimages
 	ExtraEips                   []int               // Additional EIPS that are to be enabled
 	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
-	EnableOpcodeOptimizations bool      // Enable opcode optimization
+	EnableOpcodeOptimizations   bool                // Enable opcode optimization
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -156,7 +156,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		debug   = in.evm.Config.Tracer != nil
 	)
 	// Don't move this deferred function, it's placed before the capturestate-deferred method,
-	// so that it get's executed _after_: the capturestate needs the stacks before
+	// so that it gets executed _after_: the capturestate needs the stacks before
 	// they are returned to the pools
 	defer func() {
 		returnStack(stack)

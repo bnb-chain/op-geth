@@ -103,7 +103,8 @@ type Config struct {
 
 	NewPayloadTimeout time.Duration // The maximum time allowance for creating a new payload
 
-	RollupComputePendingBlock bool // Compute the pending block from tx-pool, instead of copying the latest-block
+	RollupComputePendingBlock bool   // Compute the pending block from tx-pool, instead of copying the latest-block
+	EffectiveGasCeil          uint64 // if non-zero, a gas ceiling to apply independent of the header's gaslimit value
 
 	Mev MevConfig // Mev configuration
 }
@@ -111,7 +112,7 @@ type Config struct {
 // DefaultConfig contains default settings for miner.
 var DefaultConfig = Config{
 	GasCeil:  30000000,
-	GasPrice: big.NewInt(params.GWei),
+	GasPrice: big.NewInt(params.Wei),
 
 	// The default recommit time is chosen as two seconds since
 	// consensus-layer usually will wait a half slot of time(6s)
@@ -249,6 +250,11 @@ func (miner *Miner) SetExtra(extra []byte) error {
 		return fmt.Errorf("extra exceeds max length. %d > %v", len(extra), params.MaximumExtraDataSize)
 	}
 	miner.worker.setExtra(extra)
+	return nil
+}
+
+func (miner *Miner) SetGasTip(tip *big.Int) error {
+	miner.worker.setGasTip(tip)
 	return nil
 }
 

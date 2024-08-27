@@ -181,18 +181,11 @@ func (p *Peer) announceTransactions() {
 			if len(pending) > 0 {
 				done = make(chan struct{})
 				go func() {
-					if p.version >= ETH68 {
-						if err := p.sendPooledTransactionHashes68(pending, pendingTypes, pendingSizes); err != nil {
-							p.Log().Warn("Announce hashes68 failed", "peerId", p.ID(), "peerIP", safeGetPeerIP(p), "lost", len(pending), "hashes", concat(pending), "err", err.Error())
-							fail <- err
-							return
-						}
-					} else {
-						if err := p.sendPooledTransactionHashes66(pending); err != nil {
-							p.Log().Warn("Announce hashes66 failed", "peerId", p.ID(), "peerIP", safeGetPeerIP(p), "lost", len(pending), "hashes", concat(pending), "err", err.Error())
-							fail <- err
-							return
-						}
+					// TODO need check it eth68 condition
+					if err := p.sendPooledTransactionHashes(pending, pendingTypes, pendingSizes); err != nil {
+						p.Log().Warn("Announce hashes failed", "peerId", p.ID(), "peerIP", safeGetPeerIP(p), "lost", len(pending), "hashes", concat(pending), "err", err.Error())
+						fail <- err
+						return
 					}
 					close(done)
 					p.Log().Trace("Sent transaction announcements", "count", len(pending), "peer.Id", p.ID(), "peer.IP", p.Node().IP().String(), "hashes", concat(pending))

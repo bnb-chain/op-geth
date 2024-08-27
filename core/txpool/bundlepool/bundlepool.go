@@ -144,7 +144,7 @@ func (p *BundlePool) SetBundleSimulator(simulator BundleSimulator) {
 	p.simulator = simulator
 }
 
-func (p *BundlePool) Init(gasTip *big.Int, head *types.Header, reserve txpool.AddressReserver) error {
+func (p *BundlePool) Init(gasTip uint64, head *types.Header, reserve txpool.AddressReserver) error {
 	return nil
 }
 
@@ -298,7 +298,7 @@ func (p *BundlePool) Add(txs []*types.Transaction, local bool, sync bool) []erro
 
 // Pending retrieves all currently processable transactions, grouped by origin
 // account and sorted by nonce.
-func (p *BundlePool) Pending(enforceTips bool) map[common.Address][]*txpool.LazyTransaction {
+func (p *BundlePool) Pending(filter txpool.PendingFilter) map[common.Address][]*txpool.LazyTransaction {
 	return nil
 }
 

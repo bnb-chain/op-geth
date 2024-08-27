@@ -21,6 +21,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/params/forks"
 )
 
 // Genesis hashes to enforce below configs on.
@@ -32,7 +33,7 @@ var (
 
 	OPBNBMainNetGenesisHash = common.HexToHash("0x4dd61178c8b0f01670c231597e7bcb368e84545acd46d940a896d6a791dd6df4")
 	OPBNBTestNetGenesisHash = common.HexToHash("0x51fa57729dfb1c27542c21b06cb72a0459c57440ceb43a465dae1307cd04fe80")
-	OPBNBQANetGenesisHash   = common.HexToHash("0xfd822cb9ed44eac6bb4c5413cc34b247d814ba4d162610f434a19d5ba68749fd")
+	OPBNBQANetGenesisHash   = common.HexToHash("0x73eaf214333f29eed23c4902fdc17889b3e379372e52a42567d0069e1b10cdb0")
 )
 
 const (
@@ -93,6 +94,7 @@ var (
 		TerminalTotalDifficulty:       MainnetTerminalTotalDifficulty, // 58_750_000_000_000_000_000_000
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  newUint64(1681338455),
+		CancunTime:                    newUint64(1710338135),
 		Ethash:                        new(EthashConfig),
 	}
 	// HoleskyChainConfig contains the chain parameters to run a node on the Holesky test network.
@@ -117,6 +119,7 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		MergeNetsplitBlock:            nil,
 		ShanghaiTime:                  newUint64(1696000704),
+		CancunTime:                    newUint64(1707305664),
 		Ethash:                        new(EthashConfig),
 	}
 	// SepoliaChainConfig contains the chain parameters to run a node on the Sepolia test network.
@@ -141,6 +144,7 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		MergeNetsplitBlock:            big.NewInt(1735371),
 		ShanghaiTime:                  newUint64(1677557088),
+		CancunTime:                    newUint64(1706655072),
 		Ethash:                        new(EthashConfig),
 	}
 	// GoerliChainConfig contains the chain parameters to run a node on the Görli test network.
@@ -163,6 +167,7 @@ var (
 		TerminalTotalDifficulty:       big.NewInt(10_790_000),
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  newUint64(1678832736),
+		CancunTime:                    newUint64(1705473120),
 		Clique: &CliqueConfig{
 			Period: 15,
 			Epoch:  30000,
@@ -241,7 +246,7 @@ var (
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{
-		ChainID:                       big.NewInt(7180),
+		ChainID:                       big.NewInt(1081),
 		HomesteadBlock:                big.NewInt(0),
 		EIP150Block:                   big.NewInt(0),
 		EIP155Block:                   big.NewInt(0),
@@ -266,13 +271,14 @@ var (
 			EIP1559DenominatorCanyon: 8,
 		},
 		Fermat:       big.NewInt(0),
-		ShanghaiTime: newUint64(1714993800), // May-06-2024 11:10 AM +UTC
-		CanyonTime:   newUint64(1714993800), // May-06-2024 11:10 AM +UTC
+		ShanghaiTime: newUint64(0),
+		CanyonTime:   newUint64(0),
 		// Delta: the Delta upgrade does not affect the execution-layer, and is thus not configurable in the chain config.
-		CancunTime:  newUint64(1714995000), // May-06-2024 11:30 AM +UTC
-		EcotoneTime: newUint64(1714995000), // May-06-2024 11:30 AM +UTC
-		HaberTime:   newUint64(1716361200), // May-22-2024 07:00 AM +UTC
-		WrightTime:  newUint64(1721815200), // July-24-2024 10:00 AM +UTC
+		CancunTime:  newUint64(0),
+		EcotoneTime: newUint64(0),
+		HaberTime:   newUint64(0),
+		WrightTime:  newUint64(0),
+		FjordTime:   newUint64(1724392800), // Aug-23-2024 06:00 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced
@@ -389,6 +395,36 @@ var (
 		Clique:                        nil,
 	}
 
+	// MergedTestChainConfig contains every protocol change (EIPs) introduced
+	// and accepted by the Ethereum core developers for testing purposes.
+	MergedTestChainConfig = &ChainConfig{
+		ChainID:                       big.NewInt(1),
+		HomesteadBlock:                big.NewInt(0),
+		DAOForkBlock:                  nil,
+		DAOForkSupport:                false,
+		EIP150Block:                   big.NewInt(0),
+		EIP155Block:                   big.NewInt(0),
+		EIP158Block:                   big.NewInt(0),
+		ByzantiumBlock:                big.NewInt(0),
+		ConstantinopleBlock:           big.NewInt(0),
+		PetersburgBlock:               big.NewInt(0),
+		IstanbulBlock:                 big.NewInt(0),
+		MuirGlacierBlock:              big.NewInt(0),
+		BerlinBlock:                   big.NewInt(0),
+		LondonBlock:                   big.NewInt(0),
+		ArrowGlacierBlock:             big.NewInt(0),
+		GrayGlacierBlock:              big.NewInt(0),
+		MergeNetsplitBlock:            big.NewInt(0),
+		ShanghaiTime:                  newUint64(0),
+		CancunTime:                    newUint64(0),
+		PragueTime:                    nil,
+		VerkleTime:                    nil,
+		TerminalTotalDifficulty:       big.NewInt(0),
+		TerminalTotalDifficultyPassed: true,
+		Ethash:                        new(EthashConfig),
+		Clique:                        nil,
+	}
+
 	// NonActivatedConfig defines the chain configuration without activating
 	// any protocol change (EIPs).
 	NonActivatedConfig = &ChainConfig{
@@ -486,6 +522,7 @@ type ChainConfig struct {
 	EcotoneTime *uint64 `json:"ecotoneTime,omitempty"` // Ecotone switch time (nil = no fork, 0 = already on optimism ecotone)
 	HaberTime   *uint64 `json:"haberTime,omitempty"`   // Haber switch time (nil = no fork, 0 = already on haber)
 	WrightTime  *uint64 `json:"wrightTime,omitempty"`  // Wright switch time (nil = no fork, 0 = already on wright)
+	FjordTime   *uint64 `json:"fjordTime,omitempty"`   // Fjord switch time (nil = no fork, 0 = already on Optimism Fjord)
 
 	InteropTime *uint64 `json:"interopTime,omitempty"` // Interop switch time (nil = no fork, 0 = already on optimism interop)
 
@@ -625,7 +662,7 @@ func (c *ChainConfig) Description() string {
 		banner += fmt.Sprintf(" - Shanghai:                    @%-10v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/shanghai.md)\n", *c.ShanghaiTime)
 	}
 	if c.CancunTime != nil {
-		banner += fmt.Sprintf(" - Cancun:                      @%-10v\n", *c.CancunTime)
+		banner += fmt.Sprintf(" - Cancun:                      @%-10v (https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/cancun.md)\n", *c.CancunTime)
 	}
 	if c.PragueTime != nil {
 		banner += fmt.Sprintf(" - Prague:                      @%-10v\n", *c.PragueTime)
@@ -641,6 +678,9 @@ func (c *ChainConfig) Description() string {
 	}
 	if c.EcotoneTime != nil {
 		banner += fmt.Sprintf(" - Ecotone:                     @%-10v\n", *c.EcotoneTime)
+	}
+	if c.FjordTime != nil {
+		banner += fmt.Sprintf(" - Fjord:                       @%-10v\n", *c.FjordTime)
 	}
 	if c.InteropTime != nil {
 		banner += fmt.Sprintf(" - Interop:                     @%-10v\n", *c.InteropTime)
@@ -780,6 +820,10 @@ func (c *ChainConfig) IsEcotone(time uint64) bool {
 	return isTimestampForked(c.EcotoneTime, time)
 }
 
+func (c *ChainConfig) IsFjord(time uint64) bool {
+	return isTimestampForked(c.FjordTime, time)
+}
+
 func (c *ChainConfig) IsHaber(time uint64) bool {
 	return isTimestampForked(c.HaberTime, time)
 }
@@ -812,6 +856,10 @@ func (c *ChainConfig) IsOptimismCanyon(time uint64) bool {
 
 func (c *ChainConfig) IsOptimismEcotone(time uint64) bool {
 	return c.IsOptimism() && c.IsEcotone(time)
+}
+
+func (c *ChainConfig) IsOptimismFjord(time uint64) bool {
+	return c.IsOptimism() && c.IsFjord(time)
 }
 
 // IsOptimismPreBedrock returns true iff this is an optimism node & bedrock is not yet active
@@ -889,7 +937,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 						lastFork.name, cur.name, cur.block)
 				} else {
 					return fmt.Errorf("unsupported fork ordering: %v not enabled, but %v enabled at timestamp %v",
-						lastFork.name, cur.name, cur.timestamp)
+						lastFork.name, cur.name, *cur.timestamp)
 				}
 
 			// Fork (whether defined by block or timestamp) must follow the fork definition sequence
@@ -899,7 +947,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 						lastFork.name, lastFork.block, cur.name, cur.block)
 				} else if lastFork.timestamp != nil && *lastFork.timestamp > *cur.timestamp {
 					return fmt.Errorf("unsupported fork ordering: %v enabled at timestamp %v, but %v enabled at timestamp %v",
-						lastFork.name, lastFork.timestamp, cur.name, cur.timestamp)
+						lastFork.name, *lastFork.timestamp, cur.name, *cur.timestamp)
 				}
 
 				// Timestamp based forks can follow block based ones, but not the other way around
@@ -1012,6 +1060,23 @@ func (c *ChainConfig) ElasticityMultiplier() uint64 {
 		return c.Optimism.EIP1559Elasticity
 	}
 	return DefaultElasticityMultiplier
+}
+
+// LatestFork returns the latest time-based fork that would be active for the given time.
+func (c *ChainConfig) LatestFork(time uint64) forks.Fork {
+	// Assume last non-time-based fork has passed.
+	london := c.LondonBlock
+
+	switch {
+	case c.IsPrague(london, time):
+		return forks.Prague
+	case c.IsCancun(london, time):
+		return forks.Cancun
+	case c.IsShanghai(london, time):
+		return forks.Shanghai
+	default:
+		return forks.Paris
+	}
 }
 
 // isForkBlockIncompatible returns true if a fork scheduled at block s1 cannot be
@@ -1148,7 +1213,7 @@ type Rules struct {
 	IsMerge, IsShanghai, IsCancun, IsPrague                 bool
 	IsVerkle                                                bool
 	IsOptimismBedrock, IsOptimismRegolith                   bool
-	IsOptimismCanyon                                        bool
+	IsOptimismCanyon, IsOptimismFjord                       bool
 	IsFermat                                                bool
 	IsHaber                                                 bool
 	IsWright                                                bool
@@ -1160,6 +1225,8 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 	if chainID == nil {
 		chainID = new(big.Int)
 	}
+	// disallow setting Merge out of order
+	isMerge = isMerge && c.IsLondon(num)
 	return Rules{
 		ChainID:          new(big.Int).Set(chainID),
 		IsHomestead:      c.IsHomestead(num),
@@ -1173,14 +1240,15 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsBerlin:         c.IsBerlin(num),
 		IsLondon:         c.IsLondon(num),
 		IsMerge:          isMerge,
-		IsShanghai:       c.IsShanghai(num, timestamp),
-		IsCancun:         c.IsCancun(num, timestamp),
-		IsPrague:         c.IsPrague(num, timestamp),
-		IsVerkle:         c.IsVerkle(num, timestamp),
+		IsShanghai:       isMerge && c.IsShanghai(num, timestamp),
+		IsCancun:         isMerge && c.IsCancun(num, timestamp),
+		IsPrague:         isMerge && c.IsPrague(num, timestamp),
+		IsVerkle:         isMerge && c.IsVerkle(num, timestamp),
 		// Optimism
-		IsOptimismBedrock:  c.IsOptimismBedrock(num),
-		IsOptimismRegolith: c.IsOptimismRegolith(timestamp),
-		IsOptimismCanyon:   c.IsOptimismCanyon(timestamp),
+		IsOptimismBedrock:  isMerge && c.IsOptimismBedrock(num),
+		IsOptimismRegolith: isMerge && c.IsOptimismRegolith(timestamp),
+		IsOptimismCanyon:   isMerge && c.IsOptimismCanyon(timestamp),
+		IsOptimismFjord:    isMerge && c.IsOptimismFjord(timestamp),
 		// OPBNB
 		IsFermat: c.IsFermat(num),
 		IsHaber:  c.IsHaber(timestamp),

@@ -722,6 +722,9 @@ func (api *ConsensusAPI) delayPayloadImport(block *types.Block) (engine.PayloadS
 		// that the parent state is missing and the syncer rejected extending the
 		// current cycle with the new payload.
 		log.Warn("Ignoring payload with missing parent", "number", block.NumberU64(), "hash", block.Hash(), "parent", block.ParentHash(), "reason", err)
+		if errors.Is(err, downloader.ErrForcedNeeded) {
+			return engine.PayloadStatusV1{Status: engine.SYNCING}, err
+		}
 	} else {
 		// In non-full sync mode (i.e. snap sync) all payloads are rejected until
 		// snap sync terminates as snap sync relies on direct database injections

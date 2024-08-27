@@ -19,6 +19,7 @@ package vm
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
@@ -37,6 +38,7 @@ type Config struct {
 	ParallelTxNum               int                 // Number of slot for transaction execution
 	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
 	EnableOpcodeOptimizations   bool                // Enable opcode optimization
+	TxDAG                       types.TxDAG
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,

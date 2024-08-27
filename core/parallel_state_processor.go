@@ -772,32 +772,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
 	}
 	statedb.MarkFullProcessed()
-
-	var (
-		txDAG types.TxDAG
-	)
-	if p.bc.enableTxDAG {
-		var err error
-		if p.bc.txDAGReader != nil {
-			// load cache txDAG from file first
-			txDAG = p.bc.txDAGReader.TxDAG(block.NumberU64())
-		} else {
-			// load TxDAG from block
-			txDAG, err = types.GetTxDAG(block)
-			if err != nil {
-				log.Debug("pevm decode txdag failed", "block", block.NumberU64(), "err", err)
-			}
-		}
-		if err := types.ValidateTxDAG(txDAG, len(block.Transactions())); err != nil {
-			log.Warn("pevm cannot apply wrong txdag",
-				"block", block.NumberU64(), "txs", len(block.Transactions()), "err", err)
-			txDAG = nil
-		}
-	}
-
-	if txDAG != nil && txDAG.Type() == types.EmptyTxDAGType {
-		return nil, nil, 0, FallbackToSerialProcessorErr
-	}
+	txDAG := cfg.TxDAG
 
 	txNum := len(allTxs)
 	latestExcludedTx := -1

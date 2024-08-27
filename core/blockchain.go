@@ -1968,15 +1968,16 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			activeState = statedb
 
 			if bc.vmConfig.EnableParallelExec {
+				bc.parseTxDAG(block)
 				txsCount := block.Transactions().Len()
 				threshold := min(bc.vmConfig.ParallelTxNum/2+2, 4)
-				if txsCount >= threshold {
+				if txsCount < threshold || bc.isEmptyTxDAG() {
+					bc.UseSerialProcessor()
+					log.Debug("Disable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+				} else {
 					bc.UseParallelProcessor()
 					statedb.CreateParallelDBManager(2 * txsCount)
 					log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
-				} else {
-					bc.UseSerialProcessor()
-					log.Debug("Disable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
 				}
 			}
 			// If we have a followup block, run that against the current state to pre-cache
@@ -2154,6 +2155,39 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	stats.ignored += it.remaining()
 
 	return it.index, err
+}
+
+func (bc *BlockChain) parseTxDAG(block *types.Block) {
+	if !bc.enableTxDAG {
+		return
+	}
+	var (
+		txDAG types.TxDAG
+		err   error
+	)
+	if bc.txDAGReader != nil {
+		// load cache txDAG from file first
+		txDAG = bc.txDAGReader.TxDAG(block.NumberU64())
+	} else {
+		// load TxDAG from block
+		txDAG, err = types.GetTxDAG(block)
+		if err != nil {
+			log.Warn("pevm decode txdag failed", "block", block.NumberU64(), "err", err)
+		}
+	}
+	if err := types.ValidateTxDAG(txDAG, len(block.Transactions())); err != nil {
+		log.Warn("pevm cannot apply wrong txdag",
+			"block", block.NumberU64(), "txs", len(block.Transactions()), "err", err)
+		txDAG = nil
+	}
+	bc.vmConfig.TxDAG = txDAG
+}
+
+func (bc *BlockChain) isEmptyTxDAG() bool {
+	if bc.vmConfig.TxDAG != nil && bc.vmConfig.TxDAG.Type() == types.EmptyTxDAGType {
+		return true
+	}
+	return false
 }
 
 // insertSideChain is called when an import batch hits upon a pruned ancestor

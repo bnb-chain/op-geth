@@ -2036,7 +2036,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		} else if numCpu == 1 {
 			parallelNum = 1 // single CPU core
 		} else {
-			parallelNum = numCpu - 1
+			// 1-2 core for merge (with parallel KV check)
+			// 1-2 core for others (bc optimizer, main)
+			// 1-2 core for possible other concurrent routine
+			parallelNum = max(1, numCpu-6)
 		}
 		cfg.ParallelTxNum = parallelNum
 	}

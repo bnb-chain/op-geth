@@ -752,19 +752,6 @@ func (s *Syncer) Sync(root common.Hash, cancel chan struct{}) error {
 	}
 }
 
-// cleanPath is used to remove the dangling nodes in the stackTrie.
-func (s *Syncer) cleanPath(batch ethdb.Batch, owner common.Hash, path []byte) {
-	if owner == (common.Hash{}) && rawdb.ExistsAccountTrieNode(s.db.StateStoreReader(), path) {
-		rawdb.DeleteAccountTrieNode(batch, path)
-		deletionGauge.Inc(1)
-	}
-	if owner != (common.Hash{}) && rawdb.ExistsStorageTrieNode(s.db.StateStoreReader(), owner, path) {
-		rawdb.DeleteStorageTrieNode(batch, owner, path)
-		deletionGauge.Inc(1)
-	}
-	lookupGauge.Inc(1)
-}
-
 // loadSyncStatus retrieves a previously aborted sync status from the database,
 // or generates a fresh one if none is available.
 func (s *Syncer) loadSyncStatus() {

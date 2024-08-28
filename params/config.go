@@ -207,6 +207,7 @@ var (
 		EcotoneTime: newUint64(1718871600), // Jun-20-2024 08:20 AM +UTC
 		HaberTime:   newUint64(1718872200), // Jun-20-2024 08:30 AM +UTC
 		WrightTime:  newUint64(1724738400), // Aug-27-2024 06:00 AM +UTC
+		FjordTime:   newUint64(1727157600), // Sep-24-2024 06:00 AM +UTC
 	}
 	// OPBNBTestNetConfig is the chain parameters to run a node on the opBNB testnet network.
 	OPBNBTestNetConfig = &ChainConfig{
@@ -243,6 +244,7 @@ var (
 		EcotoneTime: newUint64(1715754600), // May-15-2024 06:30 AM +UTC
 		HaberTime:   newUint64(1717048800), // May-30-2024 06:00 AM +UTC
 		WrightTime:  newUint64(1723701600), // Aug-15-2024 06:00 AM +UTC
+		FjordTime:   newUint64(1725948000), // Sep-10-2024 06:00 AM +UTC
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{

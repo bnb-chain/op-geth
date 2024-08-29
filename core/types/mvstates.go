@@ -1,12 +1,10 @@
 package types
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -14,78 +12,19 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const (
-	AccountStatePrefix = 'a'
-	StorageStatePrefix = 's'
-)
-
-type RWKey [1 + common.AddressLength + common.HashLength]byte
-
 type AccountState byte
 
-const (
-	AccountSelf AccountState = iota
-	AccountNonce
-	AccountBalance
-	AccountCodeHash
-	AccountSuicide
+var (
+	AccountSelf     AccountState = 0x01
+	AccountNonce    AccountState = 0x02
+	AccountBalance  AccountState = 0x04
+	AccountCodeHash AccountState = 0x08
+	AccountSuicide  AccountState = 0x10
 )
 
 const (
-	asyncDepGenChanSize = 10000
+	asyncDepGenChanSize = 1000
 )
-
-func AccountStateKey(account common.Address, state AccountState) RWKey {
-	var key RWKey
-	key[0] = AccountStatePrefix
-	copy(key[1:], account.Bytes())
-	key[1+common.AddressLength] = byte(state)
-	return key
-}
-
-func StorageStateKey(account common.Address, state common.Hash) RWKey {
-	var key RWKey
-	key[0] = StorageStatePrefix
-	copy(key[1:], account.Bytes())
-	copy(key[1+common.AddressLength:], state.Bytes())
-	return key
-}
-
-func (key *RWKey) IsAccountState() (bool, AccountState) {
-	return AccountStatePrefix == key[0], AccountState(key[1+common.AddressLength])
-}
-
-func (key *RWKey) IsAccountSelf() bool {
-	ok, s := key.IsAccountState()
-	if !ok {
-		return false
-	}
-	return s == AccountSelf
-}
-
-func (key *RWKey) IsAccountSuicide() bool {
-	ok, s := key.IsAccountState()
-	if !ok {
-		return false
-	}
-	return s == AccountSuicide
-}
-
-func (key *RWKey) ToAccountSelf() RWKey {
-	return AccountStateKey(key.Addr(), AccountSelf)
-}
-
-func (key *RWKey) IsStorageState() bool {
-	return StorageStatePrefix == key[0]
-}
-
-func (key *RWKey) String() string {
-	return hex.EncodeToString(key[:])
-}
-
-func (key *RWKey) Addr() common.Address {
-	return common.BytesToAddress(key[1 : 1+common.AddressLength])
-}
 
 // StateVersion record specific TxIndex & TxIncarnation
 // if TxIndex equals to -1, it means the state read from DB.
@@ -98,9 +37,11 @@ type StateVersion struct {
 // RWSet record all read & write set in txs
 // Attention: this is not a concurrent safety structure
 type RWSet struct {
-	ver      StateVersion
-	readSet  map[RWKey]*RWItem
-	writeSet map[RWKey]*RWItem
+	ver          StateVersion
+	accReadSet   map[common.Address]map[AccountState]RWItem
+	accWriteSet  map[common.Address]map[AccountState]RWItem
+	slotReadSet  map[common.Address]map[common.Hash]RWItem
+	slotWriteSet map[common.Address]map[common.Hash]RWItem
 
 	// some flags
 	rwRecordDone bool
@@ -109,45 +50,112 @@ type RWSet struct {
 
 func NewRWSet(ver StateVersion) *RWSet {
 	return &RWSet{
-		ver:      ver,
-		readSet:  make(map[RWKey]*RWItem, 64),
-		writeSet: make(map[RWKey]*RWItem, 32),
+		ver:          ver,
+		accReadSet:   make(map[common.Address]map[AccountState]RWItem),
+		accWriteSet:  make(map[common.Address]map[AccountState]RWItem),
+		slotReadSet:  make(map[common.Address]map[common.Hash]RWItem),
+		slotWriteSet: make(map[common.Address]map[common.Hash]RWItem),
 	}
 }
 
-func (s *RWSet) RecordRead(key RWKey, ver StateVersion, val interface{}) {
+func (s *RWSet) RecordAccountRead(addr common.Address, state AccountState, ver StateVersion, val interface{}) {
 	// only record the first read version
-	if _, exist := s.readSet[key]; exist {
+	sub, ok := s.accReadSet[addr]
+	if !ok {
+		s.accReadSet[addr] = make(map[AccountState]RWItem)
+		s.accReadSet[addr][state] = RWItem{
+			Ver: ver,
+			Val: val,
+		}
 		return
 	}
-	s.readSet[key] = &RWItem{
+	if _, ok = sub[state]; ok {
+		return
+	}
+	s.accReadSet[addr][state] = RWItem{
 		Ver: ver,
 		Val: val,
 	}
 }
 
-func (s *RWSet) RecordWrite(key RWKey, val interface{}) {
-	wr, exist := s.writeSet[key]
-	if !exist {
-		s.writeSet[key] = &RWItem{
-			Ver: s.ver,
+func (s *RWSet) RecordStorageRead(addr common.Address, slot common.Hash, ver StateVersion, val interface{}) {
+	// only record the first read version
+	sub, ok := s.slotReadSet[addr]
+	if !ok {
+		s.slotReadSet[addr] = make(map[common.Hash]RWItem)
+		s.slotReadSet[addr][slot] = RWItem{
+			Ver: ver,
 			Val: val,
 		}
 		return
 	}
-	wr.Val = val
+	if _, ok = sub[slot]; ok {
+		return
+	}
+	s.slotReadSet[addr][slot] = RWItem{
+		Ver: ver,
+		Val: val,
+	}
+}
+
+func (s *RWSet) RecordAccountWrite(addr common.Address, state AccountState, val interface{}) {
+	_, ok := s.accWriteSet[addr]
+	if !ok {
+		s.accWriteSet[addr] = make(map[AccountState]RWItem)
+	}
+	s.accWriteSet[addr][state] = RWItem{
+		Ver: s.ver,
+		Val: val,
+	}
+}
+
+func (s *RWSet) RecordStorageWrite(addr common.Address, slot common.Hash, val interface{}) {
+	_, ok := s.slotWriteSet[addr]
+	if !ok {
+		s.slotWriteSet[addr] = make(map[common.Hash]RWItem)
+	}
+	s.slotWriteSet[addr][slot] = RWItem{
+		Ver: s.ver,
+		Val: val,
+	}
+}
+
+func (s *RWSet) queryAccReadItem(addr common.Address, state AccountState) *RWItem {
+	sub, ok := s.accReadSet[addr]
+	if !ok {
+		return nil
+	}
+
+	ret, ok := sub[state]
+	if !ok {
+		return nil
+	}
+	return &ret
+}
+
+func (s *RWSet) querySlotReadItem(addr common.Address, slot common.Hash) *RWItem {
+	sub, ok := s.slotReadSet[addr]
+	if !ok {
+		return nil
+	}
+
+	ret, ok := sub[slot]
+	if !ok {
+		return nil
+	}
+	return &ret
 }
 
 func (s *RWSet) Version() StateVersion {
 	return s.ver
 }
 
-func (s *RWSet) ReadSet() map[RWKey]*RWItem {
-	return s.readSet
+func (s *RWSet) ReadSet() (map[common.Address]map[AccountState]RWItem, map[common.Address]map[common.Hash]RWItem) {
+	return s.accReadSet, s.slotReadSet
 }
 
-func (s *RWSet) WriteSet() map[RWKey]*RWItem {
-	return s.writeSet
+func (s *RWSet) WriteSet() (map[common.Address]map[AccountState]RWItem, map[common.Address]map[common.Hash]RWItem) {
+	return s.accWriteSet, s.slotWriteSet
 }
 
 func (s *RWSet) WithExcludedTxFlag() *RWSet {
@@ -159,7 +167,15 @@ func (s *RWSet) String() string {
 	builder := strings.Builder{}
 	builder.WriteString(fmt.Sprintf("tx: %v, inc: %v\nreadSet: [", s.ver.TxIndex, s.ver.TxIncarnation))
 	i := 0
-	for key, _ := range s.readSet {
+	for key, _ := range s.accReadSet {
+		if i > 0 {
+			builder.WriteString(fmt.Sprintf(", %v", key.String()))
+			continue
+		}
+		builder.WriteString(fmt.Sprintf("%v", key.String()))
+		i++
+	}
+	for key, _ := range s.slotReadSet {
 		if i > 0 {
 			builder.WriteString(fmt.Sprintf(", %v", key.String()))
 			continue
@@ -169,7 +185,15 @@ func (s *RWSet) String() string {
 	}
 	builder.WriteString("]\nwriteSet: [")
 	i = 0
-	for key, _ := range s.writeSet {
+	for key, _ := range s.accWriteSet {
+		if i > 0 {
+			builder.WriteString(fmt.Sprintf(", %v", key.String()))
+			continue
+		}
+		builder.WriteString(fmt.Sprintf("%v", key.String()))
+		i++
+	}
+	for key, _ := range s.slotWriteSet {
 		if i > 0 {
 			builder.WriteString(fmt.Sprintf(", %v", key.String()))
 			continue
@@ -182,9 +206,9 @@ func (s *RWSet) String() string {
 }
 
 // isEqualRWVal compare state
-func isEqualRWVal(key RWKey, src interface{}, compared interface{}) bool {
-	if ok, state := key.IsAccountState(); ok {
-		switch state {
+func isEqualRWVal(accState *AccountState, src interface{}, compared interface{}) bool {
+	if accState != nil {
+		switch *accState {
 		case AccountBalance:
 			if src != nil && compared != nil {
 				return equalUint256(src.(*uint256.Int), compared.(*uint256.Int))
@@ -241,7 +265,7 @@ type PendingWrites struct {
 
 func NewPendingWrites() *PendingWrites {
 	return &PendingWrites{
-		list: make([]*RWItem, 0, 8),
+		list: make([]*RWItem, 0),
 	}
 }
 
@@ -298,19 +322,19 @@ func (w *PendingWrites) FindPrevWrites(txIndex int) []*RWItem {
 }
 
 type MVStates struct {
-	rwSets            map[int]*RWSet
-	pendingWriteSet   map[RWKey]*PendingWrites
-	nextFinaliseIndex int
+	rwSets              map[int]*RWSet
+	pendingAccWriteSet  map[common.Address]map[AccountState]*PendingWrites
+	pendingSlotWriteSet map[common.Address]map[common.Hash]*PendingWrites
+	nextFinaliseIndex   int
 
 	// dependency map cache for generating TxDAG
 	// depMapCache[i].exist(j) means j->i, and i > j
-	depMapCache map[int]TxDepMap
-	depsCache   map[int][]uint64
+	txDepCache []TxDepMaker
 
 	// async dep analysis
-	depsGenChan  chan int
-	stopChan     chan struct{}
-	asyncRunning bool
+	asyncGenChan  chan int
+	asyncStopChan chan struct{}
+	asyncRunning  bool
 
 	// execution stat infos
 	stats map[int]*ExeStat
@@ -319,53 +343,53 @@ type MVStates struct {
 
 func NewMVStates(txCount int) *MVStates {
 	return &MVStates{
-		rwSets:          make(map[int]*RWSet, txCount),
-		pendingWriteSet: make(map[RWKey]*PendingWrites, txCount*8),
-		depMapCache:     make(map[int]TxDepMap, txCount),
-		depsCache:       make(map[int][]uint64, txCount),
-		stats:           make(map[int]*ExeStat, txCount),
+		rwSets:              make(map[int]*RWSet, txCount),
+		pendingAccWriteSet:  make(map[common.Address]map[AccountState]*PendingWrites, txCount*8),
+		pendingSlotWriteSet: make(map[common.Address]map[common.Hash]*PendingWrites, txCount*8),
+		txDepCache:          make([]TxDepMaker, 0, txCount),
+		stats:               make(map[int]*ExeStat, txCount),
 	}
 }
 
-func (s *MVStates) EnableAsyncDepGen() *MVStates {
+func (s *MVStates) EnableAsyncGen() *MVStates {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.depsGenChan = make(chan int, asyncDepGenChanSize)
-	s.stopChan = make(chan struct{})
+	chanSize := asyncDepGenChanSize
+	if len(s.rwSets) > 0 && len(s.rwSets) < asyncDepGenChanSize {
+		chanSize = len(s.rwSets)
+	}
+	s.asyncGenChan = make(chan int, chanSize)
+	s.asyncStopChan = make(chan struct{})
 	s.asyncRunning = true
-	go s.asyncDepGenLoop()
+	go s.asyncGenLoop()
 	return s
 }
 
 func (s *MVStates) Stop() error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.stopAsyncDepGen()
+	s.stopAsyncGen()
 	return nil
 }
 
-func (s *MVStates) stopAsyncDepGen() {
+func (s *MVStates) stopAsyncGen() {
 	if !s.asyncRunning {
 		return
 	}
 	s.asyncRunning = false
-	if s.stopChan != nil {
-		close(s.stopChan)
+	if s.asyncStopChan != nil {
+		close(s.asyncStopChan)
 	}
 }
 
-func (s *MVStates) asyncDepGenLoop() {
-	timeout := time.After(3 * time.Second)
+func (s *MVStates) asyncGenLoop() {
 	for {
 		select {
-		case tx := <-s.depsGenChan:
-			s.lock.Lock()
-			s.resolveDepsCacheByWrites(tx, s.rwSets[tx])
-			s.lock.Unlock()
-		case <-s.stopChan:
-			return
-		case <-timeout:
-			log.Warn("asyncDepGenLoop exit by timeout")
+		case tx := <-s.asyncGenChan:
+			if err := s.Finalise(tx); err != nil {
+				log.Error("async MVStates Finalise err", "err", err)
+			}
+		case <-s.asyncStopChan:
 			return
 		}
 	}
@@ -392,12 +416,32 @@ func (s *MVStates) RWSet(index int) *RWSet {
 	return s.rwSets[index]
 }
 
-// ReadState read state from MVStates
-func (s *MVStates) ReadState(txIndex int, key RWKey) *RWItem {
+// ReadAccState read state from MVStates
+func (s *MVStates) ReadAccState(txIndex int, addr common.Address, state AccountState) *RWItem {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
-	wset, ok := s.pendingWriteSet[key]
+	sub, ok := s.pendingAccWriteSet[addr]
+	if !ok {
+		return nil
+	}
+	wset, ok := sub[state]
+	if !ok {
+		return nil
+	}
+	return wset.FindLastWrite(txIndex)
+}
+
+// ReadSlotState read state from MVStates
+func (s *MVStates) ReadSlotState(txIndex int, addr common.Address, slot common.Hash) *RWItem {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	sub, ok := s.pendingSlotWriteSet[addr]
+	if !ok {
+		return nil
+	}
+	wset, ok := sub[slot]
 	if !ok {
 		return nil
 	}
@@ -407,7 +451,6 @@ func (s *MVStates) ReadState(txIndex int, key RWKey) *RWItem {
 // FulfillRWSet it can execute as async, and rwSet & stat must guarantee read-only
 // try to generate TxDAG, when fulfill RWSet
 func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
-	log.Debug("FulfillRWSet", "total", len(s.rwSets), "cur", rwSet.ver.TxIndex, "reads", len(rwSet.readSet), "writes", len(rwSet.writeSet))
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	index := rwSet.ver.TxIndex
@@ -420,106 +463,141 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 		}
 		s.stats[index] = stat
 	}
-
-	//if metrics.EnabledExpensive {
-	//	for k := range rwSet.writeSet {
-	//		// this action is only for testing, it runs when enable expensive metrics.
-	//		checkRWSetInconsistent(index, k, rwSet.readSet, rwSet.writeSet)
-	//	}
-	//}
 	s.rwSets[index] = rwSet
 	return nil
 }
 
+// AsyncFinalise it will put target write set into pending writes.
+func (s *MVStates) AsyncFinalise(index int) {
+	// async resolve dependency, but non-block action
+	if s.asyncRunning && s.asyncGenChan != nil {
+		select {
+		case s.asyncGenChan <- index:
+		default:
+		}
+	}
+}
+
 // Finalise it will put target write set into pending writes.
 func (s *MVStates) Finalise(index int) error {
-	log.Debug("Finalise", "total", len(s.rwSets), "index", index)
 	s.lock.Lock()
+	defer s.lock.Unlock()
 
+	// just finalise all previous txs
+	for i := s.nextFinaliseIndex; i <= index; i++ {
+		if err := s.innerFinalise(i); err != nil {
+			return err
+		}
+		s.resolveDepsMapCacheByWrites(i, s.rwSets[i])
+	}
+
+	return nil
+}
+
+func (s *MVStates) innerFinalise(index int) error {
 	rwSet := s.rwSets[index]
 	if rwSet == nil {
-		s.lock.Unlock()
 		return fmt.Errorf("finalise a non-exist RWSet, index: %d", index)
 	}
 
 	if index != s.nextFinaliseIndex {
-		s.lock.Unlock()
 		return fmt.Errorf("finalise in wrong order, next: %d, input: %d", s.nextFinaliseIndex, index)
 	}
 
 	// append to pending write set
-	for k, v := range rwSet.writeSet {
-		if _, exist := s.pendingWriteSet[k]; !exist {
-			s.pendingWriteSet[k] = NewPendingWrites()
+	for addr, sub := range rwSet.accWriteSet {
+		if _, exist := s.pendingAccWriteSet[addr]; !exist {
+			s.pendingAccWriteSet[addr] = make(map[AccountState]*PendingWrites)
 		}
-		s.pendingWriteSet[k].Append(v)
+		for state, item := range sub {
+			if _, exist := s.pendingAccWriteSet[addr][state]; !exist {
+				s.pendingAccWriteSet[addr][state] = NewPendingWrites()
+			}
+			s.pendingAccWriteSet[addr][state].Append(&item)
+		}
+	}
+	for k, sub := range rwSet.slotWriteSet {
+		if _, exist := s.pendingSlotWriteSet[k]; !exist {
+			s.pendingSlotWriteSet[k] = make(map[common.Hash]*PendingWrites)
+		}
+		for slot, item := range sub {
+			if _, exist := s.pendingSlotWriteSet[k][slot]; !exist {
+				s.pendingSlotWriteSet[k][slot] = NewPendingWrites()
+			}
+			s.pendingSlotWriteSet[k][slot].Append(&item)
+		}
 	}
 	s.nextFinaliseIndex++
-	s.lock.Unlock()
-	// async resolve dependency, but non-block action
-	if s.asyncRunning && s.depsGenChan != nil {
-		s.depsGenChan <- index
-	}
 	return nil
 }
 
-func (s *MVStates) resolveDepsCacheByWrites(index int, rwSet *RWSet) {
+func (s *MVStates) queryAccWrites(addr common.Address, state AccountState) *PendingWrites {
+	if _, exist := s.pendingAccWriteSet[addr]; !exist {
+		return nil
+	}
+	return s.pendingAccWriteSet[addr][state]
+}
+
+func (s *MVStates) querySlotWrites(addr common.Address, slot common.Hash) *PendingWrites {
+	if _, exist := s.pendingSlotWriteSet[addr]; !exist {
+		return nil
+	}
+	return s.pendingSlotWriteSet[addr][slot]
+}
+
+// resolveDepsMapCacheByWrites must be executed in order
+func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
-	s.depMapCache[index] = NewTxDeps(8)
+	depMap := NewTxDepMap(0)
 	if rwSet.excludedTx {
+		s.txDepCache = append(s.txDepCache, depMap)
 		return
 	}
-	seen := make(map[int]struct{}, 8)
 	// check tx dependency, only check key, skip version
-	if len(s.pendingWriteSet) > len(rwSet.readSet) {
-		for key := range rwSet.readSet {
+	for addr, sub := range rwSet.accReadSet {
+		for state := range sub {
 			// check self destruct
-			if key.IsAccountSelf() {
-				key = AccountStateKey(key.Addr(), AccountSuicide)
+			if state == AccountSelf {
+				state = AccountSuicide
 			}
-			writes := s.pendingWriteSet[key]
+			writes := s.queryAccWrites(addr, state)
 			if writes == nil {
 				continue
 			}
 			items := writes.FindPrevWrites(index)
 			for _, item := range items {
-				seen[item.TxIndex()] = struct{}{}
+				depMap.add(uint64(item.TxIndex()))
 			}
 		}
-	} else {
-		for k, w := range s.pendingWriteSet {
-			// check suicide, add read address flag, it only for check suicide quickly, and cannot for other scenarios.
-			if k.IsAccountSuicide() {
-				k = k.ToAccountSelf()
-			}
-			if _, ok := rwSet.readSet[k]; !ok {
+	}
+	for addr, sub := range rwSet.slotReadSet {
+		for slot := range sub {
+			writes := s.querySlotWrites(addr, slot)
+			if writes == nil {
 				continue
 			}
-			items := w.FindPrevWrites(index)
+			items := writes.FindPrevWrites(index)
 			for _, item := range items {
-				seen[item.TxIndex()] = struct{}{}
+				depMap.add(uint64(item.TxIndex()))
 			}
 		}
 	}
-	for prev := 0; prev < index; prev++ {
-		if _, ok := seen[prev]; !ok {
-			continue
-		}
-		s.depMapCache[index].add(prev)
-		// clear redundancy deps compared with prev
-		for dep := range s.depMapCache[index] {
-			if s.depMapCache[prev].exist(dep) {
-				s.depMapCache[index].remove(dep)
-			}
+	// clear redundancy deps compared with prev
+	preDeps := depMap.deps()
+	for _, prev := range preDeps {
+		for _, tx := range s.txDepCache[prev].deps() {
+			depMap.remove(tx)
 		}
 	}
-	s.depsCache[index] = s.depMapCache[index].toArray()
+	s.txDepCache = append(s.txDepCache, depMap)
 }
 
+// resolveDepsCache must be executed in order
 func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
-	s.depMapCache[index] = NewTxDeps(0)
+	depMap := NewTxDepMap(0)
 	if rwSet.excludedTx {
+		s.txDepCache = append(s.txDepCache, depMap)
 		return
 	}
 	for prev := 0; prev < index; prev++ {
@@ -534,40 +612,26 @@ func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 			continue
 		}
 		// check if there has written op before i
-		if checkDependency(prevSet.writeSet, rwSet.readSet) {
-			s.depMapCache[index].add(prev)
+		if checkAccDependency(prevSet.accWriteSet, rwSet.accReadSet) {
+			depMap.add(uint64(prev))
 			// clear redundancy deps compared with prev
-			for dep := range s.depMapCache[index] {
-				if s.depMapCache[prev].exist(dep) {
-					s.depMapCache[index].remove(dep)
+			for _, dep := range depMap.deps() {
+				if s.txDepCache[prev].exist(dep) {
+					depMap.remove(dep)
+				}
+			}
+		}
+		if checkSlotDependency(prevSet.slotWriteSet, rwSet.slotReadSet) {
+			depMap.add(uint64(prev))
+			// clear redundancy deps compared with prev
+			for _, dep := range depMap.deps() {
+				if s.txDepCache[prev].exist(dep) {
+					depMap.remove(dep)
 				}
 			}
 		}
 	}
-	s.depsCache[index] = s.depMapCache[index].toArray()
-}
-
-func checkRWSetInconsistent(index int, k RWKey, readSet map[RWKey]*RWItem, writeSet map[RWKey]*RWItem) bool {
-	var (
-		readOk  bool
-		writeOk bool
-		r       *RWItem
-	)
-
-	if k.IsAccountSuicide() {
-		_, readOk = readSet[k.ToAccountSelf()]
-	} else {
-		_, readOk = readSet[k]
-	}
-
-	r, writeOk = writeSet[k]
-	if readOk != writeOk {
-		// check if it's correct? read nil, write non-nil
-		log.Warn("checkRWSetInconsistent find inconsistent", "tx", index, "k", k.String(), "read", readOk, "write", writeOk, "val", r.Val)
-		return true
-	}
-
-	return false
+	s.txDepCache = append(s.txDepCache, depMap)
 }
 
 // ResolveTxDAG generate TxDAG from RWSets
@@ -577,27 +641,34 @@ func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (Tx
 	if len(s.rwSets) != txCnt {
 		return nil, fmt.Errorf("wrong rwSet count, expect: %v, actual: %v", txCnt, len(s.rwSets))
 	}
-	if txCnt != s.nextFinaliseIndex {
-		return nil, fmt.Errorf("resolve in wrong order, next: %d, input: %d", s.nextFinaliseIndex, txCnt)
+	s.stopAsyncGen()
+	// collect all rw sets, try to finalise them
+	for i := s.nextFinaliseIndex; i < txCnt; i++ {
+		if err := s.innerFinalise(i); err != nil {
+			return nil, err
+		}
 	}
-	s.stopAsyncDepGen()
-	txDAG := NewPlainTxDAG(len(s.rwSets))
+
+	txDAG := NewPlainTxDAG(txCnt)
 	for i := 0; i < txCnt; i++ {
 		// check if there are RW with gas fee receiver for gas delay calculation
 		for _, addr := range gasFeeReceivers {
-			if _, ok := s.rwSets[i].readSet[AccountStateKey(addr, AccountSelf)]; ok {
+			if _, ok := s.rwSets[i].accReadSet[addr]; !ok {
+				continue
+			}
+			if _, ok := s.rwSets[i].accReadSet[addr][AccountSelf]; ok {
 				return NewEmptyTxDAG(), nil
 			}
 		}
 		txDAG.TxDeps[i].TxIndexes = []uint64{}
+		if len(s.txDepCache) <= i {
+			s.resolveDepsMapCacheByWrites(i, s.rwSets[i])
+		}
 		if s.rwSets[i].excludedTx {
 			txDAG.TxDeps[i].SetFlag(ExcludedTxFlag)
 			continue
 		}
-		if s.depMapCache[i] == nil {
-			s.resolveDepsCacheByWrites(i, s.rwSets[i])
-		}
-		deps := s.depsCache[i]
+		deps := s.txDepCache[i].deps()
 		if len(deps) <= (txCnt-1)/2 {
 			txDAG.TxDeps[i].TxIndexes = deps
 			continue
@@ -614,48 +685,92 @@ func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (Tx
 	return txDAG, nil
 }
 
-func checkDependency(writeSet map[RWKey]*RWItem, readSet map[RWKey]*RWItem) bool {
+func checkAccDependency(writeSet map[common.Address]map[AccountState]RWItem, readSet map[common.Address]map[AccountState]RWItem) bool {
 	// check tx dependency, only check key, skip version
-	for k, _ := range writeSet {
-		// check suicide, add read address flag, it only for check suicide quickly, and cannot for other scenarios.
-		if k.IsAccountSuicide() {
-			if _, ok := readSet[k.ToAccountSelf()]; ok {
-				return true
-			}
+	for addr, sub := range writeSet {
+		if _, ok := readSet[addr]; !ok {
 			continue
 		}
-		if _, ok := readSet[k]; ok {
-			return true
+		for state := range sub {
+			// check suicide, add read address flag, it only for check suicide quickly, and cannot for other scenarios.
+			if state == AccountSuicide {
+				if _, ok := readSet[addr][AccountSelf]; ok {
+					return true
+				}
+				continue
+			}
+			if _, ok := readSet[addr][state]; ok {
+				return true
+			}
 		}
 	}
 
 	return false
 }
 
-type TxDepMap map[int]struct{}
+func checkSlotDependency(writeSet map[common.Address]map[common.Hash]RWItem, readSet map[common.Address]map[common.Hash]RWItem) bool {
+	// check tx dependency, only check key, skip version
+	for addr, sub := range writeSet {
+		if _, ok := readSet[addr]; !ok {
+			continue
+		}
+		for slot := range sub {
+			if _, ok := readSet[addr][slot]; ok {
+				return true
+			}
+		}
+	}
 
-func NewTxDeps(cap int) TxDepMap {
-	return make(map[int]struct{}, cap)
+	return false
 }
 
-func (m TxDepMap) add(index int) {
-	m[index] = struct{}{}
+type TxDepMaker interface {
+	add(index uint64)
+	exist(index uint64) bool
+	deps() []uint64
+	remove(index uint64)
+	len() int
 }
 
-func (m TxDepMap) exist(index int) bool {
-	_, ok := m[index]
+type TxDepMap struct {
+	tm    map[uint64]struct{}
+	cache []uint64
+}
+
+func NewTxDepMap(cap int) *TxDepMap {
+	return &TxDepMap{
+		tm: make(map[uint64]struct{}, cap),
+	}
+}
+
+func (m *TxDepMap) add(index uint64) {
+	m.cache = nil
+	m.tm[index] = struct{}{}
+}
+
+func (m *TxDepMap) exist(index uint64) bool {
+	_, ok := m.tm[index]
 	return ok
 }
 
-func (m TxDepMap) toArray() []uint64 {
-	ret := make([]uint64, 0, len(m))
-	for index := range m {
-		ret = append(ret, uint64(index))
+func (m *TxDepMap) deps() []uint64 {
+	if m.cache != nil {
+		return m.cache
 	}
-	slices.Sort(ret)
-	return ret
+	res := make([]uint64, 0, len(m.tm))
+	for index := range m.tm {
+		res = append(res, index)
+	}
+	slices.Sort(res)
+	m.cache = res
+	return m.cache
 }
 
-func (m TxDepMap) remove(index int) {
-	delete(m, index)
+func (m *TxDepMap) remove(index uint64) {
+	m.cache = nil
+	delete(m.tm, index)
+}
+
+func (m *TxDepMap) len() int {
+	return len(m.tm)
 }

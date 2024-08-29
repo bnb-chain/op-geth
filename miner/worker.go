@@ -128,7 +128,7 @@ type environment struct {
 func (env *environment) copy() *environment {
 	cpy := &environment{
 		signer:   env.signer,
-		state:    env.state.Copy(),
+		state:    env.state.CopyWithMvStates(),
 		tcount:   env.tcount,
 		coinbase: env.coinbase,
 		header:   types.CopyHeader(env.header),
@@ -1388,8 +1388,6 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			}()
 			err := w.fillTransactionsAndBundles(interrupt, work)
 			wg.Wait()
-			// append a DAG tx at the end of the block
-			w.appendTxDAG(work)
 			timer.Stop() // don't need timeout interruption any more
 			if errors.Is(err, errFillBundleInterrupted) {
 				log.Warn("fill bundles is interrupted, discard", "err", err)
@@ -1397,8 +1395,6 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			}
 		} else {
 			err := w.fillTransactions(interrupt, work)
-			// append a DAG tx at the end of the block
-			w.appendTxDAG(work)
 			timer.Stop() // don't need timeout interruption any more
 			if errors.Is(err, errBlockInterruptedByTimeout) {
 				log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
@@ -1413,9 +1409,10 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
 		return &newPayloadResult{err: errInterruptedUpdate}
 	}
-	// TODO(galaio): fulfill TxDAG to mined block
-	//if w.chain.TxDAGEnabledWhenMine() {
-	//}
+	if w.chain.TxDAGEnabledWhenMine() {
+		// append a DAG tx at the end of the block
+		w.appendTxDAG(work)
+	}
 
 	start = time.Now()
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)

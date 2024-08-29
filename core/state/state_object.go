@@ -300,23 +300,27 @@ func (s *stateObject) finalise(prefetch bool) {
 }
 
 func (s *stateObject) finaliseRWSet() {
+	if s.db.mvStates == nil {
+		return
+	}
+	ms := s.db.mvStates
 	for key, value := range s.dirtyStorage {
 		// three are some unclean dirtyStorage from previous reverted txs, it will skip finalise
 		// so add a new rule, if val has no change, then skip it
 		if value == s.GetCommittedState(key) {
 			continue
 		}
-		s.db.RecordStorageWrite(s.address, key, value)
+		ms.RecordStorageWrite(s.address, key)
 	}
 
 	if s.dirtyNonce != nil && *s.dirtyNonce != s.data.Nonce {
-		s.db.RecordAccountWrite(s.address, types.AccountNonce, *s.dirtyNonce)
+		ms.RecordAccountWrite(s.address, types.AccountNonce)
 	}
 	if s.dirtyBalance != nil && s.dirtyBalance.Cmp(s.data.Balance) != 0 {
-		s.db.RecordAccountWrite(s.address, types.AccountBalance, new(uint256.Int).Set(s.dirtyBalance))
+		ms.RecordAccountWrite(s.address, types.AccountBalance)
 	}
 	if s.dirtyCodeHash != nil && !slices.Equal(s.dirtyCodeHash, s.data.CodeHash) {
-		s.db.RecordAccountWrite(s.address, types.AccountCodeHash, s.dirtyCodeHash)
+		ms.RecordAccountWrite(s.address, types.AccountCodeHash)
 	}
 }
 

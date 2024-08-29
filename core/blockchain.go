@@ -1922,12 +1922,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		if bc.enableTxDAG {
 			// compare input TxDAG when it enable in consensus
-			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+			dag, err := statedb.ResolveTxDAG(len(block.Transactions()))
 			if err == nil {
 				// TODO(galaio): check TxDAG correctness?
 				log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
 				if metrics.EnabledExpensive {
-					go types.EvaluateTxDAGPerformance(dag, statedb.ResolveStats())
+					go types.EvaluateTxDAGPerformance(dag)
 				}
 			} else {
 				log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)

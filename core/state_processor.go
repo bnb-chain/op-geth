@@ -91,11 +91,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	statedb.MarkFullProcessed()
 	if p.bc.enableTxDAG {
-		statedb.ResetMVStates(len(block.Transactions())).EnableAsyncGen()
+		feeReceivers := []common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient}
+		statedb.ResetMVStates(len(block.Transactions()), feeReceivers).EnableAsyncGen()
 	}
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
-		statedb.BeginTxStat(i)
+		statedb.BeginTxRecorder(i, tx.IsSystemTx() || tx.IsDepositTx())
 		start := time.Now()
 		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
 		if err != nil {
@@ -106,17 +107,14 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
-
-		// if systemTx or depositTx, tag it
-		if tx.IsSystemTx() || tx.IsDepositTx() {
-			statedb.RecordSystemTxRWSet(i)
-		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 		if metrics.EnabledExpensive {
 			processTxTimer.UpdateSince(start)
 		}
-		statedb.StopTxStat(receipt.GasUsed)
+	}
+	if statedb.MVStates() != nil {
+		statedb.MVStates().BatchRecordHandle()
 	}
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.
 	withdrawals := block.Withdrawals()

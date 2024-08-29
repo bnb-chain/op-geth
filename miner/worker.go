@@ -1320,8 +1320,6 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 			return err
 		}
 	}
-	// append a DAG tx at the end of the block
-	w.appendTxDAG(env)
 	commitTxpoolTxsTimer.UpdateSince(start)
 	log.Debug("commitTxpoolTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
 	return nil
@@ -1400,6 +1398,8 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			}()
 			err := w.fillTransactionsAndBundles(interrupt, work)
 			wg.Wait()
+			// append a DAG tx at the end of the block
+			w.appendTxDAG(work)
 			timer.Stop() // don't need timeout interruption any more
 			if errors.Is(err, errFillBundleInterrupted) {
 				log.Warn("fill bundles is interrupted, discard", "err", err)
@@ -1407,6 +1407,8 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			}
 		} else {
 			err := w.fillTransactions(interrupt, work)
+			// append a DAG tx at the end of the block
+			w.appendTxDAG(work)
 			timer.Stop() // don't need timeout interruption any more
 			if errors.Is(err, errBlockInterruptedByTimeout) {
 				log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)

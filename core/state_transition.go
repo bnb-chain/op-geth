@@ -398,10 +398,6 @@ func (st *StateTransition) preCheck() error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
-	// start record rw set in here
-	if !st.msg.IsSystemTx && !st.msg.IsDepositTx {
-		st.state.BeforeTxTransition()
-	}
 	if mint := st.msg.Mint; mint != nil {
 		st.state.AddBalance(st.msg.From, mint)
 	}
@@ -422,22 +418,12 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		if st.msg.IsSystemTx && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
 			gasUsed = 0
 		}
-		// just record error tx here
-		if ferr := st.state.FinaliseRWSet(); ferr != nil {
-			log.Error("finalise error deposit tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
-		}
 		result = &ExecutionResult{
 			UsedGas:    gasUsed,
 			Err:        fmt.Errorf("failed deposit: %w", err),
 			ReturnData: nil,
 		}
 		err = nil
-	}
-	if err != nil {
-		// just record error tx here
-		if ferr := st.state.FinaliseRWSet(); ferr != nil {
-			log.Error("finalise error tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
-		}
 	}
 	return result, err
 }
@@ -511,11 +497,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	}
 	DebugInnerExecutionDuration += time.Since(start)
 
-	// stop record rw set in here, skip gas fee distribution
-	if ferr := st.state.FinaliseRWSet(); ferr != nil {
-		log.Error("finalise tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
-	}
-
 	// if deposit: skip refunds, skip tipping coinbase
 	// Regolith changes this behaviour to report the actual gasUsed instead of always reporting all gas used.
 	if st.msg.IsDepositTx && !rules.IsOptimismRegolith {
@@ -551,6 +532,11 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			Err:         vmerr,
 			ReturnData:  ret,
 		}, nil
+	}
+
+	// check fee receiver rwSet here
+	if ferr := st.state.CheckFeeReceiversRWSet(); ferr != nil {
+		log.Error("CheckFeeReceiversRWSet err", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
 	}
 	effectiveTip := msg.GasPrice
 	if rules.IsLondon {

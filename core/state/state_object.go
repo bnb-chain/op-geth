@@ -306,17 +306,17 @@ func (s *stateObject) finaliseRWSet() {
 		if value == s.GetCommittedState(key) {
 			continue
 		}
-		s.db.RecordWrite(types.StorageStateKey(s.address, key), value)
+		s.db.RecordStorageWrite(s.address, key, value)
 	}
 
 	if s.dirtyNonce != nil && *s.dirtyNonce != s.data.Nonce {
-		s.db.RecordWrite(types.AccountStateKey(s.address, types.AccountNonce), *s.dirtyNonce)
+		s.db.RecordAccountWrite(s.address, types.AccountNonce, *s.dirtyNonce)
 	}
 	if s.dirtyBalance != nil && s.dirtyBalance.Cmp(s.data.Balance) != 0 {
-		s.db.RecordWrite(types.AccountStateKey(s.address, types.AccountBalance), new(uint256.Int).Set(s.dirtyBalance))
+		s.db.RecordAccountWrite(s.address, types.AccountBalance, new(uint256.Int).Set(s.dirtyBalance))
 	}
 	if s.dirtyCodeHash != nil && !slices.Equal(s.dirtyCodeHash, s.data.CodeHash) {
-		s.db.RecordWrite(types.AccountStateKey(s.address, types.AccountCodeHash), s.dirtyCodeHash)
+		s.db.RecordAccountWrite(s.address, types.AccountCodeHash, s.dirtyCodeHash)
 	}
 }
 

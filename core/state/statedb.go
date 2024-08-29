@@ -18,12 +18,13 @@
 package state
 
 import (
-	"errors"
 	"fmt"
 	"runtime"
 	"sort"
 	"sync"
 	"time"
+
+	"golang.org/x/exp/slices"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
@@ -116,9 +117,7 @@ type StateDB struct {
 	logSize uint
 
 	// parallel EVM related
-	rwSet    *types.RWSet
 	mvStates *types.MVStates
-	stat     *types.ExeStat
 
 	// Preimages occurred seen by VM in the scope of block.
 	preimages map[common.Hash][]byte
@@ -346,10 +345,11 @@ func (s *StateDB) Empty(addr common.Address) bool {
 }
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
-func (s *StateDB) GetBalance(addr common.Address) (ret *uint256.Int) {
-	defer func() {
-		s.RecordAccountRead(addr, types.AccountBalance, ret)
-	}()
+func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+	}
+
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Balance()
@@ -358,10 +358,10 @@ func (s *StateDB) GetBalance(addr common.Address) (ret *uint256.Int) {
 }
 
 // GetNonce retrieves the nonce from the given address or 0 if object not found
-func (s *StateDB) GetNonce(addr common.Address) (ret uint64) {
-	defer func() {
-		s.RecordAccountRead(addr, types.AccountNonce, ret)
-	}()
+func (s *StateDB) GetNonce(addr common.Address) uint64 {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountNonce)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Nonce()
@@ -386,9 +386,9 @@ func (s *StateDB) TxIndex() int {
 }
 
 func (s *StateDB) GetCode(addr common.Address) []byte {
-	defer func() {
-		s.RecordAccountRead(addr, types.AccountCodeHash, s.GetCodeHash(addr))
-	}()
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Code()
@@ -397,9 +397,9 @@ func (s *StateDB) GetCode(addr common.Address) []byte {
 }
 
 func (s *StateDB) GetCodeSize(addr common.Address) int {
-	defer func() {
-		s.RecordAccountRead(addr, types.AccountCodeHash, s.GetCodeHash(addr))
-	}()
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.CodeSize()
@@ -407,10 +407,10 @@ func (s *StateDB) GetCodeSize(addr common.Address) int {
 	return 0
 }
 
-func (s *StateDB) GetCodeHash(addr common.Address) (ret common.Hash) {
-	defer func() {
-		s.RecordAccountRead(addr, types.AccountCodeHash, ret.Bytes())
-	}()
+func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return common.BytesToHash(stateObject.CodeHash())
@@ -419,10 +419,10 @@ func (s *StateDB) GetCodeHash(addr common.Address) (ret common.Hash) {
 }
 
 // GetState retrieves a value from the given account's storage trie.
-func (s *StateDB) GetState(addr common.Address, hash common.Hash) (ret common.Hash) {
-	defer func() {
-		s.RecordStorageRead(addr, hash, ret)
-	}()
+func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
+	if s.mvStates != nil {
+		s.mvStates.RecordStorageRead(addr, hash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.GetState(hash)
@@ -431,10 +431,10 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) (ret common.Ha
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
-func (s *StateDB) GetCommittedState(addr common.Address, hash common.Hash) (ret common.Hash) {
-	defer func() {
-		s.RecordStorageRead(addr, hash, ret)
-	}()
+func (s *StateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
+	if s.mvStates != nil {
+		s.mvStates.RecordStorageRead(addr, hash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.GetCommittedState(hash)
@@ -461,24 +461,26 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+	}
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
-		s.RecordAccountRead(addr, types.AccountBalance, stateObject.Balance())
 		stateObject.AddBalance(amount)
 		return
 	}
-	s.RecordAccountRead(addr, types.AccountBalance, common.Big0)
 }
 
 // SubBalance subtracts amount from the account associated with addr.
 func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int) {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+	}
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
-		s.RecordAccountRead(addr, types.AccountBalance, stateObject.Balance())
 		stateObject.SubBalance(amount)
 		return
 	}
-	s.RecordAccountRead(addr, types.AccountBalance, common.Big0)
 }
 
 func (s *StateDB) SetBalance(addr common.Address, amount *uint256.Int) {
@@ -658,7 +660,6 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 // flag set. This is needed by the state journal to revert to the correct s-
 // destructed object instead of wiping all knowledge about the state object.
 func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
-	s.RecordAccountRead(addr, types.AccountSelf, struct{}{})
 	// Prefer live objects if any is available
 	if obj := s.stateObjects[addr]; obj != nil {
 		return obj
@@ -933,13 +934,19 @@ func (s *StateDB) GetRefund() uint64 {
 // the journal as well as the refunds. Finalise, however, will not push any updates
 // into the tries just yet. Only IntermediateRoot or Commit will do that.
 func (s *StateDB) Finalise(deleteEmptyObjects bool) {
+	var feeReceivers []common.Address
+	if s.mvStates != nil {
+		feeReceivers = s.mvStates.FeeReceivers()
+	}
 	addressesToPrefetch := make([][]byte, 0, len(s.journal.dirties))
 
 	// finalise stateObjectsDestruct
 	for addr, acc := range s.stateObjectsDestructDirty {
 		s.stateObjectsDestruct[addr] = acc
+		if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
+			s.mvStates.RecordAccountWrite(addr, types.AccountSuicide)
+		}
 	}
-	s.stateObjectsDestructDirty = make(map[common.Address]*types.StateAccount)
 	for addr := range s.journal.dirties {
 		obj, exist := s.stateObjects[addr]
 		if !exist {
@@ -959,6 +966,9 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			// event is tracked.
 			if _, ok := s.stateObjectsDestruct[obj.address]; !ok {
 				s.stateObjectsDestruct[obj.address] = obj.origin
+				if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
+					s.mvStates.RecordAccountWrite(addr, types.AccountSuicide)
+				}
 			}
 			// Note, we can't do this only at the end of a block because multiple
 			// transactions within the same block might self destruct and then
@@ -968,6 +978,9 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			delete(s.accountsOrigin, obj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
 			delete(s.storagesOrigin, obj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
 		} else {
+			if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
+				obj.finaliseRWSet()
+			}
 			obj.finalise(true) // Prefetch slots in the background
 		}
 		obj.created = false
@@ -979,6 +992,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// the commit-phase will be a lot faster
 		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:])) // Copy needed for closure
 	}
+
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
 	}
@@ -1689,129 +1703,51 @@ func (s *StateDB) GetSnap() snapshot.Snapshot {
 	return s.snap
 }
 
-func (s *StateDB) BeforeTxTransition() {
-	log.Debug("BeforeTxTransition", "mvStates", s.mvStates == nil, "rwSet", s.rwSet == nil)
+func (s *StateDB) BeginTxRecorder(index int, isExcludeTx bool) {
 	if s.mvStates == nil {
 		return
 	}
-	s.rwSet = types.NewRWSet(types.StateVersion{
-		TxIndex: s.txIndex,
-	})
-}
-
-func (s *StateDB) BeginTxStat(index int) {
-	if s.mvStates == nil {
-		return
-	}
-	if metrics.EnabledExpensive {
-		s.stat = types.NewExeStat(index).Begin()
-	}
-}
-
-func (s *StateDB) StopTxStat(usedGas uint64) {
-	if s.mvStates == nil {
-		return
-	}
-	// record stat first
-	if metrics.EnabledExpensive && s.stat != nil {
-		s.stat.Done().WithGas(usedGas)
-		rwSet := s.mvStates.RWSet(s.txIndex)
-		if rwSet != nil {
-			ar, sr := rwSet.ReadSet()
-			s.stat.WithRead(len(ar) + len(sr))
+	if isExcludeTx {
+		rwSet := types.NewRWSet(index).WithExcludedTxFlag()
+		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {
+			log.Error("MVStates SystemTx Finalise err", "err", err)
 		}
-	}
-}
-
-func (s *StateDB) RecordAccountRead(addr common.Address, state types.AccountState, val interface{}) {
-	if s.rwSet == nil {
 		return
 	}
-	s.rwSet.RecordAccountRead(addr, state, types.StateVersion{
-		TxIndex: -1,
-	}, val)
+	s.mvStates.RecordNewTx(index)
 }
 
-func (s *StateDB) RecordStorageRead(addr common.Address, slot common.Hash, val interface{}) {
-	if s.rwSet == nil {
-		return
-	}
-	s.rwSet.RecordStorageRead(addr, slot, types.StateVersion{
-		TxIndex: -1,
-	}, val)
-}
-
-func (s *StateDB) RecordAccountWrite(addr common.Address, state types.AccountState, val interface{}) {
-	if s.rwSet == nil {
-		return
-	}
-	s.rwSet.RecordAccountWrite(addr, state, val)
-}
-
-func (s *StateDB) RecordStorageWrite(addr common.Address, slot common.Hash, val interface{}) {
-	if s.rwSet == nil {
-		return
-	}
-	s.rwSet.RecordStorageWrite(addr, slot, val)
-}
-
-func (s *StateDB) ResetMVStates(txCount int) *types.MVStates {
-	if s.mvStates != nil {
-		s.mvStates.Stop()
-	}
-	s.mvStates = types.NewMVStates(txCount)
-	s.rwSet = nil
+func (s *StateDB) ResetMVStates(txCount int, feeReceivers []common.Address) *types.MVStates {
+	s.mvStates = types.NewMVStates(txCount, feeReceivers)
 	return s.mvStates
 }
 
-func (s *StateDB) FinaliseRWSet() error {
-	if s.rwSet == nil {
+func (s *StateDB) CheckFeeReceiversRWSet() error {
+	if s.mvStates == nil {
 		return nil
 	}
-	log.Debug("FinaliseRWSet", "index", s.txIndex)
-	rwSet := s.rwSet
-	stat := s.stat
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) {
 			s.TxDAGGenerate += time.Since(start)
 		}(time.Now())
 	}
-	ver := types.StateVersion{
-		TxIndex: s.txIndex,
-	}
-	if ver != rwSet.Version() {
-		return errors.New("you finalize a wrong ver of RWSet")
-	}
-
-	// finalise stateObjectsDestruct
-	for addr := range s.stateObjectsDestructDirty {
-		s.RecordAccountWrite(addr, types.AccountSuicide, struct{}{})
-	}
-	for addr := range s.journal.dirties {
-		obj, exist := s.stateObjects[addr]
-		if !exist {
+	s.mvStates.RecordReadDone()
+	feeReceivers := s.mvStates.FeeReceivers()
+	for _, addr := range feeReceivers {
+		if _, ok := s.stateObjectsDestructDirty[addr]; !ok {
 			continue
 		}
-		if obj.selfDestructed || obj.empty() {
-			// We need to maintain account deletions explicitly (will remain
-			// set indefinitely). Note only the first occurred self-destruct
-			// event is tracked.
-			if _, ok := s.stateObjectsDestruct[obj.address]; !ok {
-				s.RecordAccountWrite(addr, types.AccountSuicide, struct{}{})
-			}
-		} else {
-			// finalise account & storages
-			obj.finaliseRWSet()
-		}
+		s.mvStates.RecordCannotDelayGasFee()
+		return nil
 	}
 
-	// reset stateDB
-	s.rwSet = nil
-	if err := s.mvStates.FulfillRWSet(rwSet, stat); err != nil {
-		return err
+	for _, addr := range feeReceivers {
+		if _, ok := s.journal.dirties[addr]; !ok {
+			continue
+		}
+		s.mvStates.RecordCannotDelayGasFee()
+		return nil
 	}
-	// just Finalise rwSet in serial execution
-	s.mvStates.AsyncFinalise(s.txIndex)
 	return nil
 }
 
@@ -1831,7 +1767,7 @@ func (s *StateDB) removeStateObjectsDestruct(addr common.Address) {
 	delete(s.stateObjectsDestructDirty, addr)
 }
 
-func (s *StateDB) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (types.TxDAG, error) {
+func (s *StateDB) ResolveTxDAG(txCnt int) (types.TxDAG, error) {
 	if s.mvStates == nil {
 		return types.NewEmptyTxDAG(), nil
 	}
@@ -1841,31 +1777,11 @@ func (s *StateDB) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (typ
 		}(time.Now())
 	}
 
-	return s.mvStates.ResolveTxDAG(txCnt, gasFeeReceivers)
-}
-
-func (s *StateDB) ResolveStats() map[int]*types.ExeStat {
-	if s.mvStates == nil {
-		return nil
-	}
-
-	return s.mvStates.Stats()
+	return s.mvStates.ResolveTxDAG(txCnt)
 }
 
 func (s *StateDB) MVStates() *types.MVStates {
 	return s.mvStates
-}
-
-func (s *StateDB) RecordSystemTxRWSet(index int) {
-	if s.mvStates == nil {
-		return
-	}
-	s.mvStates.FulfillRWSet(types.NewRWSet(types.StateVersion{
-		TxIndex: index,
-	}).WithExcludedTxFlag(), types.NewExeStat(index).WithExcludedTxFlag())
-	if err := s.mvStates.Finalise(index); err != nil {
-		log.Error("MVStates SystemTx Finalise err", "err", err)
-	}
 }
 
 // copySet returns a deep-copied set.

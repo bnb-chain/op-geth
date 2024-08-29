@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -394,16 +393,6 @@ func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64
 	return 0, false
 }
 
-// travelTxDAGExecutionPaths will print all tx execution path
-func travelTxDAGExecutionPaths(d TxDAG) [][]uint64 {
-	exePaths := make([][]uint64, 0)
-	// travel tx deps with BFS
-	for i := uint64(0); i < uint64(d.TxCount()); i++ {
-		exePaths = append(exePaths, travelTxDAGTargetPath(d, i))
-	}
-	return exePaths
-}
-
 // TxDep store the current tx dependency relation with other txs
 type TxDep struct {
 	TxIndexes []uint64
@@ -473,175 +462,18 @@ func (d *TxDep) ClearFlag(flag uint8) {
 }
 
 var (
-	longestTimeTimer = metrics.NewRegisteredTimer("dag/longesttime", nil)
-	longestGasTimer  = metrics.NewRegisteredTimer("dag/longestgas", nil)
-	serialTimeTimer  = metrics.NewRegisteredTimer("dag/serialtime", nil)
-	totalTxMeter     = metrics.NewRegisteredMeter("dag/txcnt", nil)
-	totalNoDepMeter  = metrics.NewRegisteredMeter("dag/nodepcnt", nil)
-	total2DepMeter   = metrics.NewRegisteredMeter("dag/2depcnt", nil)
-	total4DepMeter   = metrics.NewRegisteredMeter("dag/4depcnt", nil)
-	total8DepMeter   = metrics.NewRegisteredMeter("dag/8depcnt", nil)
-	total16DepMeter  = metrics.NewRegisteredMeter("dag/16depcnt", nil)
-	total32DepMeter  = metrics.NewRegisteredMeter("dag/32depcnt", nil)
+	totalTxMeter    = metrics.NewRegisteredMeter("dag/txcnt", nil)
+	totalNoDepMeter = metrics.NewRegisteredMeter("dag/nodepcnt", nil)
 )
 
-func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
-	if len(stats) != dag.TxCount() || dag.TxCount() == 0 {
+func EvaluateTxDAGPerformance(dag TxDAG) {
+	if dag.TxCount() == 0 {
 		return
 	}
-	paths := travelTxDAGExecutionPaths(dag)
-	// Attention: this is based on best schedule, it will reduce a lot by executing previous txs in parallel
-	// It assumes that there is no parallel thread limit
-	txCount := dag.TxCount()
-	var (
-		maxGasIndex  int
-		maxGas       uint64
-		maxTimeIndex int
-		maxTime      time.Duration
-		txTimes      = make([]time.Duration, txCount)
-		txGases      = make([]uint64, txCount)
-		txReads      = make([]int, txCount)
-		noDepCnt     int
-	)
-
-	totalTxMeter.Mark(int64(txCount))
-	for i, path := range paths {
-		if stats[i].excludedTx {
-			continue
-		}
-		if len(path) <= 1 {
-			noDepCnt++
+	totalTxMeter.Mark(int64(dag.TxCount()))
+	for i := 0; i < dag.TxCount(); i++ {
+		if len(TxDependency(dag, i)) == 0 {
 			totalNoDepMeter.Mark(1)
 		}
-		if len(path) <= 3 {
-			total2DepMeter.Mark(1)
-		}
-		if len(path) <= 5 {
-			total4DepMeter.Mark(1)
-		}
-		if len(path) <= 9 {
-			total8DepMeter.Mark(1)
-		}
-		if len(path) <= 17 {
-			total16DepMeter.Mark(1)
-		}
-		if len(path) <= 33 {
-			total32DepMeter.Mark(1)
-		}
-
-		// find the biggest cost time from dependency txs
-		for j := 0; j < len(path)-1; j++ {
-			prev := path[j]
-			if txTimes[prev] > txTimes[i] {
-				txTimes[i] = txTimes[prev]
-			}
-			if txGases[prev] > txGases[i] {
-				txGases[i] = txGases[prev]
-			}
-			if txReads[prev] > txReads[i] {
-				txReads[i] = txReads[prev]
-			}
-		}
-		txTimes[i] += stats[i].costTime
-		txGases[i] += stats[i].usedGas
-		txReads[i] += stats[i].readCount
-
-		// try to find max gas
-		if txGases[i] > maxGas {
-			maxGas = txGases[i]
-			maxGasIndex = i
-		}
-		if txTimes[i] > maxTime {
-			maxTime = txTimes[i]
-			maxTimeIndex = i
-		}
 	}
-
-	longestTimeTimer.Update(txTimes[maxTimeIndex])
-	longestGasTimer.Update(txTimes[maxGasIndex])
-	// serial path
-	var (
-		sTime time.Duration
-		sGas  uint64
-		sRead int
-		sPath []int
-	)
-	for i, stat := range stats {
-		if stat.excludedTx {
-			continue
-		}
-		sPath = append(sPath, i)
-		sTime += stat.costTime
-		sGas += stat.usedGas
-		sRead += stat.readCount
-	}
-	serialTimeTimer.Update(sTime)
-}
-
-// travelTxDAGTargetPath will print target execution path
-func travelTxDAGTargetPath(d TxDAG, from uint64) []uint64 {
-	var (
-		queue []uint64
-		path  []uint64
-	)
-
-	queue = append(queue, from)
-	path = append(path, from)
-	for len(queue) > 0 {
-		var next []uint64
-		for _, i := range queue {
-			for _, dep := range TxDependency(d, int(i)) {
-				if !slices.Contains(path, dep) {
-					path = append(path, dep)
-					next = append(next, dep)
-				}
-			}
-		}
-		queue = next
-	}
-	slices.Sort(path)
-	return path
-}
-
-// ExeStat records tx execution info
-type ExeStat struct {
-	txIndex   int
-	usedGas   uint64
-	readCount int
-	startTime time.Time
-	costTime  time.Duration
-
-	// some flags
-	excludedTx bool
-}
-
-func NewExeStat(txIndex int) *ExeStat {
-	return &ExeStat{
-		txIndex: txIndex,
-	}
-}
-
-func (s *ExeStat) Begin() *ExeStat {
-	s.startTime = time.Now()
-	return s
-}
-
-func (s *ExeStat) Done() *ExeStat {
-	s.costTime = time.Since(s.startTime)
-	return s
-}
-
-func (s *ExeStat) WithExcludedTxFlag() *ExeStat {
-	s.excludedTx = true
-	return s
-}
-
-func (s *ExeStat) WithGas(gas uint64) *ExeStat {
-	s.usedGas = gas
-	return s
-}
-
-func (s *ExeStat) WithRead(rc int) *ExeStat {
-	s.readCount = rc
-	return s
 }

@@ -3,7 +3,6 @@ package types
 import (
 	"encoding/hex"
 	"testing"
-	"time"
 
 	"github.com/golang/snappy"
 
@@ -50,16 +49,7 @@ func TestTxDAG(t *testing.T) {
 
 func TestEvaluateTxDAG(t *testing.T) {
 	dag := mockSystemTxDAG()
-	stats := make(map[int]*ExeStat, dag.TxCount())
-	for i := 0; i < dag.TxCount(); i++ {
-		stats[i] = NewExeStat(i).WithGas(uint64(i)).WithRead(i)
-		stats[i].costTime = time.Duration(i)
-		txDep := dag.TxDep(i)
-		if txDep.CheckFlag(NonDependentRelFlag) {
-			stats[i].WithExcludedTxFlag()
-		}
-	}
-	EvaluateTxDAGPerformance(dag, stats)
+	EvaluateTxDAGPerformance(dag)
 }
 
 func TestMergeTxDAGExecutionPaths_Simple(t *testing.T) {

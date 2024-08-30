@@ -1375,12 +1375,20 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		// reserve gas for TxDAG
 		work.gasForTxDAG = 0
 		if w.chain.TxDAGEnabledWhenMine() {
-			// We reserved n% of the header.GasLimit for TxDAG data, because:
-			// 1. a 10k-transactions block will need at most 64k bytes for its txdag data. a 10k-transactions block usually cost 500M gas;
-			// 2. before EIP-2028, it cost 68 gas per non-zero byte, and after EIP-2028, it cost 16 gas;
-			// 3. the gas for a n-bytes txdag transaction is calculated by: 64*68 = 4352, rate: 4352/500000000 = 0.0000087;
-			// for just in case, we finally reserved 0.00002% gas for TxDAG data.
-			work.gasForTxDAG = work.header.GasLimit/50000 + 21000
+			// a 10k-transactions block need at most 64kB to store its transaction
+			// TxDAG transaction is a legacy transaction, so its accessList is nil, and no need to pay for accessList.
+			// gasForTxDAG = params.TxGas +  len(TxDAGBytes) x params.TxDataNonZeroGasFrontier
+			//  1. a 10k-transactions block consumes about 500M gas, which needs 64kB to store its TxData
+			//  3. a 4k-transactions block consumes about 200M gas, which needs 32kB to store its TxData
+			//  2. a 2k-transactions block consumes about 100M gas, which needs 14kB to store its TxData
+			//  3. and so on ...
+			// so we can estimate that a n-gaslimit block needs a TxDAG data byte of length: n/100M x 14kB
+			// it's cost totally about 0.003 ~ 0.01 of the header.GasLimit
+			if w.chainConfig.IsIstanbul(work.header.Number) {
+				work.gasForTxDAG = (work.header.GasLimit/100000000*14*1024)*params.TxDataNonZeroGasEIP2028 + params.TxGas
+			} else {
+				work.gasForTxDAG = (work.header.GasLimit/100000000*14*1024)*params.TxDataNonZeroGasFrontier + params.TxGas
+			}
 		}
 		// use shared interrupt if present
 		interrupt := genParams.interrupt

@@ -1971,7 +1971,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				bc.parseTxDAG(block)
 				txsCount := block.Transactions().Len()
 				threshold := min(bc.vmConfig.ParallelTxNum/2+2, 4)
-				if txsCount < threshold || bc.isEmptyTxDAG() {
+				if bc.vmConfig.ParallelTxNum < 2 || txsCount < threshold || bc.isEmptyTxDAG() {
 					bc.UseSerialProcessor()
 					log.Debug("Disable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
 				} else {

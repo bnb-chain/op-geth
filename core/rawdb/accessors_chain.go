@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
@@ -259,14 +260,27 @@ func WriteLastPivotNumber(db ethdb.KeyValueWriter, pivot uint64) {
 	}
 }
 
+var cache atomic.Uint64
+
+const cacheNotSet = ^uint64(0)
+
+func init() {
+	cache.Store(cacheNotSet)
+}
+
 // ReadTxIndexTail retrieves the number of oldest indexed block
 // whose transaction indices has been indexed.
 func ReadTxIndexTail(db ethdb.KeyValueReader) *uint64 {
+	tail := cache.Load()
+	if tail != cacheNotSet {
+		return &tail
+	}
 	data, _ := db.Get(txIndexTailKey)
 	if len(data) != 8 {
 		return nil
 	}
 	number := binary.BigEndian.Uint64(data)
+	cache.Store(number)
 	return &number
 }
 
@@ -276,6 +290,7 @@ func WriteTxIndexTail(db ethdb.KeyValueWriter, number uint64) {
 	if err := db.Put(txIndexTailKey, encodeBlockNumber(number)); err != nil {
 		log.Crit("Failed to store the transaction index tail", "err", err)
 	}
+	cache.Store(number)
 }
 
 // ReadHeaderRange returns the rlp-encoded headers, starting at 'number', and going

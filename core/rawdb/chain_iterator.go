@@ -178,7 +178,7 @@ func iterateTransactions(db ethdb.Database, from uint64, to uint64, reverse bool
 //
 // There is a passed channel, the whole procedure will be interrupted if any
 // signal received.
-func indexTransactions(db ethdb.Database, from uint64, to uint64, interrupt chan struct{}, hook func(uint64) bool, report bool) {
+func indexTransactions(db ethdb.Database, from uint64, to uint64, lastTailCh chan *uint64, interrupt chan struct{}, hook func(uint64) bool, report bool) {
 	// short circuit for invalid range
 	if from >= to {
 		return
@@ -240,6 +240,9 @@ func indexTransactions(db ethdb.Database, from uint64, to uint64, interrupt chan
 		log.Crit("Failed writing batch to db", "error", err)
 		return
 	}
+	if lastTailCh != nil {
+		lastTailCh <- &lastNum
+	}
 	logger := log.Debug
 	if report {
 		logger = log.Info
@@ -261,20 +264,20 @@ func indexTransactions(db ethdb.Database, from uint64, to uint64, interrupt chan
 //
 // There is a passed channel, the whole procedure will be interrupted if any
 // signal received.
-func IndexTransactions(db ethdb.Database, from uint64, to uint64, interrupt chan struct{}, report bool) {
-	indexTransactions(db, from, to, interrupt, nil, report)
+func IndexTransactions(db ethdb.Database, from uint64, to uint64, lastTailCh chan *uint64, interrupt chan struct{}, report bool) {
+	indexTransactions(db, from, to, lastTailCh, interrupt, nil, report)
 }
 
 // indexTransactionsForTesting is the internal debug version with an additional hook.
 func indexTransactionsForTesting(db ethdb.Database, from uint64, to uint64, interrupt chan struct{}, hook func(uint64) bool) {
-	indexTransactions(db, from, to, interrupt, hook, false)
+	indexTransactions(db, from, to, nil, interrupt, hook, false)
 }
 
 // unindexTransactions removes txlookup indices of the specified block range.
 //
 // There is a passed channel, the whole procedure will be interrupted if any
 // signal received.
-func unindexTransactions(db ethdb.Database, from uint64, to uint64, interrupt chan struct{}, hook func(uint64) bool, report bool) {
+func unindexTransactions(db ethdb.Database, from uint64, to uint64, lastTailCh chan *uint64, interrupt chan struct{}, hook func(uint64) bool, report bool) {
 	// short circuit for invalid range
 	if from >= to {
 		return
@@ -336,6 +339,9 @@ func unindexTransactions(db ethdb.Database, from uint64, to uint64, interrupt ch
 		log.Crit("Failed writing batch to db", "error", err)
 		return
 	}
+	if lastTailCh != nil {
+		lastTailCh <- &nextNum
+	}
 	logger := log.Debug
 	if report {
 		logger = log.Info
@@ -353,11 +359,11 @@ func unindexTransactions(db ethdb.Database, from uint64, to uint64, interrupt ch
 //
 // There is a passed channel, the whole procedure will be interrupted if any
 // signal received.
-func UnindexTransactions(db ethdb.Database, from uint64, to uint64, interrupt chan struct{}, report bool) {
-	unindexTransactions(db, from, to, interrupt, nil, report)
+func UnindexTransactions(db ethdb.Database, from uint64, to uint64, lastTailCh chan *uint64, interrupt chan struct{}, report bool) {
+	unindexTransactions(db, from, to, lastTailCh, interrupt, nil, report)
 }
 
 // unindexTransactionsForTesting is the internal debug version with an additional hook.
 func unindexTransactionsForTesting(db ethdb.Database, from uint64, to uint64, interrupt chan struct{}, hook func(uint64) bool) {
-	unindexTransactions(db, from, to, interrupt, hook, false)
+	unindexTransactions(db, from, to, nil, interrupt, hook, false)
 }

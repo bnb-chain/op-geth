@@ -221,20 +221,20 @@ func TestTxIndexer(t *testing.T) {
 			db:       db,
 			progress: make(chan chan TxIndexProgress),
 		}
-		indexer.run(nil, 128, make(chan struct{}), make(chan struct{}))
+		indexer.run(nil, 128, nil, make(chan struct{}), make(chan struct{}))
 		verify(db, c.tailA, indexer)
 
 		indexer.limit = c.limitB
-		indexer.run(rawdb.ReadTxIndexTail(db), 128, make(chan struct{}), make(chan struct{}))
+		indexer.run(rawdb.ReadTxIndexTail(db), 128, nil, make(chan struct{}), make(chan struct{}))
 		verify(db, c.tailB, indexer)
 
 		indexer.limit = c.limitC
-		indexer.run(rawdb.ReadTxIndexTail(db), 128, make(chan struct{}), make(chan struct{}))
+		indexer.run(rawdb.ReadTxIndexTail(db), 128, nil, make(chan struct{}), make(chan struct{}))
 		verify(db, c.tailC, indexer)
 
 		// Recover all indexes
 		indexer.limit = 0
-		indexer.run(rawdb.ReadTxIndexTail(db), 128, make(chan struct{}), make(chan struct{}))
+		indexer.run(rawdb.ReadTxIndexTail(db), 128, nil, make(chan struct{}), make(chan struct{}))
 		verify(db, 0, indexer)
 
 		db.Close()

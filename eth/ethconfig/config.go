@@ -35,7 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
@@ -203,6 +203,8 @@ type Config struct {
 	OverrideOptimismCanyon *uint64 `toml:",omitempty"`
 
 	OverrideOptimismEcotone *uint64 `toml:",omitempty"`
+
+	OverrideOptimismFjord *uint64 `toml:",omitempty"`
 
 	OverrideOptimismInterop *uint64 `toml:",omitempty"`
 

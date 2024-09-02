@@ -17,7 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	trie2 "github.com/ethereum/go-ethereum/trie"
-	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 )
 
 const (
@@ -217,7 +217,7 @@ func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofData
 		StateRoot:    kRecord.StateRoot,
 		Address:      l2ToL1MessagePasserAddr,
 		AccountProof: accountProof,
-		Balance:      stateDB.GetBalance(l2ToL1MessagePasserAddr),
+		Balance:      stateDB.GetBalance(l2ToL1MessagePasserAddr).ToBig(),
 		CodeHash:     stateDB.GetCodeHash(l2ToL1MessagePasserAddr),
 		Nonce:        stateDB.GetNonce(l2ToL1MessagePasserAddr),
 		StorageHash:  stateDB.GetStorageRoot(l2ToL1MessagePasserAddr),

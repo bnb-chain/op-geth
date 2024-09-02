@@ -1976,8 +1976,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 					log.Debug("Disable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
 				} else {
 					bc.UseParallelProcessor()
-					statedb.CreateParallelDBManager(2 * txsCount)
-					log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+					if bc.processor == bc.parallelProcessor {
+						statedb.CreateParallelDBManager(2 * txsCount)
+						log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+					}
 				}
 			}
 			// If we have a followup block, run that against the current state to pre-cache
@@ -2923,7 +2925,8 @@ func (bc *BlockChain) UseParallelProcessor() {
 		bc.parallelExecution = true
 		bc.processor = bc.parallelProcessor
 	} else {
-		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
+		log.Error("bc.ParallelProcessor is nil! fallback to serial processor!")
+		bc.UseSerialProcessor()
 	}
 }
 

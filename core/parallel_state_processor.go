@@ -197,14 +197,7 @@ func (p *ParallelStateProcessor) resetState(txNum int, statedb *state.StateDB) {
 
 	statedb.PrepareForParallel()
 	p.allTxReqs = make([]*ParallelTxRequest, 0, txNum)
-	p.slotDBsToRelease = make([]*state.ParallelStateDB, 0, txNum)
 
-	stateDBsToRelease := p.slotDBsToRelease
-	go func() {
-		for _, slotDB := range stateDBsToRelease {
-			slotDB.PutSyncPool()
-		}
-	}()
 	for _, slot := range p.slotState {
 		slot.pendingTxReqList = make([]*ParallelTxRequest, 0)
 		slot.activatedType = parallelPrimarySlot
@@ -335,7 +328,6 @@ func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxR
 	}
 
 	slotDB.SetTxContext(txReq.tx.Hash(), txReq.txIndex)
-
 	evm, result, err := applyTransactionStageExecution(txReq.msg, gpSlot, slotDB, vmenv, p.delayGasFee)
 	txResult := ParallelTxResult{
 		executedIndex: execNum,
@@ -460,6 +452,8 @@ func (p *ParallelStateProcessor) toConfirmTxIndex(targetTxIndex int, isStage2 bo
 				p.debugConflictRedoNum++
 				// interrupt its current routine, and switch to the other routine
 				p.switchSlot(staticSlotIndex)
+				// reclaim the result.
+				targetResult.slotDB.PutSyncPool()
 				return nil
 			}
 			continue
@@ -794,6 +788,8 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 		}
 		p.txReqExecuteRecord[resultTxIndex]++
 	}
+	// after merge, the slotDB will not accessible, reclaim the resource
+	result.slotDB.PutSyncPool()
 	return result
 }
 
@@ -949,6 +945,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 
 	// clean up when the block is processed
 	p.doCleanUp()
+
 	if p.error != nil {
 		return nil, nil, 0, p.error
 	}

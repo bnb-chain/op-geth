@@ -187,8 +187,6 @@ type StateDB struct {
 	trieParallelLock        sync.Mutex   // for parallel mode of trie, mostly for get states/objects from trie, lock required to handle trie tracer.
 	stateObjectDestructLock sync.RWMutex // for parallel mode, used in mainDB for mergeSlot and conflict check.
 	snapDestructs           map[common.Address]struct{}
-	snapAccounts            map[common.Address][]byte
-	snapStorage             map[common.Address]map[string][]byte
 
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
@@ -1254,14 +1252,6 @@ var addressToUintPool = sync.Pool{
 	New: func() interface{} { return make(map[common.Address]uint64, defaultNumOfSlots) },
 }
 
-var snapStoragePool = sync.Pool{
-	New: func() interface{} { return make(map[common.Address]map[string][]byte, defaultNumOfSlots) },
-}
-
-var snapStorageValuePool = sync.Pool{
-	New: func() interface{} { return make(map[string][]byte, defaultNumOfSlots) },
-}
-
 var logsPool = sync.Pool{
 	New: func() interface{} { return make(map[common.Hash][]*types.Log, defaultNumOfSlots) },
 }
@@ -1362,20 +1352,6 @@ func (s *StateDB) PutSyncPool() {
 		delete(s.parallel.createdObjectRecord, key)
 	}
 	addressToStructPool.Put(s.parallel.createdObjectRecord)
-
-	for key := range s.snapAccounts {
-		delete(s.snapAccounts, key)
-	}
-	addressToBytesPool.Put(s.snapAccounts)
-
-	for key, storage := range s.snapStorage {
-		for key := range storage {
-			delete(storage, key)
-		}
-		snapStorageValuePool.Put(storage)
-		delete(s.snapStorage, key)
-	}
-	snapStoragePool.Put(s.snapStorage)
 }
 
 func NewEmptySlotDB() *ParallelStateDB {
@@ -2653,10 +2629,6 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 				// remove the addr from snapAccounts&snapStorage only when object is deleted.
 				// "deleted" is not equal to "snapDestructs", since createObject() will add an addr for
 				//  snapDestructs to destroy previous object, while it will keep the addr in snapAccounts & snapAccounts
-				s.snapParallelLock.Lock()
-				delete(s.snapAccounts, addr)
-				delete(s.snapStorage, addr)
-				s.snapParallelLock.Unlock()
 				s.AccountMux.Lock()
 				delete(s.accounts, dirtyObj.addrHash)      // Clear out any previously updated account data (may be recreated via a resurrect)
 				delete(s.accountsOrigin, dirtyObj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
@@ -2720,10 +2692,6 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 					// remove the addr from snapAccounts&snapStorage only when object is deleted.
 					// "deleted" is not equal to "snapDestructs", since createObject() will add an addr for
 					//  snapDestructs to destroy previous object, while it will keep the addr in snapAccounts & snapAccounts
-					s.snapParallelLock.Lock()
-					delete(s.snapAccounts, addr)
-					delete(s.snapStorage, addr)
-					s.snapParallelLock.Unlock()
 					s.AccountMux.Lock()
 					delete(s.accounts, dirtyObj.addrHash)      // Clear out any previously updated account data (may be recreated via a resurrect)
 					delete(s.accountsOrigin, dirtyObj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
@@ -2846,5 +2814,6 @@ func (m *ParallelDBManager) allocate() *ParallelStateDB {
 
 	elem := m.pool.Front()
 	m.pool.Remove(elem)
-	return elem.Value.(*ParallelStateDB)
+	ret := elem.Value.(*ParallelStateDB)
+	return ret
 }

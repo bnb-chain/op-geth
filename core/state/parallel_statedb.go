@@ -524,6 +524,7 @@ func (s *ParallelStateDB) GetCode(addr common.Address) []byte {
 			code = object.Code()
 		}
 	}
+
 	if _, ok := s.parallel.codeReadsInSlot[addr]; !ok {
 		s.parallel.codeReadsInSlot[addr] = code
 	}

@@ -14,6 +14,7 @@ Nodes on the Testnet and Mainnet need to be upgraded to this version before the 
 * feature(op-geth): update opBNB qanet config by @redhdx in https://github.com/bnb-chain/op-geth/pull/138
 * fix: txpool legacy pool Pending() applies filter @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/124
 * feature(op-geth): Add extra error info when meet an unexpected el sync @krish-nr in https://github.com/bnb-chain/op-geth/pull/132
+* feat: cache lastTail in txindexer to avoid read from db by @bnoieh in https://github.com/bnb-chain/op-geth/pull/157
 
 
 ### Docker Images

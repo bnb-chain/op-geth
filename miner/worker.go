@@ -1078,6 +1078,9 @@ func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIn
 	}
 	// txIndex is the index of this txDAG transaction
 	txDAG.SetTxDep(txIndex, types.TxDep{Flags: &types.NonDependentRelFlag})
+	if metrics.EnabledExpensive {
+		go types.EvaluateTxDAGPerformance(txDAG, statedb.ResolveStats())
+	}
 
 	publicKey := sender.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)

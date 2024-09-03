@@ -46,7 +46,7 @@ type ParallelStateProcessor struct {
 	pendingConfirmResults *sync.Map              // tx could be executed several times, with several result to check
 	unconfirmedResults    *sync.Map              // for stage2 confirm, since pendingConfirmResults can not be accessed in stage2 loop
 	unconfirmedDBs        *sync.Map              // intermediate store of slotDB that is not verified
-	slotDBsToRelease      []*state.ParallelStateDB
+	slotDBsToRelease      *sync.Map
 	stopSlotChan          chan struct{}
 	stopConfirmChan       chan struct{}
 	debugConflictRedoNum  int
@@ -204,6 +204,7 @@ func (p *ParallelStateProcessor) resetState(txNum int, statedb *state.StateDB) {
 	}
 	p.unconfirmedResults = new(sync.Map)
 	p.unconfirmedDBs = new(sync.Map)
+	p.slotDBsToRelease = new(sync.Map)
 	p.pendingConfirmResults = new(sync.Map)
 	p.txReqExecuteRecord = make(map[int]int, txNum)
 	p.txReqExecuteCount = 0
@@ -453,7 +454,7 @@ func (p *ParallelStateProcessor) toConfirmTxIndex(targetTxIndex int, isStage2 bo
 				// interrupt its current routine, and switch to the other routine
 				p.switchSlot(staticSlotIndex)
 				// reclaim the result.
-				targetResult.slotDB.PutSyncPool()
+				p.slotDBsToRelease.Store(targetResult.slotDB, targetResult.slotDB)
 				return nil
 			}
 			continue
@@ -789,7 +790,7 @@ func (p *ParallelStateProcessor) confirmTxResults(statedb *state.StateDB, gp *Ga
 		p.txReqExecuteRecord[resultTxIndex]++
 	}
 	// after merge, the slotDB will not accessible, reclaim the resource
-	result.slotDB.PutSyncPool()
+	p.slotDBsToRelease.Store(result.slotDB, result.slotDB)
 	return result
 }
 
@@ -812,6 +813,18 @@ func (p *ParallelStateProcessor) doCleanUp() {
 	// 3.make sure the confirmation routine is stopped
 	p.stopConfirmStage2Chan <- struct{}{}
 	<-p.stopSlotChan
+
+	go func() {
+		p.slotDBsToRelease.Range(func(key, value any) bool {
+			sdb := value.(*state.ParallelStateDB)
+			sdb.PutSyncPool()
+			return true
+		})
+	}()
+
+	p.unconfirmedResults = nil
+	p.unconfirmedDBs = nil
+	p.pendingConfirmResults = nil
 }
 
 // Process implements BEP-130 Parallel Transaction Execution

@@ -150,12 +150,7 @@ type ParallelState struct {
 	addrStateChangesInSlot map[common.Address]bool // true: created, false: deleted
 
 	addrSnapDestructsReadsInSlot map[common.Address]bool
-
-	accountsDeletedRecord      []common.Hash
-	storagesDeleteRecord       []common.Hash
-	accountsOriginDeleteRecord []common.Address
-	storagesOriginDeleteRecord []common.Address
-	createdObjectRecord        map[common.Address]struct{}
+	createdObjectRecord          map[common.Address]struct{}
 	// we may need to redo for some specific reasons, like we read the wrong state and need to panic in sequential mode in SubRefund
 	needsRedo                     bool
 	useDAG                        bool
@@ -1256,104 +1251,6 @@ var logsPool = sync.Pool{
 	New: func() interface{} { return make(map[common.Hash][]*types.Log, defaultNumOfSlots) },
 }
 
-func (s *StateDB) PutSyncPool() {
-	for key := range s.parallel.codeReadsInSlot {
-		delete(s.parallel.codeReadsInSlot, key)
-	}
-	addressToBytesPool.Put(s.parallel.codeReadsInSlot)
-
-	for key := range s.parallel.codeHashReadsInSlot {
-		delete(s.parallel.codeHashReadsInSlot, key)
-	}
-	addressToHashPool.Put(s.parallel.codeHashReadsInSlot)
-
-	for key := range s.parallel.codeChangesInSlot {
-		delete(s.parallel.codeChangesInSlot, key)
-	}
-	addressToStructPool.Put(s.parallel.codeChangesInSlot)
-
-	for key := range s.parallel.kvChangesInSlot {
-		delete(s.parallel.kvChangesInSlot, key)
-	}
-	addressToStateKeysPool.Put(s.parallel.kvChangesInSlot)
-
-	for key := range s.parallel.kvReadsInSlot {
-		delete(s.parallel.kvReadsInSlot, key)
-	}
-	addressToStoragePool.Put(s.parallel.kvReadsInSlot)
-
-	for key := range s.parallel.balanceChangesInSlot {
-		delete(s.parallel.balanceChangesInSlot, key)
-	}
-	addressToStructPool.Put(s.parallel.balanceChangesInSlot)
-
-	for key := range s.parallel.balanceReadsInSlot {
-		delete(s.parallel.balanceReadsInSlot, key)
-	}
-	balancePool.Put(s.parallel.balanceReadsInSlot)
-
-	for key := range s.parallel.addrStateReadsInSlot {
-		delete(s.parallel.addrStateReadsInSlot, key)
-	}
-	addressToBoolPool.Put(s.parallel.addrStateReadsInSlot)
-
-	for key := range s.parallel.addrStateChangesInSlot {
-		delete(s.parallel.addrStateChangesInSlot, key)
-	}
-	addressToBoolPool.Put(s.parallel.addrStateChangesInSlot)
-
-	for key := range s.parallel.nonceChangesInSlot {
-		delete(s.parallel.nonceChangesInSlot, key)
-	}
-	addressToStructPool.Put(s.parallel.nonceChangesInSlot)
-
-	for key := range s.parallel.nonceReadsInSlot {
-		delete(s.parallel.nonceReadsInSlot, key)
-	}
-	addressToUintPool.Put(s.parallel.nonceReadsInSlot)
-
-	for key := range s.parallel.addrSnapDestructsReadsInSlot {
-		delete(s.parallel.addrSnapDestructsReadsInSlot, key)
-	}
-	addressToBoolPool.Put(s.parallel.addrSnapDestructsReadsInSlot)
-
-	for key := range s.parallel.dirtiedStateObjectsInSlot {
-		delete(s.parallel.dirtiedStateObjectsInSlot, key)
-	}
-	addressToStateObjectsPool.Put(s.parallel.dirtiedStateObjectsInSlot)
-
-	for key := range s.stateObjectsPending {
-		delete(s.stateObjectsPending, key)
-	}
-	addressToStructPool.Put(s.stateObjectsPending)
-
-	for key := range s.stateObjectsDirty {
-		delete(s.stateObjectsDirty, key)
-	}
-	addressToStructPool.Put(s.stateObjectsDirty)
-
-	for key := range s.logs {
-		delete(s.logs, key)
-	}
-	logsPool.Put(s.logs)
-
-	for key := range s.journal.dirties {
-		delete(s.journal.dirties, key)
-	}
-	s.journal.entries = s.journal.entries[:0]
-	journalPool.Put(s.journal)
-
-	for key := range s.snapDestructs {
-		delete(s.snapDestructs, key)
-	}
-	addressToStructPool.Put(s.snapDestructs)
-
-	for key := range s.parallel.createdObjectRecord {
-		delete(s.parallel.createdObjectRecord, key)
-	}
-	addressToStructPool.Put(s.parallel.createdObjectRecord)
-}
-
 func NewEmptySlotDB() *ParallelStateDB {
 	parallel := ParallelState{
 		// The stateObjects in Parallel is thread-local.
@@ -1385,10 +1282,6 @@ func NewEmptySlotDB() *ParallelStateDB {
 		addrSnapDestructsReadsInSlot: addressToBoolPool.Get().(map[common.Address]bool),
 		isSlotDB:                     true,
 		dirtiedStateObjectsInSlot:    addressToStateObjectsPool.Get().(map[common.Address]*stateObject),
-		accountsDeletedRecord:        make([]common.Hash, 10),
-		storagesDeleteRecord:         make([]common.Hash, 10),
-		accountsOriginDeleteRecord:   make([]common.Address, 10),
-		storagesOriginDeleteRecord:   make([]common.Address, 10),
 		createdObjectRecord:          addressToStructPool.Get().(map[common.Address]struct{}),
 	}
 	state := &ParallelStateDB{
@@ -1530,14 +1423,6 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			delete(s.storages, obj.addrHash)      // Clear out any previously updated storage data (may be recreated via a resurrect)
 			delete(s.accountsOrigin, obj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
 			delete(s.storagesOrigin, obj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
-
-			if s.parallel.isSlotDB {
-				s.parallel.accountsDeletedRecord = append(s.parallel.accountsDeletedRecord, obj.addrHash)
-				s.parallel.storagesDeleteRecord = append(s.parallel.storagesDeleteRecord, obj.addrHash)
-				s.parallel.accountsOriginDeleteRecord = append(s.parallel.accountsOriginDeleteRecord, obj.address)
-				s.parallel.storagesOriginDeleteRecord = append(s.parallel.storagesOriginDeleteRecord, obj.address)
-			}
-
 		} else {
 			// 1.none parallel mode, we do obj.finalise(true) as normal
 			// 2.with parallel mode, we do obj.finalise(true) on dispatcher, not on slot routine
@@ -1925,9 +1810,6 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 		if aborted {
 			incomplete[addr] = struct{}{}
 			delete(s.storagesOrigin, addr)
-			if s.parallel.isSlotDB {
-				s.parallel.storagesOriginDeleteRecord = append(s.parallel.storagesOriginDeleteRecord, addr)
-			}
 			continue
 		}
 		if s.storagesOrigin[addr] == nil {
@@ -2780,13 +2662,6 @@ func (s *StateDB) CreateParallelDBManager(txCount int) {
 	}
 }
 
-// ParallelDBManager manages a pool of ParallelDB instances
-type ParallelDBManager struct {
-	pool    *list.List
-	mutex   sync.Mutex
-	newFunc func() *ParallelStateDB // Function to create a new ParallelDB instance
-}
-
 // NewParallelDBManager creates a new ParallelDBManager with the specified number of instance
 func NewParallelDBManager(initialCount int, newFunc func() *ParallelStateDB) *ParallelDBManager {
 	manager := &ParallelDBManager{
@@ -2800,6 +2675,13 @@ func NewParallelDBManager(initialCount int, newFunc func() *ParallelStateDB) *Pa
 	}
 
 	return manager
+}
+
+// ParallelDBManager manages a pool of ParallelDB instances
+type ParallelDBManager struct {
+	pool    *list.List
+	mutex   sync.Mutex
+	newFunc func() *ParallelStateDB // Function to create a new ParallelDB instance
 }
 
 // allocate acquires a ParallelStateDB instance from the pool
@@ -2816,4 +2698,8 @@ func (m *ParallelDBManager) allocate() *ParallelStateDB {
 	m.pool.Remove(elem)
 	ret := elem.Value.(*ParallelStateDB)
 	return ret
+}
+
+func (m *ParallelDBManager) reclaim(s *ParallelStateDB) {
+	m.pool.PushBack(s)
 }

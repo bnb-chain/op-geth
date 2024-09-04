@@ -12,7 +12,6 @@ import (
 	"github.com/cometbft/cometbft/libs/rand"
 	"github.com/golang/snappy"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
@@ -185,104 +184,6 @@ func TestMVStates_SystemTxWithLargeDepsResolveTxDAG(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, mockSystemTxDAGWithLargeDeps(), dag)
 	t.Log(dag)
-}
-
-func TestIsEqualRWVal(t *testing.T) {
-	tests := []struct {
-		key      *AccountState
-		src      interface{}
-		compared interface{}
-		isEqual  bool
-	}{
-		{
-			key:      &AccountNonce,
-			src:      uint64(0),
-			compared: uint64(0),
-			isEqual:  true,
-		},
-		{
-			key:      &AccountNonce,
-			src:      uint64(0),
-			compared: uint64(1),
-			isEqual:  false,
-		},
-		{
-			key:      &AccountBalance,
-			src:      new(uint256.Int).SetUint64(1),
-			compared: new(uint256.Int).SetUint64(1),
-			isEqual:  true,
-		},
-		{
-			key:      &AccountBalance,
-			src:      nil,
-			compared: new(uint256.Int).SetUint64(1),
-			isEqual:  false,
-		},
-		{
-			key:      &AccountBalance,
-			src:      (*uint256.Int)(nil),
-			compared: new(uint256.Int).SetUint64(1),
-			isEqual:  false,
-		},
-		{
-			key:      &AccountBalance,
-			src:      (*uint256.Int)(nil),
-			compared: (*uint256.Int)(nil),
-			isEqual:  true,
-		},
-		{
-			key:      &AccountCodeHash,
-			src:      []byte{1},
-			compared: []byte{1},
-			isEqual:  true,
-		},
-		{
-			key:      &AccountCodeHash,
-			src:      nil,
-			compared: []byte{1},
-			isEqual:  false,
-		},
-		{
-			key:      &AccountCodeHash,
-			src:      ([]byte)(nil),
-			compared: []byte{1},
-			isEqual:  false,
-		},
-		{
-			key:      &AccountCodeHash,
-			src:      ([]byte)(nil),
-			compared: ([]byte)(nil),
-			isEqual:  true,
-		},
-		{
-			key:      &AccountSuicide,
-			src:      struct{}{},
-			compared: struct{}{},
-			isEqual:  false,
-		},
-		{
-			key:      &AccountSuicide,
-			src:      nil,
-			compared: struct{}{},
-			isEqual:  false,
-		},
-		{
-			key:      nil,
-			src:      mockHash,
-			compared: mockHash,
-			isEqual:  true,
-		},
-		{
-			key:      nil,
-			src:      nil,
-			compared: mockHash,
-			isEqual:  false,
-		},
-	}
-
-	for i, item := range tests {
-		require.Equal(t, item.isEqual, isEqualRWVal(item.key, item.src, item.compared), i)
-	}
 }
 
 func TestTxRecorder_Basic(t *testing.T) {

@@ -81,18 +81,17 @@ var (
 	ChainFreezerName = "chain" // the folder name of chain segment ancient store.
 	StateFreezerName = "state" // the folder name of reverse diff ancient store.
 	ProofFreezerName = "proof" // the folder name of propose withdraw proof store.
-
 )
 
 // freezers the collections of all builtin freezers.
 var freezers = []string{ChainFreezerName, StateFreezerName, ProofFreezerName}
 
 // NewStateFreezer initializes the freezer for state history.
-func NewStateFreezer(ancientDir string, readOnly bool) (*ResettableFreezer, error) {
-	return NewResettableFreezer(filepath.Join(ancientDir, StateFreezerName), "eth/db/state", readOnly, stateHistoryTableSize, stateFreezerNoSnappy)
+func NewStateFreezer(ancientDir string, readOnly, writeTrieNode bool) (*ResettableFreezer, error) {
+	return NewResettableFreezer(filepath.Join(ancientDir, StateFreezerName), "eth/db/state", readOnly, writeTrieNode, stateHistoryTableSize, stateFreezerNoSnappy)
 }
 
 // NewProofFreezer initializes the freezer for propose withdraw proof.
 func NewProofFreezer(ancientDir string, readOnly bool) (*ResettableFreezer, error) {
-	return NewResettableFreezer(filepath.Join(ancientDir, ProofFreezerName), "eth/db/proof", readOnly, stateHistoryTableSize, proofFreezerNoSnappy)
+	return NewResettableFreezer(filepath.Join(ancientDir, ProofFreezerName), "eth/db/proof", readOnly, false, stateHistoryTableSize, proofFreezerNoSnappy)
 }

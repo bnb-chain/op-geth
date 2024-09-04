@@ -257,7 +257,7 @@ type history struct {
 }
 
 // newHistory constructs the state history object with provided state change set.
-func newHistory(root common.Hash, parent common.Hash, block uint64, states *triestate.Set, nodes map[common.Hash]map[string]*trienode.Node) *history {
+func newHistory(root common.Hash, parent common.Hash, block uint64, fastRecovery bool, states *triestate.Set, nodes map[common.Hash]map[string]*trienode.Node) *history {
 	var (
 		accountList []common.Address
 		storageList = make(map[common.Address][]common.Hash)
@@ -281,7 +281,7 @@ func newHistory(root common.Hash, parent common.Hash, block uint64, states *trie
 	}
 	slices.SortFunc(incomplete, common.Address.Cmp)
 
-	return &history{
+	h := &history{
 		meta: &meta{
 			version:    stateHistoryVersion,
 			parent:     parent,
@@ -293,8 +293,14 @@ func newHistory(root common.Hash, parent common.Hash, block uint64, states *trie
 		accountList: accountList,
 		storages:    states.Storages,
 		storageList: storageList,
-		nodes:       compressTrieNodes(nodes),
 	}
+	if fastRecovery {
+		h.nodes = compressTrieNodes(nodes)
+	} else {
+		h.nodes = nil
+	}
+
+	return h
 }
 
 // encode serializes the state history and returns four byte streams represent
@@ -334,9 +340,17 @@ func (h *history) encode() ([]byte, []byte, []byte, []byte, []byte) {
 		accountIndexes = append(accountIndexes, accIndex.encode()...)
 	}
 
-	nodesBytes, err := rlp.EncodeToBytes(h.nodes)
-	if err != nil {
-		log.Error("Failed to encode trie nodes", "error", err)
+	var (
+		nodesBytes []byte
+		err        error
+	)
+	if h.nodes != nil {
+		nodesBytes, err = rlp.EncodeToBytes(h.nodes)
+		if err != nil {
+			log.Crit("Failed to encode trie nodes", "error", err)
+		}
+	} else {
+		nodesBytes = nil
 	}
 
 	return accountData, storageData, accountIndexes, storageIndexes, nodesBytes
@@ -617,28 +631,34 @@ func readHistory(freezer *rawdb.ResettableFreezer, id uint64) (*history, error) 
 }
 
 // writeHistory persists the state history with the provided state set.
-func writeHistory(freezer *rawdb.ResettableFreezer, dl *diffLayer) error {
+func writeHistory(freezer *rawdb.ResettableFreezer, dl *diffLayer, fastRecovery bool) error {
 	// Short circuit if state set is not available.
 	if dl.states == nil {
 		return errors.New("state change set is not available")
 	}
 	var (
 		start   = time.Now()
-		history = newHistory(dl.rootHash(), dl.parentLayer().rootHash(), dl.block, dl.states, dl.nodes)
+		history = newHistory(dl.rootHash(), dl.parentLayer().rootHash(), dl.block, fastRecovery, dl.states, dl.nodes)
 	)
+
 	accountData, storageData, accountIndex, storageIndex, trieNodes := history.encode()
 	dataSize := common.StorageSize(len(accountData) + len(storageData))
 	indexSize := common.StorageSize(len(accountIndex) + len(storageIndex))
 
 	// Write history data into five freezer table respectively.
-	rawdb.WriteStateHistory(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
+	if fastRecovery {
+		rawdb.WriteStateHistoryWithTrieNodes(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
+	} else {
+		rawdb.WriteStateHistory(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData)
+	}
 
 	historyDataBytesMeter.Mark(int64(dataSize))
 	historyIndexBytesMeter.Mark(int64(indexSize))
 	historyBuildTimeMeter.UpdateSince(start)
 	historyTotalSizeMeter1.Mark(int64(history.Size()))
 	historyTrieNodesSizeMeter.Mark(int64(history.trieNodesSize()))
-	log.Debug("Stored state history", "id", dl.stateID(), "block", dl.block, "data", dataSize, "index", indexSize, "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Debug("Stored state history", "id", dl.stateID(), "block", dl.block, "data", dataSize,
+		"index", indexSize, "elapsed", common.PrettyDuration(time.Since(start)))
 
 	return nil
 }

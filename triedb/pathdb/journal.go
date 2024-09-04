@@ -24,6 +24,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -266,7 +267,7 @@ func (db *Database) loadLayers() layer {
 		dl      *diskLayer
 		stateID = rawdb.ReadPersistentStateID(db.diskdb)
 	)
-	if (errors.Is(err, errMissJournal) || errors.Is(err, errUnmatchedJournal)) && db.config.TrieNodeBufferType == NodeBufferList {
+	if (errors.Is(err, errMissJournal) || errors.Is(err, errUnmatchedJournal)) && db.fastRecovery {
 		start := time.Now()
 		if db.freezer == nil {
 			log.Crit("Use unopened freezer db to recover node buffer list")
@@ -274,7 +275,7 @@ func (db *Database) loadLayers() layer {
 		log.Info("Recover node buffer list from ancient db")
 
 		nb, err = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
-			db.config.ProposeBlockInterval, db.config.NotifyKeep, db.freezer, true)
+			db.config.ProposeBlockInterval, db.config.NotifyKeep, db.freezer, db.fastRecovery)
 		if err != nil {
 			log.Error("Failed to new trie node buffer for recovery", "error", err)
 		} else {
@@ -670,4 +671,21 @@ func flattenTrieNodes(jn []journalNodes) map[common.Hash]map[string]*trienode.No
 		nodes[entry.Owner] = subset
 	}
 	return nodes
+}
+
+func check(ancient string, nodeBufferType NodeBufferType) bool {
+	trieNodes := rawdb.DetectTrieNodesFile(ancient)
+	state := common.FileExist(filepath.Join(ancient, rawdb.StateFreezerName))
+	if state || trieNodes {
+		if nodeBufferType == AsyncNodeBuffer || nodeBufferType == SyncNodeBuffer {
+			log.Warn(fmt.Sprintf("%s node buffer will be removed in the future!"))
+			log.Warn("Recommend using nodebufferlist")
+			if err := rawdb.DeleteTrieNodesFile(ancient); err != nil {
+				log.Crit("Failed to delete trie nodes file", "error", err)
+			}
+			return false
+		}
+		return true
+	}
+	return true
 }

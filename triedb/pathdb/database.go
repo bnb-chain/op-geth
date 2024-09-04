@@ -150,15 +150,16 @@ type Database struct {
 	// readOnly is the flag whether the mutation is allowed to be applied.
 	// It will be set automatically when the database is journaled during
 	// the shutdown to reject all following unexpected mutations.
-	readOnly   bool                     // Flag if database is opened in read only mode
-	waitSync   bool                     // Flag if database is deactivated due to initial state sync
-	bufferSize int                      // Memory allowance (in bytes) for caching dirty nodes
-	config     *Config                  // Configuration for database
-	diskdb     ethdb.Database           // Persistent storage for matured trie nodes
-	tree       *layerTree               // The group for all known layers
-	freezer    *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
-	lock       sync.RWMutex             // Lock to prevent mutations from happening at the same time
-	capLock    sync.Mutex
+	readOnly     bool                     // Flag if database is opened in read only mode
+	waitSync     bool                     // Flag if database is deactivated due to initial state sync
+	fastRecovery bool                     // Flag if recover nodebufferlist
+	bufferSize   int                      // Memory allowance (in bytes) for caching dirty nodes
+	config       *Config                  // Configuration for database
+	diskdb       ethdb.Database           // Persistent storage for matured trie nodes
+	tree         *layerTree               // The group for all known layers
+	freezer      *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
+	lock         sync.RWMutex             // Lock to prevent mutations from happening at the same time
+	capLock      sync.Mutex
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -180,7 +181,8 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 	// Open the freezer for state history if the passed database contains an
 	// ancient store. Otherwise, all the relevant functionalities are disabled.
 	if ancient, err := diskdb.AncientDatadir(); err == nil && ancient != "" && !db.readOnly {
-		freezer, err := rawdb.NewStateFreezer(ancient, false)
+		db.fastRecovery = check(ancient, config.TrieNodeBufferType)
+		freezer, err := rawdb.NewStateFreezer(ancient, false, db.fastRecovery)
 		if err != nil {
 			log.Crit("Failed to open state history freezer", "err", err)
 		}

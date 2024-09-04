@@ -290,7 +290,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 		limit    = dl.db.config.StateHistory
 	)
 	if dl.db.freezer != nil {
-		err := writeHistory(dl.db.freezer, bottom)
+		err := writeHistory(dl.db.freezer, bottom, dl.db.fastRecovery)
 		if err != nil {
 			return nil, err
 		}

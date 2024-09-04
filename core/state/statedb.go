@@ -787,7 +787,7 @@ func (s *StateDB) CreateAccount(addr common.Address) {
 func (s *StateDB) CopyWithMvStates() *StateDB {
 	state := s.Copy()
 	if s.mvStates != nil {
-		state.mvStates = s.mvStates
+		state.mvStates = s.mvStates.Copy()
 	}
 	return state
 }
@@ -1755,18 +1755,20 @@ func (s *StateDB) RecordStorageWrite(addr common.Address, slot common.Hash, val 
 	s.rwSet.RecordStorageWrite(addr, slot, val)
 }
 
-func (s *StateDB) ResetMVStates(txCount int) {
+func (s *StateDB) ResetMVStates(txCount int) *types.MVStates {
 	if s.mvStates != nil {
 		s.mvStates.Stop()
 	}
-	s.mvStates = types.NewMVStates(txCount).EnableAsyncGen()
+	s.mvStates = types.NewMVStates(txCount)
 	s.rwSet = nil
+	return s.mvStates
 }
 
 func (s *StateDB) FinaliseRWSet() error {
 	if s.rwSet == nil {
 		return nil
 	}
+	log.Debug("FinaliseRWSet", "index", s.txIndex)
 	rwSet := s.rwSet
 	stat := s.stat
 	if metrics.EnabledExpensive {

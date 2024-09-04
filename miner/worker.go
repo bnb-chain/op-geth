@@ -1422,6 +1422,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				newWork.state.MVStates().EnableAsyncGen()
 				err := w.fillTransactions(interrupt, newWork)
 				if errors.Is(err, errBlockInterruptedByTimeout) {
 					log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
@@ -1431,6 +1432,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 					isBuildBlockInterruptCounter.Inc(1)
 				}
 			}()
+			work.state.MVStates().EnableAsyncGen()
 			err := w.fillTransactionsAndBundles(interrupt, work)
 			wg.Wait()
 			timer.Stop() // don't need timeout interruption any more
@@ -1439,6 +1441,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 				work = newWork
 			}
 		} else {
+			work.state.MVStates().EnableAsyncGen()
 			err := w.fillTransactions(interrupt, work)
 			timer.Stop() // don't need timeout interruption any more
 			if errors.Is(err, errBlockInterruptedByTimeout) {

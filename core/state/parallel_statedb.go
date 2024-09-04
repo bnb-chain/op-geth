@@ -127,8 +127,8 @@ func StartKvCheckLoop() {
 // NewSlotDB creates a new State DB based on the provided StateDB.
 // With parallel, each execution slot would have its own StateDB.
 // This method must be called after the baseDB call PrepareParallel()
-func NewSlotDB(db *StateDB, txIndex int, baseTxIndex int, unconfirmedDBs *sync.Map, useDAG bool) *ParallelStateDB {
-	slotDB := db.CopyForSlot()
+func NewSlotDB(db *StateDB, txIndex int, baseTxIndex int, manager *ParallelDBManager, unconfirmedDBs *sync.Map, useDAG bool) *ParallelStateDB {
+	slotDB := db.CopyForSlot(manager)
 	slotDB.txIndex = txIndex
 	slotDB.originalRoot = db.originalRoot
 	slotDB.parallel.baseStateDB = db
@@ -138,7 +138,7 @@ func NewSlotDB(db *StateDB, txIndex int, baseTxIndex int, unconfirmedDBs *sync.M
 	return slotDB
 }
 
-func (s *ParallelStateDB) PutSyncPool() {
+func (s *ParallelStateDB) PutSyncPool(parallelDBManager *ParallelDBManager) {
 	for key := range s.parallel.codeReadsInSlot {
 		delete(s.parallel.codeReadsInSlot, key)
 	}
@@ -235,9 +235,8 @@ func (s *ParallelStateDB) PutSyncPool() {
 	}
 	addressToStructPool.Put(s.parallel.createdObjectRecord)
 
-	manager := s.parallel.baseStateDB.parallelDBManager
 	s.reset()
-	manager.reclaim(s)
+	parallelDBManager.reclaim(s)
 }
 
 // getStateDBBasePtr get the pointer of parallelStateDB.
@@ -1794,43 +1793,93 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 }
 
 func (s *ParallelStateDB) reset() {
-	parallel := ParallelState{
-		stateObjects:                 &StateObjectSyncMap{}, // s.parallel.stateObjects,
-		codeReadsInSlot:              addressToBytesPool.Get().(map[common.Address][]byte),
-		codeHashReadsInSlot:          addressToHashPool.Get().(map[common.Address]common.Hash),
-		codeChangesInSlot:            addressToStructPool.Get().(map[common.Address]struct{}),
-		kvChangesInSlot:              addressToStateKeysPool.Get().(map[common.Address]StateKeys),
-		kvReadsInSlot:                addressToStoragePool.Get().(map[common.Address]Storage),
-		balanceChangesInSlot:         addressToStructPool.Get().(map[common.Address]struct{}),
-		balanceReadsInSlot:           balancePool.Get().(map[common.Address]*big.Int),
-		addrStateReadsInSlot:         addressToBoolPool.Get().(map[common.Address]bool),
-		addrStateChangesInSlot:       addressToBoolPool.Get().(map[common.Address]bool),
-		nonceChangesInSlot:           addressToStructPool.Get().(map[common.Address]struct{}),
-		nonceReadsInSlot:             addressToUintPool.Get().(map[common.Address]uint64),
-		addrSnapDestructsReadsInSlot: addressToBoolPool.Get().(map[common.Address]bool),
-		isSlotDB:                     true,
-		dirtiedStateObjectsInSlot:    addressToStateObjectsPool.Get().(map[common.Address]*stateObject),
-		createdObjectRecord:          addressToStructPool.Get().(map[common.Address]struct{}),
-	}
-	s.StateDB = StateDB{
-		db:                   nil,
-		trie:                 nil, // Parallel StateDB may access the trie, but it takes no effect to the baseDB.
-		accounts:             make(map[common.Hash][]byte),
-		storages:             make(map[common.Hash]map[common.Hash][]byte),
-		accountsOrigin:       make(map[common.Address][]byte),
-		storagesOrigin:       make(map[common.Address]map[common.Hash][]byte),
-		stateObjects:         make(map[common.Address]*stateObject), // replaced by parallel.stateObjects in parallel mode
-		stateObjectsPending:  addressToStructPool.Get().(map[common.Address]struct{}),
-		stateObjectsDirty:    addressToStructPool.Get().(map[common.Address]struct{}),
-		stateObjectsDestruct: make(map[common.Address]*types.StateAccount),
-		refund:               0, // should be 0
-		logs:                 logsPool.Get().(map[common.Hash][]*types.Log),
-		logSize:              0,
-		preimages:            nil,
-		journal:              journalPool.Get().(*journal),
-		hasher:               crypto.NewKeccakState(),
-		isParallel:           true,
-		parallel:             parallel,
-	}
-	s.snapDestructs = addressToStructPool.Get().(map[common.Address]struct{})
+
+	s.StateDB.db = nil
+	s.StateDB.prefetcher = nil
+	s.StateDB.trie = nil
+	s.StateDB.noTrie = false
+	s.StateDB.hasher = crypto.NewKeccakState()
+	s.StateDB.snaps = nil
+	s.StateDB.snap = nil
+	s.StateDB.snapParallelLock = sync.RWMutex{}
+	s.StateDB.trieParallelLock = sync.Mutex{}
+	s.StateDB.stateObjectDestructLock = sync.RWMutex{}
+	s.StateDB.snapDestructs = addressToStructPool.Get().(map[common.Address]struct{})
+	s.StateDB.originalRoot = common.Hash{}
+	s.StateDB.expectedRoot = common.Hash{}
+	s.StateDB.stateRoot = common.Hash{}
+	s.StateDB.fullProcessed = false
+	s.StateDB.AccountMux = sync.Mutex{}
+	s.StateDB.StorageMux = sync.Mutex{}
+	s.StateDB.accounts = make(map[common.Hash][]byte)
+	s.StateDB.storages = make(map[common.Hash]map[common.Hash][]byte)
+	s.StateDB.accountsOrigin = make(map[common.Address][]byte)
+	s.StateDB.storagesOrigin = make(map[common.Address]map[common.Hash][]byte)
+	s.StateDB.stateObjects = make(map[common.Address]*stateObject) // replaced by parallel.stateObjects in parallel mode
+	s.StateDB.stateObjectsPending = addressToStructPool.Get().(map[common.Address]struct{})
+	s.StateDB.stateObjectsDirty = addressToStructPool.Get().(map[common.Address]struct{})
+	s.StateDB.stateObjectsDestruct = make(map[common.Address]*types.StateAccount)
+	s.StateDB.stateObjectsDestructDirty = make(map[common.Address]*types.StateAccount)
+	s.StateDB.dbErr = nil
+	s.StateDB.refund = 0
+	s.StateDB.thash = common.Hash{}
+	s.StateDB.txIndex = 0
+	s.StateDB.logs = logsPool.Get().(map[common.Hash][]*types.Log)
+	s.StateDB.logSize = 0
+	s.StateDB.rwSet = nil
+	s.StateDB.mvStates = nil
+	s.StateDB.stat = nil
+	s.StateDB.preimages = nil
+	s.StateDB.accessList = nil
+	s.StateDB.transientStorage = nil
+	s.StateDB.journal = journalPool.Get().(*journal)
+	s.StateDB.validRevisions = nil
+	s.StateDB.nextRevisionId = 0
+	s.StateDB.AccountReads = 0
+	s.StateDB.AccountHashes = 0
+	s.StateDB.AccountUpdates = 0
+	s.StateDB.AccountCommits = 0
+	s.StateDB.StorageReads = 0
+	s.StateDB.StorageHashes = 0
+	s.StateDB.StorageUpdates = 0
+	s.StateDB.StorageCommits = 0
+	s.StateDB.SnapshotAccountReads = 0
+	s.StateDB.SnapshotStorageReads = 0
+	s.StateDB.SnapshotCommits = 0
+	s.StateDB.TrieDBCommits = 0
+	s.StateDB.TrieCommits = 0
+	s.StateDB.CodeCommits = 0
+	s.StateDB.TxDAGGenerate = 0
+	s.StateDB.AccountUpdated = 0
+	s.StateDB.StorageUpdated = 0
+	s.StateDB.AccountDeleted = 0
+	s.StateDB.StorageDeleted = 0
+	s.StateDB.isParallel = true
+	s.StateDB.parallel = ParallelState{}
+	s.StateDB.onCommit = nil
+
+	s.parallel.isSlotDB = true
+	s.parallel.SlotIndex = -1
+	s.parallel.stateObjects = &StateObjectSyncMap{}
+	s.parallel.baseStateDB = nil
+	s.parallel.baseTxIndex = -1
+	s.parallel.dirtiedStateObjectsInSlot = addressToStateObjectsPool.Get().(map[common.Address]*stateObject)
+	s.parallel.unconfirmedDBs = nil
+	s.parallel.nonceChangesInSlot = addressToStructPool.Get().(map[common.Address]struct{})
+	s.parallel.nonceReadsInSlot = addressToUintPool.Get().(map[common.Address]uint64)
+	s.parallel.balanceChangesInSlot = addressToStructPool.Get().(map[common.Address]struct{})
+	s.parallel.balanceReadsInSlot = balancePool.Get().(map[common.Address]*big.Int)
+	s.parallel.codeReadsInSlot = addressToBytesPool.Get().(map[common.Address][]byte)
+	s.parallel.codeHashReadsInSlot = addressToHashPool.Get().(map[common.Address]common.Hash)
+	s.parallel.codeChangesInSlot = addressToStructPool.Get().(map[common.Address]struct{})
+	s.parallel.kvChangesInSlot = addressToStateKeysPool.Get().(map[common.Address]StateKeys)
+	s.parallel.kvReadsInSlot = addressToStoragePool.Get().(map[common.Address]Storage)
+	s.parallel.addrStateReadsInSlot = addressToBoolPool.Get().(map[common.Address]bool)
+	s.parallel.addrStateChangesInSlot = addressToBoolPool.Get().(map[common.Address]bool)
+	s.parallel.addrSnapDestructsReadsInSlot = addressToBoolPool.Get().(map[common.Address]bool)
+	s.parallel.createdObjectRecord = addressToStructPool.Get().(map[common.Address]struct{})
+	s.parallel.needsRedo = false
+	s.parallel.useDAG = false
+	s.parallel.conflictCheckStateObjectCache = nil
+	s.parallel.conflictCheckKVReadCache = nil
 }

@@ -91,7 +91,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	statedb.MarkFullProcessed()
 	if p.bc.enableTxDAG {
-		statedb.ResetMVStates(len(block.Transactions()))
+		statedb.ResetMVStates(len(block.Transactions())).EnableAsyncGen()
 	}
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {

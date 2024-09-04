@@ -321,6 +321,14 @@ func (w *PendingWrites) FindPrevWrites(txIndex int) []*RWItem {
 	return nil
 }
 
+func (w *PendingWrites) Copy() *PendingWrites {
+	np := &PendingWrites{}
+	for i, item := range w.list {
+		np.list[i] = item
+	}
+	return np
+}
+
 type MVStates struct {
 	rwSets              map[int]*RWSet
 	pendingAccWriteSet  map[common.Address]map[AccountState]*PendingWrites
@@ -363,6 +371,40 @@ func (s *MVStates) EnableAsyncGen() *MVStates {
 	s.asyncRunning = true
 	go s.asyncGenLoop()
 	return s
+}
+
+func (s *MVStates) Copy() *MVStates {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if len(s.asyncGenChan) > 0 {
+		log.Error("It's dangerous to copy a async MVStates")
+	}
+	ns := NewMVStates(len(s.rwSets))
+	ns.nextFinaliseIndex = s.nextFinaliseIndex
+	ns.txDepCache = append(ns.txDepCache, s.txDepCache...)
+	for k, v := range s.rwSets {
+		ns.rwSets[k] = v
+	}
+	for k, v := range s.stats {
+		ns.stats[k] = v
+	}
+	for addr, sub := range s.pendingAccWriteSet {
+		for state, writes := range sub {
+			if _, ok := ns.pendingAccWriteSet[addr]; !ok {
+				ns.pendingAccWriteSet[addr] = make(map[AccountState]*PendingWrites)
+			}
+			ns.pendingAccWriteSet[addr][state] = writes.Copy()
+		}
+	}
+	for addr, sub := range s.pendingSlotWriteSet {
+		for slot, writes := range sub {
+			if _, ok := ns.pendingSlotWriteSet[addr]; !ok {
+				ns.pendingSlotWriteSet[addr] = make(map[common.Hash]*PendingWrites)
+			}
+			ns.pendingSlotWriteSet[addr][slot] = writes.Copy()
+		}
+	}
+	return ns
 }
 
 func (s *MVStates) Stop() error {
@@ -489,6 +531,9 @@ func (s *MVStates) Finalise(index int) error {
 			return err
 		}
 		s.resolveDepsMapCacheByWrites(i, s.rwSets[i])
+		log.Debug("Finalise the reads/writes", "index", i,
+			"readCnt", len(s.rwSets[i].accReadSet)+len(s.rwSets[i].slotReadSet),
+			"writeCnt", len(s.rwSets[i].accWriteSet)+len(s.rwSets[i].slotWriteSet))
 	}
 
 	return nil

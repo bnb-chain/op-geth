@@ -96,7 +96,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
-		statedb.BeginTxRecorder(i, tx.IsSystemTx() || tx.IsDepositTx())
 		start := time.Now()
 		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
 		if err != nil {
@@ -130,6 +129,7 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	// Create a new context to be used in the EVM environment.
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
+	statedb.BeginTxRecorder(tx.IsSystemTx() || tx.IsDepositTx())
 
 	nonce := tx.Nonce()
 	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.Time) {

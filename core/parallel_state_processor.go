@@ -66,6 +66,7 @@ type ParallelStateProcessor struct {
 	resultMutex       sync.RWMutex
 	resultProcessChan chan *ResultHandleEnv
 	resultAppendChan  chan struct{}
+	parallelDBManager *state.ParallelDBManager
 }
 
 func newParallelStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine, parallelNum int) *ParallelStateProcessor {
@@ -139,6 +140,9 @@ func (p *ParallelStateProcessor) init() {
 	p.resultAppendChan = make(chan struct{}, 20000)
 
 	p.slotState = make([]*SlotState, p.parallelNum)
+
+	p.parallelDBManager = state.NewParallelDBManager(20000, state.NewEmptySlotDB)
+
 	quickMergeNum := 2 // p.parallelNum / 2
 	for i := 0; i < p.parallelNum-quickMergeNum; i++ {
 		p.slotState[i] = &SlotState{
@@ -184,6 +188,7 @@ func (p *ParallelStateProcessor) init() {
 	go func() {
 		p.handlePendingResultLoop()
 	}()
+
 }
 
 // resetState clear slot state for each block.
@@ -311,7 +316,7 @@ func (p *ParallelStateProcessor) executeInSlot(slotIndex int, txReq *ParallelTxR
 		return nil
 	}
 	execNum := txReq.executedNum.Add(1)
-	slotDB := state.NewSlotDB(txReq.baseStateDB, txReq.txIndex, int(mIndex), p.unconfirmedDBs, txReq.useDAG)
+	slotDB := state.NewSlotDB(txReq.baseStateDB, txReq.txIndex, int(mIndex), p.parallelDBManager, p.unconfirmedDBs, txReq.useDAG)
 	blockContext := NewEVMBlockContext(txReq.block.Header(), p.bc, nil, p.config, slotDB) // can share blockContext within a block for efficiency
 	txContext := NewEVMTxContext(txReq.msg)
 	vmenv := vm.NewEVM(blockContext, txContext, slotDB, p.config, txReq.vmConfig)
@@ -814,17 +819,17 @@ func (p *ParallelStateProcessor) doCleanUp() {
 	p.stopConfirmStage2Chan <- struct{}{}
 	<-p.stopSlotChan
 
-	go func() {
-		p.slotDBsToRelease.Range(func(key, value any) bool {
-			sdb := value.(*state.ParallelStateDB)
-			sdb.PutSyncPool()
-			return true
-		})
-	}()
-
 	p.unconfirmedResults = nil
 	p.unconfirmedDBs = nil
 	p.pendingConfirmResults = nil
+
+	go func() {
+		p.slotDBsToRelease.Range(func(key, value any) bool {
+			sdb := value.(*state.ParallelStateDB)
+			sdb.PutSyncPool(p.parallelDBManager)
+			return true
+		})
+	}()
 }
 
 // Process implements BEP-130 Parallel Transaction Execution

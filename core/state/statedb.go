@@ -1703,18 +1703,18 @@ func (s *StateDB) GetSnap() snapshot.Snapshot {
 	return s.snap
 }
 
-func (s *StateDB) BeginTxRecorder(index int, isExcludeTx bool) {
+func (s *StateDB) BeginTxRecorder(isExcludeTx bool) {
 	if s.mvStates == nil {
 		return
 	}
 	if isExcludeTx {
-		rwSet := types.NewRWSet(index).WithExcludedTxFlag()
+		rwSet := types.NewRWSet(s.txIndex).WithExcludedTxFlag()
 		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {
 			log.Error("MVStates SystemTx Finalise err", "err", err)
 		}
 		return
 	}
-	s.mvStates.RecordNewTx(index)
+	s.mvStates.RecordNewTx(s.txIndex)
 }
 
 func (s *StateDB) ResetMVStates(txCount int, feeReceivers []common.Address) *types.MVStates {

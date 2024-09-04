@@ -1925,7 +1925,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			dag, err := statedb.ResolveTxDAG(len(block.Transactions()))
 			if err == nil {
 				// TODO(galaio): check TxDAG correctness?
-				log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
+				log.Debug("Process TxDAG result", "block", block.NumberU64(), "tx", len(block.Transactions()), "txDAG", dag)
 				if metrics.EnabledExpensive {
 					go types.EvaluateTxDAGPerformance(dag)
 				}

@@ -23,7 +23,7 @@ var (
 )
 
 const (
-	initRWEventCacheSize = 2
+	initRWEventCacheSize = 4
 )
 
 func init() {
@@ -314,6 +314,7 @@ func (s *MVStates) Copy() *MVStates {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	ns := NewMVStates(len(s.rwSets), s.gasFeeReceivers)
+	ns.cannotGasFeeDelay = s.cannotGasFeeDelay
 	ns.nextFinaliseIndex = s.nextFinaliseIndex
 	for k, v := range s.txDepCache {
 		ns.txDepCache[k] = v
@@ -355,9 +356,6 @@ func (s *MVStates) asyncRWEventLoop() {
 			rwEventCachePool.Put(&items)
 		case <-timeout:
 			log.Warn("asyncRWEventLoop timeout")
-			return
-		case <-timeout:
-			log.Warn("asyncDepGenLoop exit by timeout")
 			return
 		}
 	}

@@ -268,9 +268,8 @@ type StateDB struct {
 	AccountDeleted int
 	StorageDeleted int
 
-	isParallel        bool
-	parallel          ParallelState // to keep all the parallel execution elements
-	parallelDBManager *ParallelDBManager
+	isParallel bool
+	parallel   ParallelState // to keep all the parallel execution elements
 	// Testing hooks
 	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
 }
@@ -1311,8 +1310,8 @@ func NewEmptySlotDB() *ParallelStateDB {
 }
 
 // CopyForSlot copy all the basic fields, initialize the memory ones
-func (s *StateDB) CopyForSlot() *ParallelStateDB {
-	state := s.parallelDBManager.allocate()
+func (s *StateDB) CopyForSlot(parallelDBManager *ParallelDBManager) *ParallelStateDB {
+	state := parallelDBManager.allocate()
 	state.db = s.db
 	s.preimages = make(map[common.Hash][]byte, len(s.preimages))
 
@@ -2654,14 +2653,6 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 	return s
 }
 
-func (s *StateDB) CreateParallelDBManager(txCount int) {
-	// if enableDAG, it is high likely no conflict and hence no re-execution
-	// allocate the txCount of slotDBs to use.
-	if s.parallelDBManager == nil {
-		s.parallelDBManager = NewParallelDBManager(txCount, NewEmptySlotDB)
-	}
-}
-
 // NewParallelDBManager creates a new ParallelDBManager with the specified number of instance
 func NewParallelDBManager(initialCount int, newFunc func() *ParallelStateDB) *ParallelDBManager {
 	manager := &ParallelDBManager{
@@ -2701,5 +2692,7 @@ func (m *ParallelDBManager) allocate() *ParallelStateDB {
 }
 
 func (m *ParallelDBManager) reclaim(s *ParallelStateDB) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
 	m.pool.PushBack(s)
 }

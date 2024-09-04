@@ -947,6 +947,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			s.mvStates.RecordAccountWrite(addr, types.AccountSuicide)
 		}
 	}
+	s.stateObjectsDestructDirty = make(map[common.Address]*types.StateAccount)
 	for addr := range s.journal.dirties {
 		obj, exist := s.stateObjects[addr]
 		if !exist {
@@ -992,7 +993,9 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// the commit-phase will be a lot faster
 		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:])) // Copy needed for closure
 	}
-
+	if s.mvStates != nil {
+		s.mvStates.RecordWriteDone()
+	}
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
 	}
@@ -1709,6 +1712,7 @@ func (s *StateDB) BeginTxRecorder(isExcludeTx bool) {
 	if s.mvStates == nil {
 		return
 	}
+	log.Debug("BeginTxRecorder", "tx", s.txIndex)
 	if isExcludeTx {
 		rwSet := types.NewRWSet(s.txIndex).WithExcludedTxFlag()
 		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {
@@ -1724,9 +1728,9 @@ func (s *StateDB) ResetMVStates(txCount int, feeReceivers []common.Address) *typ
 	return s.mvStates
 }
 
-func (s *StateDB) CheckFeeReceiversRWSet() error {
+func (s *StateDB) CheckFeeReceiversRWSet() {
 	if s.mvStates == nil {
-		return nil
+		return
 	}
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) {
@@ -1740,7 +1744,7 @@ func (s *StateDB) CheckFeeReceiversRWSet() error {
 			continue
 		}
 		s.mvStates.RecordCannotDelayGasFee()
-		return nil
+		return
 	}
 
 	for _, addr := range feeReceivers {
@@ -1748,9 +1752,8 @@ func (s *StateDB) CheckFeeReceiversRWSet() error {
 			continue
 		}
 		s.mvStates.RecordCannotDelayGasFee()
-		return nil
+		return
 	}
-	return nil
 }
 
 func (s *StateDB) getStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool) {

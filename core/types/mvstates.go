@@ -8,7 +8,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/holiman/uint256"
 	"golang.org/x/exp/slices"
 )
 
@@ -56,10 +55,6 @@ func NewRWSet(index int) *RWSet {
 	}
 }
 
-func (s *RWSet) Index() int {
-	return s.index
-}
-
 func (s *RWSet) RecordAccountRead(addr common.Address, state AccountState) {
 	// only record the first read version
 	sub, ok := s.accReadSet[addr]
@@ -103,26 +98,6 @@ func (s *RWSet) RecordStorageWrite(addr common.Address, slot common.Hash) {
 		s.slotWriteSet[addr] = make(map[common.Hash]struct{})
 	}
 	s.slotWriteSet[addr][slot] = struct{}{}
-}
-
-func (s *RWSet) queryAccReadItem(addr common.Address, state AccountState) bool {
-	sub, ok := s.accReadSet[addr]
-	if !ok {
-		return false
-	}
-
-	_, ok = sub[state]
-	return ok
-}
-
-func (s *RWSet) querySlotReadItem(addr common.Address, slot common.Hash) bool {
-	sub, ok := s.slotReadSet[addr]
-	if !ok {
-		return false
-	}
-
-	_, ok = sub[slot]
-	return ok
 }
 
 func (s *RWSet) ReadSet() (map[common.Address]map[AccountState]struct{}, map[common.Address]map[common.Hash]struct{}) {
@@ -275,11 +250,13 @@ type MVStates struct {
 	txDepCache map[int]TxDep
 
 	// async rw event recorder
+	// these fields are only used in one routine
 	asyncRWSet        *RWSet
 	rwEventCh         chan []RWEventItem
 	rwEventCache      []RWEventItem
 	rwEventCacheIndex int
-	recordeReadDone   bool
+	recordingRead     bool
+	recordingWrite    bool
 
 	// execution stat infos
 	lock              sync.RWMutex
@@ -409,6 +386,7 @@ func (s *MVStates) finalisePreviousRWSet() {
 		}
 		if _, exist := s.asyncRWSet.accReadSet[addr][AccountSelf]; exist {
 			s.cannotGasFeeDelay = true
+			break
 		}
 	}
 	s.resolveDepsMapCacheByWrites(index, s.asyncRWSet)
@@ -425,12 +403,21 @@ func (s *MVStates) RecordNewTx(index int) {
 		})
 	}
 	s.rwEventCacheIndex++
-	s.recordeReadDone = false
+	s.recordingRead = true
+	s.recordingWrite = true
 	s.BatchRecordHandle()
 }
 
+func (s *MVStates) RecordReadDone() {
+	s.recordingRead = false
+}
+
+func (s *MVStates) RecordWriteDone() {
+	s.recordingWrite = false
+}
+
 func (s *MVStates) RecordAccountRead(addr common.Address, state AccountState) {
-	if s.recordeReadDone {
+	if !s.recordingRead {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
@@ -449,7 +436,7 @@ func (s *MVStates) RecordAccountRead(addr common.Address, state AccountState) {
 }
 
 func (s *MVStates) RecordStorageRead(addr common.Address, slot common.Hash) {
-	if s.recordeReadDone {
+	if !s.recordingRead {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
@@ -467,11 +454,10 @@ func (s *MVStates) RecordStorageRead(addr common.Address, slot common.Hash) {
 	s.rwEventCacheIndex++
 }
 
-func (s *MVStates) RecordReadDone() {
-	s.recordeReadDone = true
-}
-
 func (s *MVStates) RecordAccountWrite(addr common.Address, state AccountState) {
+	if !s.recordingWrite {
+		return
+	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
 		s.rwEventCache[s.rwEventCacheIndex].Event = WriteAccRWEvent
 		s.rwEventCache[s.rwEventCacheIndex].Addr = addr
@@ -488,6 +474,9 @@ func (s *MVStates) RecordAccountWrite(addr common.Address, state AccountState) {
 }
 
 func (s *MVStates) RecordStorageWrite(addr common.Address, slot common.Hash) {
+	if !s.recordingWrite {
+		return
+	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
 		s.rwEventCache[s.rwEventCacheIndex].Event = WriteSlotRWEvent
 		s.rwEventCache[s.rwEventCacheIndex].Addr = addr
@@ -504,6 +493,9 @@ func (s *MVStates) RecordStorageWrite(addr common.Address, slot common.Hash) {
 }
 
 func (s *MVStates) RecordCannotDelayGasFee() {
+	if !s.recordingWrite {
+		return
+	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
 		s.rwEventCache[s.rwEventCacheIndex].Event = CannotGasFeeDelayRWEvent
 		s.rwEventCacheIndex++
@@ -516,7 +508,7 @@ func (s *MVStates) RecordCannotDelayGasFee() {
 }
 
 func (s *MVStates) BatchRecordHandle() {
-	if len(s.rwEventCache) == 0 {
+	if s.rwEventCacheIndex == 0 {
 		return
 	}
 	s.rwEventCh <- s.rwEventCache[:s.rwEventCacheIndex]
@@ -545,9 +537,6 @@ func (s *MVStates) quickFinaliseWithRWSet(rwSet *RWSet) error {
 func (s *MVStates) FinaliseWithRWSet(rwSet *RWSet) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if s.asyncRWSet == nil {
-		s.asyncRWSet = nil
-	}
 	index := rwSet.index
 	if s.nextFinaliseIndex > index {
 		return fmt.Errorf("finalise in wrong order, next: %d, input: %d", s.nextFinaliseIndex, index)
@@ -567,7 +556,6 @@ func (s *MVStates) FinaliseWithRWSet(rwSet *RWSet) error {
 			"readCnt", len(s.rwSets[i].accReadSet)+len(s.rwSets[i].slotReadSet),
 			"writeCnt", len(s.rwSets[i].accWriteSet)+len(s.rwSets[i].slotWriteSet))
 	}
-	s.rwSets[index] = rwSet
 
 	return nil
 }
@@ -822,15 +810,6 @@ func checkSlotDependency(writeSet map[common.Address]map[common.Hash]struct{}, r
 	return false
 }
 
-type TxDepMaker interface {
-	add(index uint64)
-	exist(index uint64) bool
-	deps() []uint64
-	remove(index uint64)
-	len() int
-	reset()
-}
-
 type TxDepMap struct {
 	tm    map[uint64]struct{}
 	cache []uint64
@@ -872,43 +851,4 @@ func (m *TxDepMap) remove(index uint64) {
 
 func (m *TxDepMap) len() int {
 	return len(m.tm)
-}
-
-func (m *TxDepMap) reset() {
-	m.cache = nil
-	m.tm = make(map[uint64]struct{})
-}
-
-// isEqualRWVal compare state
-func isEqualRWVal(accState *AccountState, src interface{}, compared interface{}) bool {
-	if accState != nil {
-		switch *accState {
-		case AccountBalance:
-			if src != nil && compared != nil {
-				return equalUint256(src.(*uint256.Int), compared.(*uint256.Int))
-			}
-			return src == compared
-		case AccountNonce:
-			return src.(uint64) == compared.(uint64)
-		case AccountCodeHash:
-			if src != nil && compared != nil {
-				return slices.Equal(src.([]byte), compared.([]byte))
-			}
-			return src == compared
-		}
-		return false
-	}
-
-	if src != nil && compared != nil {
-		return src.(common.Hash) == compared.(common.Hash)
-	}
-	return src == compared
-}
-
-func equalUint256(s, c *uint256.Int) bool {
-	if s != nil && c != nil {
-		return s.Eq(c)
-	}
-
-	return s == c
 }

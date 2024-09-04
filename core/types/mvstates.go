@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -425,6 +426,7 @@ func (s *MVStates) stopAsyncGen() {
 }
 
 func (s *MVStates) asyncGenLoop() {
+	timeout := time.After(3 * time.Second)
 	for {
 		select {
 		case tx := <-s.asyncGenChan:
@@ -432,6 +434,9 @@ func (s *MVStates) asyncGenLoop() {
 				log.Error("async MVStates Finalise err", "err", err)
 			}
 		case <-s.asyncStopChan:
+			return
+		case <-timeout:
+			log.Warn("asyncDepGenLoop exit by timeout")
 			return
 		}
 	}

@@ -68,8 +68,4 @@ var (
 	diffHashCacheMissMeter     = metrics.NewRegisteredMeter("pathdb/difflayer/hashcache/miss", nil)
 	diffHashCacheSlowPathMeter = metrics.NewRegisteredMeter("pathdb/difflayer/hashcache/slowpath", nil)
 	diffHashCacheLengthGauge   = metrics.NewRegisteredGauge("pathdb/difflayer/hashcache/size", nil)
-
-	// temp metrics
-	historyTotalSizeMeter1    = metrics.NewRegisteredMeter("pathdb/history/total", nil)
-	historyTrieNodesSizeMeter = metrics.NewRegisteredMeter("pathdb/history/trienodes", nil)
 )

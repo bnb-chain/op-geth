@@ -166,6 +166,7 @@ type CacheConfig struct {
 	SnapshotWait         bool                  // Wait for snapshot construction on startup. TODO(karalabe): This is a dirty hack for testing, nuke it
 	JournalFilePath      string                // The file path to journal pathdb diff layers
 	JournalFile          bool                  // Whether to enable journal file
+	UseBase              bool                  // Flag if just use base for nodebufferlist
 
 	TrieCommitInterval uint64 // Define a block height interval, commit trie every TrieCommitInterval block height.
 }

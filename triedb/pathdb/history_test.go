@@ -151,8 +151,8 @@ func TestTruncateHeadHistory(t *testing.T) {
 	defer freezer.Close()
 
 	for i := 0; i < len(hs); i++ {
-		accountData, storageData, accountIndex, storageIndex, trieNodes := hs[i].encode()
-		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
+		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
+		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 		roots = append(roots, hs[i].meta.root)
 	}
@@ -179,8 +179,8 @@ func TestTruncateTailHistory(t *testing.T) {
 	defer freezer.Close()
 
 	for i := 0; i < len(hs); i++ {
-		accountData, storageData, accountIndex, storageIndex, trieNodes := hs[i].encode()
-		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
+		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
+		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 		roots = append(roots, hs[i].meta.root)
 	}
@@ -222,8 +222,8 @@ func TestTruncateTailHistories(t *testing.T) {
 		defer freezer.Close()
 
 		for i := 0; i < len(hs); i++ {
-			accountData, storageData, accountIndex, storageIndex, trieNodes := hs[i].encode()
-			rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
+			accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
+			rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
 			rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 			roots = append(roots, hs[i].meta.root)
 		}
@@ -250,8 +250,8 @@ func TestTruncateOutOfRange(t *testing.T) {
 	defer freezer.Close()
 
 	for i := 0; i < len(hs); i++ {
-		accountData, storageData, accountIndex, storageIndex, trieNodes := hs[i].encode()
-		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
+		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
+		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 	}
 	truncateFromTail(db, freezer, uint64(len(hs)/2))
@@ -287,7 +287,7 @@ func TestTruncateOutOfRange(t *testing.T) {
 
 // openFreezer initializes the freezer instance for storing state histories.
 func openFreezer(datadir string, readOnly bool) (*rawdb.ResettableFreezer, error) {
-	return rawdb.NewStateFreezer(datadir, readOnly)
+	return rawdb.NewStateFreezer(datadir, readOnly, false)
 }
 
 func compareSet[k comparable](a, b map[k][]byte) bool {

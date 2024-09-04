@@ -41,7 +41,7 @@ func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.No
 		}
 	}
 
-	log.Info("new async node buffer", "limit", common.StorageSize(limit), "layers", layers)
+	log.Info("new async node buffer", "limit", common.StorageSize(limit), "layers", layers, "size", size)
 	return &asyncnodebuffer{
 		current:    newNodeCache(uint64(limit), size, nodes, layers),
 		background: newNodeCache(uint64(limit), 0, make(map[common.Hash]map[string]*trienode.Node), 0),

@@ -69,6 +69,7 @@ type nodebufferlist struct {
 	baseMux   sync.RWMutex    // The mutex of base multiDifflayer and persistID.
 	flushMux  sync.RWMutex    // The mutex of flushing base multiDifflayer for reorg corner case.
 
+	useBase         atomic.Bool    // Flag if just use base buffer
 	isFlushing      atomic.Bool    // Flag indicates writing disk under background.
 	stopFlushing    atomic.Bool    // Flag stops writing disk under background.
 	stopCh          chan struct{}  // Trigger stop background event loop.
@@ -87,7 +88,8 @@ func newNodeBufferList(
 	proposeBlockInterval uint64,
 	keepFunc NotifyKeepFunc,
 	freezer *rawdb.ResettableFreezer,
-	recovery bool,
+	fastRecovery bool,
+	useBase bool,
 ) (*nodebufferlist, error) {
 	var (
 		rsevMdNum uint64
@@ -121,7 +123,7 @@ func newNodeBufferList(
 		nf  *nodebufferlist
 		err error
 	)
-	if recovery {
+	if !useBase && fastRecovery {
 		nf, err = recoverNodeBufferList(db, freezer, base, limit, wpBlocks, rsevMdNum, dlInMd)
 		if err != nil {
 			log.Error("Failed to recover node buffer list", "error", err)
@@ -146,6 +148,7 @@ func newNodeBufferList(
 			waitForceKeepCh: make(chan struct{}),
 			keepFunc:        keepFunc,
 		}
+		nf.useBase.Store(useBase)
 	}
 
 	go nf.loop()
@@ -249,8 +252,8 @@ func (nf *nodebufferlist) linkMultiDiffLayers(blockIntervalLength int) {
 }
 
 func (nf *nodebufferlist) readStateHistory(freezer *rawdb.ResettableFreezer, stateID uint64) (*history, error) {
-	h, err := readHistory(freezer, stateID)
-	if err != nil {
+	h, err := readHistory(freezer, stateID, true)
+	if err != nil || h.nodes == nil {
 		log.Error("Failed to read history from freezer db", "error", err)
 		return nil, err
 	}
@@ -315,6 +318,14 @@ func (nf *nodebufferlist) getLatestStatus() (common.Hash, uint64, error) {
 func (nf *nodebufferlist) node(owner common.Hash, path []byte, hash common.Hash) (node *trienode.Node, err error) {
 	nf.mux.RLock()
 	defer nf.mux.RUnlock()
+
+	if nf.useBase.Load() {
+		nf.baseMux.RLock()
+		node, err = nf.base.node(owner, path, hash)
+		nf.baseMux.RUnlock()
+		return node, err
+	}
+
 	find := func(nc *multiDifflayer) bool {
 		subset, ok := nc.nodes[owner]
 		if !ok {
@@ -353,6 +364,26 @@ func (nf *nodebufferlist) node(owner common.Hash, path []byte, hash common.Hash)
 func (nf *nodebufferlist) commit(root common.Hash, id uint64, block uint64, nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer {
 	nf.mux.Lock()
 	defer nf.mux.Unlock()
+
+	if nf.useBase.Load() {
+		for {
+			if nf.isFlushing.Swap(true) {
+				time.Sleep(time.Duration(DefaultBackgroundFlushInterval) * time.Second)
+				log.Info("waiting base node buffer to be flushed to disk")
+				continue
+			} else {
+				break
+			}
+		}
+		defer nf.isFlushing.Store(false)
+
+		nf.baseMux.Lock()
+		defer nf.baseMux.Unlock()
+		if err := nf.base.commit(root, id, block, 1, nodes); err != nil {
+			log.Crit("Failed to commit nodes to node buffer list", "error", err)
+		}
+		return nf
+	}
 
 	if nf.head == nil {
 		nf.head = newMultiDifflayer(nf.limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
@@ -455,8 +486,8 @@ func (nf *nodebufferlist) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		_ = nf.popBack()
 		return true
 	}
-
 	nf.traverseReverse(commitFunc)
+
 	persistID := nf.persistID + nf.base.layers
 	err := nf.base.flush(nf.db, nf.clean, persistID)
 	if err != nil {

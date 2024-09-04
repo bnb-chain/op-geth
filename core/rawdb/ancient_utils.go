@@ -171,14 +171,14 @@ func InspectFreezerTable(ancient string, freezerName string, tableName string, s
 	return nil
 }
 
-// DetectTrieNodesFile
+// DetectTrieNodesFile detects whether trie nodes data exists
 func DetectTrieNodesFile(ancientDir string) bool {
 	trieNodesFilePath := filepath.Join(ancientDir, StateFreezerName, fmt.Sprintf("%s.%s",
 		stateHistoryTrieNodesData, "cidx"))
 	return common.FileExist(trieNodesFilePath)
 }
 
-// DeleteTrieNodesFile
+// DeleteTrieNodesFile deletes all trie nodes data in state directory
 func DeleteTrieNodesFile(ancientDir string) error {
 	statePath := filepath.Join(ancientDir, StateFreezerName)
 	dir, err := os.Open(statePath)
@@ -204,7 +204,7 @@ func DeleteTrieNodesFile(ancientDir string) error {
 			if err != nil {
 				return err
 			}
-			log.Info(fmt.Sprintf("Delete %s file"), filePath)
+			log.Info(fmt.Sprintf("Delete %s file", filePath))
 		}
 	}
 

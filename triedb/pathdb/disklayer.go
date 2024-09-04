@@ -90,9 +90,9 @@ type trienodebuffer interface {
 type NodeBufferType int32
 
 const (
-	AsyncNodeBuffer NodeBufferType = 0
+	NodeBufferList  NodeBufferType = 0
 	SyncNodeBuffer  NodeBufferType = 1
-	NodeBufferList  NodeBufferType = 2
+	AsyncNodeBuffer NodeBufferType = 2
 )
 
 var (
@@ -125,18 +125,18 @@ func NewTrieNodeBuffer(
 	layers, proposeBlockInterval uint64,
 	keepFunc NotifyKeepFunc,
 	freezer *rawdb.ResettableFreezer,
-	recovery bool,
+	fastRecovery, useBase bool,
 ) (trienodebuffer, error) {
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {
 	case NodeBufferList:
-		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, recovery)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, fastRecovery, useBase)
 	case AsyncNodeBuffer:
 		return newAsyncNodeBuffer(limit, nodes, layers)
 	case SyncNodeBuffer:
 		return newNodeBuffer(limit, nodes, layers)
 	default:
-		return newAsyncNodeBuffer(limit, nodes, layers)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, fastRecovery, useBase)
 	}
 }
 

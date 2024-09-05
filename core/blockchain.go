@@ -1920,20 +1920,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
-		if bc.enableTxDAG {
-			// compare input TxDAG when it enable in consensus
-			dag, err := statedb.ResolveTxDAG(len(block.Transactions()))
-			if err == nil {
-				// TODO(galaio): check TxDAG correctness?
-				log.Debug("Process TxDAG result", "block", block.NumberU64(), "tx", len(block.Transactions()), "txDAG", dag)
-				if metrics.EnabledExpensive {
-					go types.EvaluateTxDAGPerformance(dag)
-				}
-			} else {
-				log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
-			}
-		}
-
 		// Update the metrics touched during block processing and validation
 		accountReadTimer.Update(statedb.AccountReads)                 // Account reads are complete(in processing)
 		storageReadTimer.Update(statedb.StorageReads)                 // Storage reads are complete(in processing)

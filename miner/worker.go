@@ -1414,7 +1414,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				if newWork.state.MVStates() != nil {
+				if w.chain.TxDAGEnabledWhenMine() {
 					newWork.state.MVStates().EnableAsyncGen()
 				}
 				err := w.fillTransactions(interrupt, newWork)
@@ -1426,7 +1426,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 					isBuildBlockInterruptCounter.Inc(1)
 				}
 			}()
-			if work.state.MVStates() != nil {
+			if w.chain.TxDAGEnabledWhenMine() {
 				work.state.MVStates().EnableAsyncGen()
 			}
 			err := w.fillTransactionsAndBundles(interrupt, work)
@@ -1434,10 +1434,13 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			timer.Stop() // don't need timeout interruption any more
 			if errors.Is(err, errFillBundleInterrupted) {
 				log.Warn("fill bundles is interrupted, discard", "err", err)
-				work = newWork
+				work, newWork = newWork, work
+			}
+			if w.chain.TxDAGEnabledWhenMine() {
+				newWork.state.MVStates().Stop()
 			}
 		} else {
-			if work.state.MVStates() != nil {
+			if w.chain.TxDAGEnabledWhenMine() {
 				work.state.MVStates().EnableAsyncGen()
 			}
 			err := w.fillTransactions(interrupt, work)

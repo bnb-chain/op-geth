@@ -993,9 +993,6 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// the commit-phase will be a lot faster
 		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:])) // Copy needed for closure
 	}
-	if s.mvStates != nil {
-		s.mvStates.RecordWriteDone()
-	}
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
 	}
@@ -1706,11 +1703,11 @@ func (s *StateDB) GetSnap() snapshot.Snapshot {
 	return s.snap
 }
 
-func (s *StateDB) BeginTxRecorder(isExcludeTx bool) {
+func (s *StateDB) StartTxRecorder(isExcludeTx bool) {
 	if s.mvStates == nil {
 		return
 	}
-	log.Debug("BeginTxRecorder", "tx", s.txIndex)
+	log.Debug("StartTxRecorder", "tx", s.txIndex)
 	if isExcludeTx {
 		rwSet := types.NewRWSet(s.txIndex).WithExcludedTxFlag()
 		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {
@@ -1719,6 +1716,14 @@ func (s *StateDB) BeginTxRecorder(isExcludeTx bool) {
 		return
 	}
 	s.mvStates.RecordNewTx(s.txIndex)
+}
+
+func (s *StateDB) StopTxRecorder() {
+	if s.mvStates == nil {
+		return
+	}
+	s.mvStates.RecordReadDone()
+	s.mvStates.RecordWriteDone()
 }
 
 func (s *StateDB) ResetMVStates(txCount int, feeReceivers []common.Address) *types.MVStates {

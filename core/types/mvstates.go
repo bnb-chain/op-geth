@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -42,7 +41,8 @@ type RWSet struct {
 	slotWriteSet map[common.Address]map[common.Hash]struct{}
 
 	// some flags
-	excludedTx bool
+	excludedTx        bool
+	cannotGasFeeDelay bool
 }
 
 func NewRWSet(index int) *RWSet {
@@ -244,10 +244,10 @@ type MVStates struct {
 	pendingSlotWriteSet map[common.Address]map[common.Hash]*PendingWrites
 	nextFinaliseIndex   int
 	gasFeeReceivers     []common.Address
-
 	// dependency map cache for generating TxDAG
 	// depMapCache[i].exist(j) means j->i, and i > j
 	txDepCache map[int]TxDep
+	lock       sync.RWMutex
 
 	// async rw event recorder
 	// these fields are only used in one routine
@@ -257,11 +257,8 @@ type MVStates struct {
 	rwEventCacheIndex int
 	recordingRead     bool
 	recordingWrite    bool
-
-	// execution stat infos
-	lock              sync.RWMutex
+	asyncRunning      bool
 	asyncWG           sync.WaitGroup
-	cannotGasFeeDelay bool
 }
 
 func NewMVStates(txCount int, gasFeeReceivers []common.Address) *MVStates {
@@ -280,18 +277,20 @@ func NewMVStates(txCount int, gasFeeReceivers []common.Address) *MVStates {
 }
 
 func (s *MVStates) EnableAsyncGen() *MVStates {
-	s.lock.Lock()
-	defer s.lock.Unlock()
 	s.asyncWG.Add(1)
+	s.asyncRunning = true
 	go s.asyncRWEventLoop()
 	return s
+}
+
+func (s *MVStates) Stop() {
+	s.stopAsyncRecorder()
 }
 
 func (s *MVStates) Copy() *MVStates {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	ns := NewMVStates(len(s.rwSets), s.gasFeeReceivers)
-	ns.cannotGasFeeDelay = s.cannotGasFeeDelay
 	ns.nextFinaliseIndex = s.nextFinaliseIndex
 	for k, v := range s.txDepCache {
 		ns.txDepCache[k] = v
@@ -320,7 +319,6 @@ func (s *MVStates) Copy() *MVStates {
 
 func (s *MVStates) asyncRWEventLoop() {
 	defer s.asyncWG.Done()
-	timeout := time.After(3 * time.Second)
 	for {
 		select {
 		case items, ok := <-s.rwEventCh:
@@ -331,9 +329,6 @@ func (s *MVStates) asyncRWEventLoop() {
 				s.handleRWEvent(item)
 			}
 			rwEventCachePool.Put(&items)
-		case <-timeout:
-			log.Warn("asyncRWEventLoop timeout")
-			return
 		}
 	}
 }
@@ -343,15 +338,8 @@ func (s *MVStates) handleRWEvent(item RWEventItem) {
 	defer s.lock.Unlock()
 	// init next RWSet, and finalise previous RWSet
 	if item.Event == NewTxRWEvent {
-		if item.Index > 0 {
-			s.finalisePreviousRWSet()
-		}
+		s.finalisePreviousRWSet()
 		s.asyncRWSet = NewRWSet(item.Index)
-		return
-	}
-	// recorde current as cannot gas fee delay
-	if item.Event == CannotGasFeeDelayRWEvent {
-		s.cannotGasFeeDelay = true
 		return
 	}
 	if s.asyncRWSet == nil {
@@ -367,6 +355,9 @@ func (s *MVStates) handleRWEvent(item RWEventItem) {
 		s.finaliseAccWrite(s.asyncRWSet.index, item.Addr, item.State)
 	case WriteSlotRWEvent:
 		s.finaliseSlotWrite(s.asyncRWSet.index, item.Addr, item.Slot)
+	// recorde current as cannot gas fee delay
+	case CannotGasFeeDelayRWEvent:
+		s.asyncRWSet.cannotGasFeeDelay = true
 	}
 }
 
@@ -375,19 +366,21 @@ func (s *MVStates) finalisePreviousRWSet() {
 		return
 	}
 	index := s.asyncRWSet.index
-	if err := s.quickFinaliseWithRWSet(s.asyncRWSet); err != nil {
-		log.Error("Finalise err when handle NewTxRWEvent", "tx", index, "err", err)
-		return
-	}
+	s.rwSets[index] = s.asyncRWSet
+
 	// check if there are RW with gas fee receiver for gas delay calculation
 	for _, addr := range s.gasFeeReceivers {
 		if _, exist := s.asyncRWSet.accReadSet[addr]; !exist {
 			continue
 		}
 		if _, exist := s.asyncRWSet.accReadSet[addr][AccountSelf]; exist {
-			s.cannotGasFeeDelay = true
+			s.rwSets[index].cannotGasFeeDelay = true
 			break
 		}
+	}
+	if err := s.innerFinalise(index, false); err != nil {
+		log.Error("Finalise err when handle NewTxRWEvent", "tx", index, "err", err)
+		return
 	}
 	s.resolveDepsMapCacheByWrites(index, s.asyncRWSet)
 }
@@ -518,19 +511,12 @@ func (s *MVStates) BatchRecordHandle() {
 }
 
 func (s *MVStates) stopAsyncRecorder() {
-	close(s.rwEventCh)
-	s.asyncWG.Wait()
-}
-
-// quickFinaliseWithRWSet it just store RWSet and inc pendingIndex
-func (s *MVStates) quickFinaliseWithRWSet(rwSet *RWSet) error {
-	index := rwSet.index
-	if s.nextFinaliseIndex != index {
-		return fmt.Errorf("finalise in wrong order, next: %d, input: %d", s.nextFinaliseIndex, index)
+	if s.asyncRunning {
+		s.asyncRunning = false
+		s.BatchRecordHandle()
+		close(s.rwEventCh)
+		s.asyncWG.Wait()
 	}
-	s.rwSets[index] = rwSet
-	s.nextFinaliseIndex++
-	return nil
 }
 
 // FinaliseWithRWSet it will put target write set into pending writes.
@@ -538,9 +524,6 @@ func (s *MVStates) FinaliseWithRWSet(rwSet *RWSet) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	index := rwSet.index
-	if s.nextFinaliseIndex > index {
-		return fmt.Errorf("finalise in wrong order, next: %d, input: %d", s.nextFinaliseIndex, index)
-	}
 	s.rwSets[index] = rwSet
 	// just finalise all previous txs
 	start := s.nextFinaliseIndex
@@ -548,7 +531,7 @@ func (s *MVStates) FinaliseWithRWSet(rwSet *RWSet) error {
 		start = index
 	}
 	for i := start; i <= index; i++ {
-		if err := s.innerFinalise(i); err != nil {
+		if err := s.innerFinalise(i, true); err != nil {
 			return err
 		}
 		s.resolveDepsMapCacheByWrites(i, s.rwSets[i])
@@ -560,7 +543,7 @@ func (s *MVStates) FinaliseWithRWSet(rwSet *RWSet) error {
 	return nil
 }
 
-func (s *MVStates) innerFinalise(index int) error {
+func (s *MVStates) innerFinalise(index int, applyWriteSet bool) error {
 	rwSet := s.rwSets[index]
 	if rwSet == nil {
 		return fmt.Errorf("finalise a non-exist RWSet, index: %d", index)
@@ -568,6 +551,12 @@ func (s *MVStates) innerFinalise(index int) error {
 
 	if index > s.nextFinaliseIndex {
 		return fmt.Errorf("finalise in wrong order, next: %d, input: %d", s.nextFinaliseIndex, index)
+	}
+
+	// reset nextFinaliseIndex to index+1, it may revert to previous txs
+	s.nextFinaliseIndex = index + 1
+	if !applyWriteSet {
+		return nil
 	}
 
 	// append to pending write set
@@ -593,8 +582,6 @@ func (s *MVStates) innerFinalise(index int) error {
 			s.pendingSlotWriteSet[addr][slot].Append(index)
 		}
 	}
-	// reset nextFinaliseIndex to index+1, it may revert to previous txs
-	s.nextFinaliseIndex = index + 1
 	return nil
 }
 
@@ -735,14 +722,10 @@ func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 
 // ResolveTxDAG generate TxDAG from RWSets
 func (s *MVStates) ResolveTxDAG(txCnt int) (TxDAG, error) {
-	s.BatchRecordHandle()
 	s.stopAsyncRecorder()
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if s.cannotGasFeeDelay {
-		return NewEmptyTxDAG(), nil
-	}
 	s.finalisePreviousRWSet()
 	if s.nextFinaliseIndex != txCnt {
 		return nil, fmt.Errorf("cannot resolve with wrong FinaliseIndex, expect: %v, now: %v", txCnt, s.nextFinaliseIndex)
@@ -750,6 +733,9 @@ func (s *MVStates) ResolveTxDAG(txCnt int) (TxDAG, error) {
 
 	txDAG := NewPlainTxDAG(txCnt)
 	for i := 0; i < txCnt; i++ {
+		if s.rwSets[i].cannotGasFeeDelay {
+			return NewEmptyTxDAG(), nil
+		}
 		deps := s.txDepCache[i].TxIndexes
 		if len(deps) <= (txCnt-1)/2 {
 			txDAG.TxDeps[i] = s.txDepCache[i]

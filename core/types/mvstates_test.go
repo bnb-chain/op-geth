@@ -25,7 +25,11 @@ func TestMVStates_SimpleResolveTxDAG(t *testing.T) {
 		mockRWSet(0, []interface{}{"0x00"}, []interface{}{"0x00"}),
 		mockRWSet(1, []interface{}{"0x01"}, []interface{}{"0x01"}),
 		mockRWSet(2, []interface{}{"0x02"}, []interface{}{"0x02"}),
+		mockRWSet(3, []interface{}{"0x03"}, []interface{}{"0x03"}),
+		mockRWSet(3, []interface{}{"0x03"}, []interface{}{"0x03"}),
 		mockRWSet(3, []interface{}{"0x00", "0x03"}, []interface{}{"0x03"}),
+	})
+	finaliseRWSets(t, ms, []*RWSet{
 		mockRWSet(4, []interface{}{"0x00", "0x04"}, []interface{}{"0x04"}),
 		mockRWSet(5, []interface{}{"0x01", "0x02", "0x05"}, []interface{}{"0x05"}),
 		mockRWSet(6, []interface{}{"0x02", "0x05", "0x06"}, []interface{}{"0x06"}),
@@ -36,8 +40,22 @@ func TestMVStates_SimpleResolveTxDAG(t *testing.T) {
 
 	dag, err := ms.ResolveTxDAG(10)
 	require.NoError(t, err)
+	time.Sleep(10 * time.Millisecond)
+	ms.Stop()
 	require.Equal(t, mockSimpleDAG(), dag)
 	t.Log(dag)
+}
+
+func TestMVStates_ResolveTxDAG_Async(t *testing.T) {
+	txCnt := 10000
+	rwSets := mockRandomRWSet(txCnt)
+	ms1 := NewMVStates(txCnt, nil).EnableAsyncGen()
+	for i := 0; i < txCnt; i++ {
+		require.NoError(t, ms1.FinaliseWithRWSet(rwSets[i]))
+	}
+	time.Sleep(100 * time.Millisecond)
+	_, err := ms1.ResolveTxDAG(txCnt)
+	require.NoError(t, err)
 }
 
 func TestMVStates_ResolveTxDAG_Compare(t *testing.T) {
@@ -221,7 +239,18 @@ func TestTxRecorder_Basic(t *testing.T) {
 	}
 	dag, err := ms.ResolveTxDAG(3)
 	require.NoError(t, err)
-	t.Log(dag)
+	require.Equal(t, "[]\n[0]\n[1]\n", dag.(*PlainTxDAG).String())
+}
+
+func TestTxRecorder_CannotDelayGasFee(t *testing.T) {
+	ms := NewMVStates(0, nil).EnableAsyncGen()
+	ms.RecordNewTx(0)
+	ms.RecordNewTx(1)
+	ms.RecordCannotDelayGasFee()
+	ms.RecordNewTx(2)
+	dag, err := ms.ResolveTxDAG(3)
+	require.NoError(t, err)
+	require.Equal(t, NewEmptyTxDAG(), dag)
 }
 
 func mockRWSet(index int, read []interface{}, write []interface{}) *RWSet {

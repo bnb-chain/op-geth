@@ -501,9 +501,6 @@ func (s *MVStates) FulfillRWSet(rwSet *RWSet, stat *ExeStat) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	index := rwSet.ver.TxIndex
-	if index < s.nextFinaliseIndex {
-		return errors.New("fulfill a finalized RWSet")
-	}
 	if stat != nil {
 		if stat.txIndex != index {
 			return errors.New("wrong execution stat")
@@ -531,7 +528,11 @@ func (s *MVStates) Finalise(index int) error {
 	defer s.lock.Unlock()
 
 	// just finalise all previous txs
-	for i := s.nextFinaliseIndex; i <= index; i++ {
+	start := s.nextFinaliseIndex
+	if start > index {
+		start = index
+	}
+	for i := start; i <= index; i++ {
 		if err := s.innerFinalise(i); err != nil {
 			return err
 		}
@@ -550,7 +551,7 @@ func (s *MVStates) innerFinalise(index int) error {
 		return fmt.Errorf("finalise a non-exist RWSet, index: %d", index)
 	}
 
-	if index != s.nextFinaliseIndex {
+	if index > s.nextFinaliseIndex {
 		return fmt.Errorf("finalise in wrong order, next: %d, input: %d", s.nextFinaliseIndex, index)
 	}
 

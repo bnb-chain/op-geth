@@ -1324,6 +1324,27 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	return nil
 }
 
+func (w *worker) estimateGasForTxDAG(env *environment) uint64 {
+	var gas uint64 = 0
+	if w.chain.TxDAGEnabledWhenMine() {
+		// 1. a 10k-transactions block need at most 64kB to store its transaction, and its data size grows linearly with the number of transactions
+		// 2. 100M gaslimit block can include at most 4761 = (100M/21000) transactions
+		//
+		// the total gas for TxDAG is calculated as follows:
+		//
+		// 		MaxBytesPerTx = 64 * 1024 / 10000 = 6.5 bytes ~ 7 bytes
+		// 		MaxTxsCanInclude uint64 = GasLimit / 21000
+		//		total = MaxBytesPerTx * NoZeroGas * MaxTxsCanInclude + params.TxGas
+		//
+		if w.chainConfig.IsIstanbul(env.header.Number) {
+			gas = 7*params.TxDataNonZeroGasEIP2028*(env.header.GasLimit/21000) + params.TxGas
+		} else {
+			gas = 7*params.TxDataNonZeroGasFrontier*(env.header.GasLimit/21000) + params.TxGas
+		}
+	}
+	return gas
+}
+
 // generateWork generates a sealing block based on the given parameters.
 func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	// TODO delete after debug performance metrics
@@ -1373,23 +1394,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	// forced transactions done, fill rest of block with transactions
 	if !genParams.noTxs {
 		// reserve gas for TxDAG
-		work.gasForTxDAG = 0
-		if w.chain.TxDAGEnabledWhenMine() {
-			// a 10k-transactions block need at most 64kB to store its transaction
-			// TxDAG transaction is a legacy transaction, so its accessList is nil, and no need to pay for accessList.
-			// gasForTxDAG = params.TxGas +  len(TxDAGBytes) x params.TxDataNonZeroGasFrontier
-			//  1. a 10k-transactions block consumes about 500M gas, which needs 64kB to store its TxData
-			//  3. a 4k-transactions block consumes about 200M gas, which needs 32kB to store its TxData
-			//  2. a 2k-transactions block consumes about 100M gas, which needs 14kB to store its TxData
-			//  3. and so on ...
-			// so we can estimate that a n-gaslimit block needs a TxDAG data byte of length: n/100M x 14kB
-			// it's cost totally about 0.003 ~ 0.01 of the header.GasLimit
-			if w.chainConfig.IsIstanbul(work.header.Number) {
-				work.gasForTxDAG = (work.header.GasLimit/100000000*14*1024)*params.TxDataNonZeroGasEIP2028 + params.TxGas
-			} else {
-				work.gasForTxDAG = (work.header.GasLimit/100000000*14*1024)*params.TxDataNonZeroGasFrontier + params.TxGas
-			}
-		}
+		work.gasForTxDAG = w.estimateGasForTxDAG(work)
 		// use shared interrupt if present
 		interrupt := genParams.interrupt
 		if interrupt == nil {

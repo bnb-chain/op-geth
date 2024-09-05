@@ -338,7 +338,7 @@ type MVStates struct {
 
 	// dependency map cache for generating TxDAG
 	// depMapCache[i].exist(j) means j->i, and i > j
-	txDepCache []TxDepMaker
+	txDepCache map[int]TxDepMaker
 
 	// async dep analysis
 	asyncGenChan  chan int
@@ -355,7 +355,7 @@ func NewMVStates(txCount int) *MVStates {
 		rwSets:              make(map[int]*RWSet, txCount),
 		pendingAccWriteSet:  make(map[common.Address]map[AccountState]*PendingWrites, txCount*8),
 		pendingSlotWriteSet: make(map[common.Address]map[common.Hash]*PendingWrites, txCount*8),
-		txDepCache:          make([]TxDepMaker, 0, txCount),
+		txDepCache:          make(map[int]TxDepMaker, txCount),
 		stats:               make(map[int]*ExeStat, txCount),
 	}
 }
@@ -382,7 +382,9 @@ func (s *MVStates) Copy() *MVStates {
 	}
 	ns := NewMVStates(len(s.rwSets))
 	ns.nextFinaliseIndex = s.nextFinaliseIndex
-	ns.txDepCache = append(ns.txDepCache, s.txDepCache...)
+	for k, v := range s.txDepCache {
+		ns.txDepCache[k] = v
+	}
 	for k, v := range s.rwSets {
 		ns.rwSets[k] = v
 	}
@@ -578,7 +580,8 @@ func (s *MVStates) innerFinalise(index int) error {
 			s.pendingSlotWriteSet[k][slot].Append(&item)
 		}
 	}
-	s.nextFinaliseIndex++
+	// reset nextFinaliseIndex to index+1, it may revert to previous txs
+	s.nextFinaliseIndex = index + 1
 	return nil
 }
 
@@ -601,7 +604,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
 	depMap := NewTxDepMap(0)
 	if rwSet.excludedTx {
-		s.txDepCache = append(s.txDepCache, depMap)
+		s.txDepCache[index] = depMap
 		return
 	}
 	// check tx dependency, only check key, skip version
@@ -633,14 +636,16 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 			}
 		}
 	}
+	log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depMap.deps())
 	// clear redundancy deps compared with prev
 	preDeps := depMap.deps()
 	for _, prev := range preDeps {
-		for _, tx := range s.txDepCache[prev].deps() {
+		for _, tx := range s.txDepCache[int(prev)].deps() {
 			depMap.remove(tx)
 		}
 	}
-	s.txDepCache = append(s.txDepCache, depMap)
+	log.Debug("resolveDepsMapCacheByWrites after clean", "tx", index, "deps", depMap.deps())
+	s.txDepCache[index] = depMap
 }
 
 // resolveDepsCache must be executed in order
@@ -648,7 +653,7 @@ func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
 	depMap := NewTxDepMap(0)
 	if rwSet.excludedTx {
-		s.txDepCache = append(s.txDepCache, depMap)
+		s.txDepCache[index] = depMap
 		return
 	}
 	for prev := 0; prev < index; prev++ {
@@ -682,7 +687,7 @@ func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 			}
 		}
 	}
-	s.txDepCache = append(s.txDepCache, depMap)
+	s.txDepCache[index] = depMap
 }
 
 // ResolveTxDAG generate TxDAG from RWSets
@@ -712,7 +717,7 @@ func (s *MVStates) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (Tx
 			}
 		}
 		txDAG.TxDeps[i].TxIndexes = []uint64{}
-		if len(s.txDepCache) <= i {
+		if s.txDepCache[i] == nil {
 			s.resolveDepsMapCacheByWrites(i, s.rwSets[i])
 		}
 		if s.rwSets[i].excludedTx {

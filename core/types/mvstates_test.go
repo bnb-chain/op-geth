@@ -89,7 +89,11 @@ func TestMVStates_AsyncDepGen_SimpleResolveTxDAG(t *testing.T) {
 		mockRWSet(0, []interface{}{"0x00"}, []interface{}{"0x00"}),
 		mockRWSet(1, []interface{}{"0x01"}, []interface{}{"0x01"}),
 		mockRWSet(2, []interface{}{"0x02"}, []interface{}{"0x02"}),
+		mockRWSet(3, []interface{}{"0x03"}, []interface{}{"0x03"}),
+		mockRWSet(3, []interface{}{"0x03"}, []interface{}{"0x03"}),
 		mockRWSet(3, []interface{}{"0x00", "0x03"}, []interface{}{"0x03"}),
+	})
+	finaliseRWSets(t, ms, []*RWSet{
 		mockRWSet(4, []interface{}{"0x00", "0x04"}, []interface{}{"0x04"}),
 		mockRWSet(5, []interface{}{"0x01", "0x02", "0x05"}, []interface{}{"0x05"}),
 		mockRWSet(6, []interface{}{"0x02", "0x05", "0x06"}, []interface{}{"0x06"}),
@@ -509,9 +513,9 @@ func mockRandomRWSet(count int) []*RWSet {
 }
 
 func finaliseRWSets(t *testing.T, mv *MVStates, rwSets []*RWSet) {
-	for i, rwSet := range rwSets {
+	for _, rwSet := range rwSets {
 		require.NoError(t, mv.FulfillRWSet(rwSet, nil))
-		require.NoError(t, mv.Finalise(i))
+		require.NoError(t, mv.Finalise(rwSet.ver.TxIndex))
 	}
 }
 

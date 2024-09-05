@@ -1099,7 +1099,7 @@ func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIn
 	}
 
 	enc, _ := types.EncodeTxDAG(txDAG)
-	log.Debug("EncodeTxDAGCalldata", "tx", txDAG.TxCount(), "enc", len(enc), "data", data, "dag", txDAG)
+	log.Debug("EncodeTxDAGCalldata", "tx", txDAG.TxCount(), "enc", len(enc), "data", len(data), "dag", txDAG)
 	// Create the transaction
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    nonce,

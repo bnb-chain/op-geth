@@ -912,6 +912,7 @@ func (w *worker) applyTransaction(env *environment, tx *types.Transaction) (*typ
 	)
 	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
+		log.Debug("ApplyTransaction err", "block", env.header.Number.Uint64(), "tx", env.tcount, "err", err)
 		env.state.RevertToSnapshot(snap)
 		env.gasPool.SetGas(gp)
 	}
@@ -1388,6 +1389,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	start := time.Now()
 	if w.chain.TxDAGEnabledWhenMine() {
 		work.state.ResetMVStates(0)
+		log.Debug("ResetMVStates", "block", work.header.Number.Uint64())
 	}
 	for _, tx := range genParams.txs {
 		from, _ := types.Sender(work.signer, tx)

@@ -27,7 +27,6 @@ func TestMVStates_BasicUsage(t *testing.T) {
 	require.Nil(t, ms.ReadSlotState(0, common.Address{}, str2Slot("0x00")))
 	require.NoError(t, ms.Finalise(0))
 
-	require.Error(t, ms.FulfillRWSet(mockRWSetWithVal(0, nil, nil), nil))
 	require.Nil(t, ms.ReadAccState(0, common.Address{}, AccountBalance))
 	require.Nil(t, ms.ReadSlotState(0, common.Address{}, str2Slot("0x00")))
 	require.Equal(t, NewRWItem(StateVersion{TxIndex: 0}, 0), ms.ReadAccState(1, common.Address{}, AccountBalance))

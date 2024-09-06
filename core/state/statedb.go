@@ -1713,6 +1713,8 @@ func (s *StateDB) StartTxRecorder(isExcludeTx bool) {
 		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {
 			log.Error("MVStates SystemTx Finalise err", "err", err)
 		}
+		s.mvStates.RecordReadDone()
+		s.mvStates.RecordWriteDone()
 		return
 	}
 	s.mvStates.RecordNewTx(s.txIndex)

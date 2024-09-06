@@ -1048,6 +1048,7 @@ func (w *worker) appendTxDAG(env *environment) {
 		log.Warn("failed to generate DAG tx", "err", err)
 		return
 	}
+	env.state.SetTxContext(txForDAG.Hash(), env.tcount)
 	_, err = w.commitTransaction(env, txForDAG)
 	if err != nil {
 		log.Warn("failed to commit DAG tx", "err", err)
@@ -1098,8 +1099,7 @@ func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIn
 		return nil, fmt.Errorf("failed to encode txDAG, err: %v", err)
 	}
 
-	enc, _ := types.EncodeTxDAG(txDAG)
-	log.Debug("EncodeTxDAGCalldata", "tx", txDAG.TxCount(), "enc", len(enc), "data", len(data), "dag", txDAG)
+	log.Debug("EncodeTxDAGCalldata", "tx", txDAG.TxCount(), "data", len(data), "dag", txDAG)
 	// Create the transaction
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    nonce,

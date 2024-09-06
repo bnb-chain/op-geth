@@ -386,6 +386,9 @@ func (s *MVStates) finalisePreviousRWSet() {
 }
 
 func (s *MVStates) RecordNewTx(index int) {
+	if !s.asyncRunning {
+		return
+	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
 		s.rwEventCache[s.rwEventCacheIndex].Event = NewTxRWEvent
 		s.rwEventCache[s.rwEventCacheIndex].Index = index
@@ -410,7 +413,7 @@ func (s *MVStates) RecordWriteDone() {
 }
 
 func (s *MVStates) RecordAccountRead(addr common.Address, state AccountState) {
-	if !s.recordingRead {
+	if !s.asyncRunning || !s.recordingRead {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
@@ -429,7 +432,7 @@ func (s *MVStates) RecordAccountRead(addr common.Address, state AccountState) {
 }
 
 func (s *MVStates) RecordStorageRead(addr common.Address, slot common.Hash) {
-	if !s.recordingRead {
+	if !s.asyncRunning || !s.recordingRead {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
@@ -448,7 +451,7 @@ func (s *MVStates) RecordStorageRead(addr common.Address, slot common.Hash) {
 }
 
 func (s *MVStates) RecordAccountWrite(addr common.Address, state AccountState) {
-	if !s.recordingWrite {
+	if !s.asyncRunning || !s.recordingWrite {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
@@ -467,7 +470,7 @@ func (s *MVStates) RecordAccountWrite(addr common.Address, state AccountState) {
 }
 
 func (s *MVStates) RecordStorageWrite(addr common.Address, slot common.Hash) {
-	if !s.recordingWrite {
+	if !s.asyncRunning || !s.recordingWrite {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
@@ -486,7 +489,7 @@ func (s *MVStates) RecordStorageWrite(addr common.Address, slot common.Hash) {
 }
 
 func (s *MVStates) RecordCannotDelayGasFee() {
-	if !s.recordingWrite {
+	if !s.asyncRunning || !s.recordingWrite {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
@@ -501,7 +504,7 @@ func (s *MVStates) RecordCannotDelayGasFee() {
 }
 
 func (s *MVStates) BatchRecordHandle() {
-	if s.rwEventCacheIndex == 0 {
+	if !s.asyncRunning || s.rwEventCacheIndex == 0 {
 		return
 	}
 	s.rwEventCh <- s.rwEventCache[:s.rwEventCacheIndex]

@@ -26,7 +26,7 @@ const (
 
 func init() {
 	for i := 0; i < initRWEventCacheSize; i++ {
-		cache := make([]RWEventItem, 200)
+		cache := make([]RWEventItem, 10000)
 		rwEventCachePool.Put(&cache)
 	}
 }
@@ -172,17 +172,17 @@ type RWEventItem struct {
 	Slot  common.Hash
 }
 
-type PendingWrites struct {
+type StateWrites struct {
 	list []int
 }
 
-func NewPendingWrites() *PendingWrites {
-	return &PendingWrites{
+func NewStateWrites() *StateWrites {
+	return &StateWrites{
 		list: make([]int, 0),
 	}
 }
 
-func (w *PendingWrites) Append(pw int) {
+func (w *StateWrites) Append(pw int) {
 	if i, found := w.SearchTxIndex(pw); found {
 		w.list[i] = pw
 		return
@@ -197,7 +197,7 @@ func (w *PendingWrites) Append(pw int) {
 	}
 }
 
-func (w *PendingWrites) SearchTxIndex(txIndex int) (int, bool) {
+func (w *StateWrites) SearchTxIndex(txIndex int) (int, bool) {
 	n := len(w.list)
 	i, j := 0, n
 	for i < j {
@@ -212,19 +212,19 @@ func (w *PendingWrites) SearchTxIndex(txIndex int) (int, bool) {
 	return i, i < n && w.list[i] == txIndex
 }
 
-func (w *PendingWrites) FindPrevWrites(txIndex int) []int {
+func (w *StateWrites) FindLastWrite(txIndex int) int {
 	var i, _ = w.SearchTxIndex(txIndex)
 	for j := i - 1; j >= 0; j-- {
 		if w.list[j] < txIndex {
-			return w.list[:j+1]
+			return w.list[j]
 		}
 	}
 
-	return nil
+	return -1
 }
 
-func (w *PendingWrites) Copy() *PendingWrites {
-	np := &PendingWrites{}
+func (w *StateWrites) Copy() *StateWrites {
+	np := &StateWrites{}
 	for i, item := range w.list {
 		np.list[i] = item
 	}
@@ -240,8 +240,8 @@ var (
 
 type MVStates struct {
 	rwSets              map[int]*RWSet
-	pendingAccWriteSet  map[common.Address]map[AccountState]*PendingWrites
-	pendingSlotWriteSet map[common.Address]map[common.Hash]*PendingWrites
+	pendingAccWriteSet  map[common.Address]map[AccountState]*StateWrites
+	pendingSlotWriteSet map[common.Address]map[common.Hash]*StateWrites
 	nextFinaliseIndex   int
 	gasFeeReceivers     []common.Address
 	// dependency map cache for generating TxDAG
@@ -264,8 +264,8 @@ type MVStates struct {
 func NewMVStates(txCount int, gasFeeReceivers []common.Address) *MVStates {
 	m := &MVStates{
 		rwSets:              make(map[int]*RWSet, txCount),
-		pendingAccWriteSet:  make(map[common.Address]map[AccountState]*PendingWrites, txCount),
-		pendingSlotWriteSet: make(map[common.Address]map[common.Hash]*PendingWrites, txCount),
+		pendingAccWriteSet:  make(map[common.Address]map[AccountState]*StateWrites, txCount),
+		pendingSlotWriteSet: make(map[common.Address]map[common.Hash]*StateWrites, txCount),
 		txDepCache:          make(map[int]TxDep, txCount),
 		rwEventCh:           make(chan []RWEventItem, 100),
 		gasFeeReceivers:     gasFeeReceivers,
@@ -301,7 +301,7 @@ func (s *MVStates) Copy() *MVStates {
 	for addr, sub := range s.pendingAccWriteSet {
 		for state, writes := range sub {
 			if _, ok := ns.pendingAccWriteSet[addr]; !ok {
-				ns.pendingAccWriteSet[addr] = make(map[AccountState]*PendingWrites)
+				ns.pendingAccWriteSet[addr] = make(map[AccountState]*StateWrites)
 			}
 			ns.pendingAccWriteSet[addr][state] = writes.Copy()
 		}
@@ -309,7 +309,7 @@ func (s *MVStates) Copy() *MVStates {
 	for addr, sub := range s.pendingSlotWriteSet {
 		for slot, writes := range sub {
 			if _, ok := ns.pendingSlotWriteSet[addr]; !ok {
-				ns.pendingSlotWriteSet[addr] = make(map[common.Hash]*PendingWrites)
+				ns.pendingSlotWriteSet[addr] = make(map[common.Hash]*StateWrites)
 			}
 			ns.pendingSlotWriteSet[addr][slot] = writes.Copy()
 		}
@@ -401,7 +401,9 @@ func (s *MVStates) RecordNewTx(index int) {
 	s.rwEventCacheIndex++
 	s.recordingRead = true
 	s.recordingWrite = true
-	s.BatchRecordHandle()
+	if index%10 == 0 {
+		s.BatchRecordHandle()
+	}
 }
 
 func (s *MVStates) RecordReadDone() {
@@ -565,22 +567,22 @@ func (s *MVStates) innerFinalise(index int, applyWriteSet bool) error {
 	// append to pending write set
 	for addr, sub := range rwSet.accWriteSet {
 		if _, exist := s.pendingAccWriteSet[addr]; !exist {
-			s.pendingAccWriteSet[addr] = make(map[AccountState]*PendingWrites)
+			s.pendingAccWriteSet[addr] = make(map[AccountState]*StateWrites)
 		}
 		for state := range sub {
 			if _, exist := s.pendingAccWriteSet[addr][state]; !exist {
-				s.pendingAccWriteSet[addr][state] = NewPendingWrites()
+				s.pendingAccWriteSet[addr][state] = NewStateWrites()
 			}
 			s.pendingAccWriteSet[addr][state].Append(index)
 		}
 	}
 	for addr, sub := range rwSet.slotWriteSet {
 		if _, exist := s.pendingSlotWriteSet[addr]; !exist {
-			s.pendingSlotWriteSet[addr] = make(map[common.Hash]*PendingWrites)
+			s.pendingSlotWriteSet[addr] = make(map[common.Hash]*StateWrites)
 		}
 		for slot := range sub {
 			if _, exist := s.pendingSlotWriteSet[addr][slot]; !exist {
-				s.pendingSlotWriteSet[addr][slot] = NewPendingWrites()
+				s.pendingSlotWriteSet[addr][slot] = NewStateWrites()
 			}
 			s.pendingSlotWriteSet[addr][slot].Append(index)
 		}
@@ -591,10 +593,10 @@ func (s *MVStates) innerFinalise(index int, applyWriteSet bool) error {
 func (s *MVStates) finaliseSlotWrite(index int, addr common.Address, slot common.Hash) {
 	// append to pending write set
 	if _, exist := s.pendingSlotWriteSet[addr]; !exist {
-		s.pendingSlotWriteSet[addr] = make(map[common.Hash]*PendingWrites)
+		s.pendingSlotWriteSet[addr] = make(map[common.Hash]*StateWrites)
 	}
 	if _, exist := s.pendingSlotWriteSet[addr][slot]; !exist {
-		s.pendingSlotWriteSet[addr][slot] = NewPendingWrites()
+		s.pendingSlotWriteSet[addr][slot] = NewStateWrites()
 	}
 	s.pendingSlotWriteSet[addr][slot].Append(index)
 }
@@ -602,22 +604,22 @@ func (s *MVStates) finaliseSlotWrite(index int, addr common.Address, slot common
 func (s *MVStates) finaliseAccWrite(index int, addr common.Address, state AccountState) {
 	// append to pending write set
 	if _, exist := s.pendingAccWriteSet[addr]; !exist {
-		s.pendingAccWriteSet[addr] = make(map[AccountState]*PendingWrites)
+		s.pendingAccWriteSet[addr] = make(map[AccountState]*StateWrites)
 	}
 	if _, exist := s.pendingAccWriteSet[addr][state]; !exist {
-		s.pendingAccWriteSet[addr][state] = NewPendingWrites()
+		s.pendingAccWriteSet[addr][state] = NewStateWrites()
 	}
 	s.pendingAccWriteSet[addr][state].Append(index)
 }
 
-func (s *MVStates) queryAccWrites(addr common.Address, state AccountState) *PendingWrites {
+func (s *MVStates) queryAccWrites(addr common.Address, state AccountState) *StateWrites {
 	if _, exist := s.pendingAccWriteSet[addr]; !exist {
 		return nil
 	}
 	return s.pendingAccWriteSet[addr][state]
 }
 
-func (s *MVStates) querySlotWrites(addr common.Address, slot common.Hash) *PendingWrites {
+func (s *MVStates) querySlotWrites(addr common.Address, slot common.Hash) *StateWrites {
 	if _, exist := s.pendingSlotWriteSet[addr]; !exist {
 		return nil
 	}
@@ -643,14 +645,15 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 			if writes == nil {
 				continue
 			}
-			items := writes.FindPrevWrites(index)
-			for _, item := range items {
-				tx := uint64(item)
-				if depMap.exist(tx) {
-					continue
-				}
-				depMap.add(tx)
+			find := writes.FindLastWrite(index)
+			if find < 0 {
+				continue
 			}
+			tx := uint64(find)
+			if depMap.exist(tx) {
+				continue
+			}
+			depMap.add(tx)
 		}
 	}
 	for addr, sub := range rwSet.slotReadSet {
@@ -659,14 +662,15 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 			if writes == nil {
 				continue
 			}
-			items := writes.FindPrevWrites(index)
-			for _, item := range items {
-				tx := uint64(item)
-				if depMap.exist(tx) {
-					continue
-				}
-				depMap.add(tx)
+			find := writes.FindLastWrite(index)
+			if find < 0 {
+				continue
 			}
+			tx := uint64(find)
+			if depMap.exist(tx) {
+				continue
+			}
+			depMap.add(tx)
 		}
 	}
 	//log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depMap.deps())

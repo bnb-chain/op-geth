@@ -129,6 +129,30 @@ func BenchmarkResolveTxDAGByWritesInMVStates(b *testing.B) {
 	}
 }
 
+func BenchmarkResolveTxDAGByWritesInMVStates_100PercentConflict(b *testing.B) {
+	rwSets := mockSameRWSet(mockRWSetSize)
+	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
+	for _, rwSet := range rwSets {
+		ms1.FinaliseWithRWSet(rwSet)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		resolveDepsMapCacheByWritesInMVStates(ms1)
+	}
+}
+
+func BenchmarkResolveTxDAGByWritesInMVStates_0PercentConflict(b *testing.B) {
+	rwSets := mockDifferentRWSet(mockRWSetSize)
+	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
+	for _, rwSet := range rwSets {
+		ms1.FinaliseWithRWSet(rwSet)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		resolveDepsMapCacheByWritesInMVStates(ms1)
+	}
+}
+
 func BenchmarkMVStates_Finalise(b *testing.B) {
 	rwSets := mockRandomRWSet(mockRWSetSize)
 	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
@@ -307,6 +331,30 @@ func mockRandomRWSet(count int) []*RWSet {
 		for j := 0; j < 5; j++ {
 			read = append(read, fmt.Sprintf("rw-%d-%d", j, rand.Int()))
 		}
+		// random write
+		s := mockRWSet(i, read, write)
+		ret = append(ret, s)
+	}
+	return ret
+}
+
+func mockSameRWSet(count int) []*RWSet {
+	var ret []*RWSet
+	for i := 0; i < count; i++ {
+		read := []interface{}{"0xa0", "0xa1", fmt.Sprintf("0x%d", i), fmt.Sprintf("0x%d", i)}
+		write := []interface{}{"0xa0", fmt.Sprintf("0x%d", i)}
+		// random write
+		s := mockRWSet(i, read, write)
+		ret = append(ret, s)
+	}
+	return ret
+}
+
+func mockDifferentRWSet(count int) []*RWSet {
+	var ret []*RWSet
+	for i := 0; i < count; i++ {
+		read := []interface{}{fmt.Sprintf("0x%d", i), fmt.Sprintf("0x%d", i)}
+		write := []interface{}{fmt.Sprintf("0x%d", i)}
 		// random write
 		s := mockRWSet(i, read, write)
 		ret = append(ret, s)

@@ -239,6 +239,7 @@ func TestTxRecorder_Basic(t *testing.T) {
 	}
 	ms := NewMVStates(0, nil).EnableAsyncGen()
 	for _, item := range sets {
+		t.Log(item)
 		ms.RecordNewTx(item.index)
 		for addr, sub := range item.accReadSet {
 			for state := range sub {

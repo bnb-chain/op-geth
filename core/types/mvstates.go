@@ -115,43 +115,76 @@ func (s *RWSet) WithExcludedTxFlag() *RWSet {
 
 func (s *RWSet) String() string {
 	builder := strings.Builder{}
-	builder.WriteString(fmt.Sprintf("tx: %v\nreadSet: [", s.index))
+	builder.WriteString(fmt.Sprintf("{tx: %v", s.index))
+	builder.WriteString(", accReadSet: [")
 	i := 0
-	for key, _ := range s.accReadSet {
+	for addr, sub := range s.accReadSet {
 		if i > 0 {
-			builder.WriteString(fmt.Sprintf(", %v", key.String()))
-			continue
+			builder.WriteString(", ")
 		}
-		builder.WriteString(fmt.Sprintf("%v", key.String()))
-		i++
-	}
-	for key, _ := range s.slotReadSet {
-		if i > 0 {
-			builder.WriteString(fmt.Sprintf(", %v", key.String()))
-			continue
+		builder.WriteString(fmt.Sprintf("{addr: \"%v\", states: [", addr))
+		j := 0
+		for key := range sub {
+			if j > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(fmt.Sprintf("%v", key))
+			j++
 		}
-		builder.WriteString(fmt.Sprintf("%v", key.String()))
-		i++
+		builder.WriteString("]}")
 	}
-	builder.WriteString("]\nwriteSet: [")
+	builder.WriteString("], slotReadSet: [")
 	i = 0
-	for key, _ := range s.accWriteSet {
+	for addr, sub := range s.slotReadSet {
 		if i > 0 {
-			builder.WriteString(fmt.Sprintf(", %v", key.String()))
-			continue
+			builder.WriteString(", ")
 		}
-		builder.WriteString(fmt.Sprintf("%v", key.String()))
-		i++
+		builder.WriteString(fmt.Sprintf("{addr: \"%v\", slots: [", addr))
+		j := 0
+		for key := range sub {
+			if j > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(fmt.Sprintf("\"%v\"", key.String()))
+			j++
+		}
+		builder.WriteString("]}")
 	}
-	for key, _ := range s.slotWriteSet {
+	builder.WriteString("], accWriteSet: [")
+	i = 0
+	for addr, sub := range s.accWriteSet {
 		if i > 0 {
-			builder.WriteString(fmt.Sprintf(", %v", key.String()))
-			continue
+			builder.WriteString(", ")
 		}
-		builder.WriteString(fmt.Sprintf("%v", key.String()))
-		i++
+		builder.WriteString(fmt.Sprintf("{addr: \"%v\", states: [", addr))
+		j := 0
+		for key := range sub {
+			if j > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(fmt.Sprintf("%v", key))
+			j++
+		}
+		builder.WriteString("]}")
 	}
-	builder.WriteString("]\n")
+	builder.WriteString("], slotWriteSet: [")
+	i = 0
+	for addr, sub := range s.slotWriteSet {
+		if i > 0 {
+			builder.WriteString(", ")
+		}
+		builder.WriteString(fmt.Sprintf("{addr: \"%v\", slots: [", addr))
+		j := 0
+		for key := range sub {
+			if j > 0 {
+				builder.WriteString(", ")
+			}
+			builder.WriteString(fmt.Sprintf("\"%v\"", key.String()))
+			j++
+		}
+		builder.WriteString("]}")
+	}
+	builder.WriteString("]}")
 	return builder.String()
 }
 

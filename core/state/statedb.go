@@ -1707,7 +1707,7 @@ func (s *StateDB) StartTxRecorder(isExcludeTx bool) {
 	if s.mvStates == nil {
 		return
 	}
-	log.Debug("StartTxRecorder", "tx", s.txIndex)
+	//log.Debug("StartTxRecorder", "tx", s.txIndex)
 	if isExcludeTx {
 		rwSet := types.NewRWSet(s.txIndex).WithExcludedTxFlag()
 		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {

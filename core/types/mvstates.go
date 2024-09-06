@@ -515,8 +515,8 @@ func (s *MVStates) BatchRecordHandle() {
 
 func (s *MVStates) stopAsyncRecorder() {
 	if s.asyncRunning {
-		s.asyncRunning = false
 		s.BatchRecordHandle()
+		s.asyncRunning = false
 		close(s.rwEventCh)
 		s.asyncWG.Wait()
 	}
@@ -538,9 +538,9 @@ func (s *MVStates) FinaliseWithRWSet(rwSet *RWSet) error {
 			return err
 		}
 		s.resolveDepsMapCacheByWrites(i, s.rwSets[i])
-		log.Debug("Finalise the reads/writes", "index", i,
-			"readCnt", len(s.rwSets[i].accReadSet)+len(s.rwSets[i].slotReadSet),
-			"writeCnt", len(s.rwSets[i].accWriteSet)+len(s.rwSets[i].slotWriteSet))
+		//log.Debug("Finalise the reads/writes", "index", i,
+		//	"readCnt", len(s.rwSets[i].accReadSet)+len(s.rwSets[i].slotReadSet),
+		//	"writeCnt", len(s.rwSets[i].accWriteSet)+len(s.rwSets[i].slotWriteSet))
 	}
 
 	return nil
@@ -669,7 +669,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 			}
 		}
 	}
-	log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depMap.deps())
+	//log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depMap.deps())
 	// clear redundancy deps compared with prev
 	preDeps := depMap.deps()
 	for _, prev := range preDeps {
@@ -677,7 +677,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 			depMap.remove(tx)
 		}
 	}
-	log.Debug("resolveDepsMapCacheByWrites after clean", "tx", index, "deps", depMap.deps())
+	//log.Debug("resolveDepsMapCacheByWrites after clean", "tx", index, "deps", depMap.deps())
 	s.txDepCache[index] = NewTxDep(depMap.deps())
 }
 

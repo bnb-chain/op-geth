@@ -129,7 +129,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		dag, err := statedb.ResolveTxDAG(len(block.Transactions()))
 		if err == nil {
 			// TODO(galaio): check TxDAG correctness?
-			log.Debug("Process TxDAG result", "block", block.NumberU64(), "tx", len(block.Transactions()), "txDAG", dag)
+			log.Debug("Process TxDAG result", "block", block.NumberU64(), "tx", len(block.Transactions()), "txDAG", dag.TxCount())
 			if metrics.EnabledExpensive {
 				go types.EvaluateTxDAGPerformance(dag)
 			}

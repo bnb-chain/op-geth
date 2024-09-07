@@ -131,6 +131,7 @@ func (s *RWSet) String() string {
 			builder.WriteString(fmt.Sprintf("%v", key))
 			j++
 		}
+		i++
 		builder.WriteString("]}")
 	}
 	builder.WriteString("], slotReadSet: [")
@@ -148,6 +149,7 @@ func (s *RWSet) String() string {
 			builder.WriteString(fmt.Sprintf("\"%v\"", key.String()))
 			j++
 		}
+		i++
 		builder.WriteString("]}")
 	}
 	builder.WriteString("], accWriteSet: [")
@@ -165,6 +167,7 @@ func (s *RWSet) String() string {
 			builder.WriteString(fmt.Sprintf("%v", key))
 			j++
 		}
+		i++
 		builder.WriteString("]}")
 	}
 	builder.WriteString("], slotWriteSet: [")
@@ -182,6 +185,7 @@ func (s *RWSet) String() string {
 			builder.WriteString(fmt.Sprintf("\"%v\"", key.String()))
 			j++
 		}
+		i++
 		builder.WriteString("]}")
 	}
 	builder.WriteString("]}")

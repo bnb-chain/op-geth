@@ -239,7 +239,6 @@ func TestTxRecorder_Basic(t *testing.T) {
 	}
 	ms := NewMVStates(0, nil).EnableAsyncGen()
 	for _, item := range sets {
-		t.Log(item)
 		ms.RecordNewTx(item.index)
 		for addr, sub := range item.accReadSet {
 			for state := range sub {
@@ -265,6 +264,17 @@ func TestTxRecorder_Basic(t *testing.T) {
 	dag, err := ms.ResolveTxDAG(3)
 	require.NoError(t, err)
 	require.Equal(t, "[]\n[0]\n[1]\n", dag.(*PlainTxDAG).String())
+}
+
+func TestRWSet(t *testing.T) {
+	set := NewRWSet(0)
+	mockRWSetWithAddr(set, common.Address{1}, []interface{}{AccountSelf, AccountBalance, "0x00"},
+		[]interface{}{AccountBalance, AccountCodeHash, "0x00"})
+	mockRWSetWithAddr(set, common.Address{2}, []interface{}{AccountSelf, AccountBalance, "0x01"},
+		[]interface{}{AccountBalance, AccountCodeHash, "0x01"})
+	mockRWSetWithAddr(set, common.Address{3}, []interface{}{AccountSelf, AccountBalance, "0x01", "0x01"},
+		[]interface{}{AccountBalance, AccountCodeHash, "0x01"})
+	t.Log(set)
 }
 
 func TestTxRecorder_CannotDelayGasFee(t *testing.T) {
@@ -298,6 +308,31 @@ func mockRWSet(index int, read []interface{}, write []interface{}) *RWSet {
 			set.accWriteSet[common.Address{}][state] = struct{}{}
 		} else {
 			set.slotWriteSet[common.Address{}][str2Slot(k.(string))] = struct{}{}
+		}
+	}
+
+	return set
+}
+
+func mockRWSetWithAddr(set *RWSet, addr common.Address, read []interface{}, write []interface{}) *RWSet {
+	set.accReadSet[addr] = map[AccountState]struct{}{}
+	set.accWriteSet[addr] = map[AccountState]struct{}{}
+	set.slotReadSet[addr] = map[common.Hash]struct{}{}
+	set.slotWriteSet[addr] = map[common.Hash]struct{}{}
+	for _, k := range read {
+		state, ok := k.(AccountState)
+		if ok {
+			set.accReadSet[addr][state] = struct{}{}
+		} else {
+			set.slotReadSet[addr][str2Slot(k.(string))] = struct{}{}
+		}
+	}
+	for _, k := range write {
+		state, ok := k.(AccountState)
+		if ok {
+			set.accWriteSet[addr][state] = struct{}{}
+		} else {
+			set.slotWriteSet[addr][str2Slot(k.(string))] = struct{}{}
 		}
 	}
 

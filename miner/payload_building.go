@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -276,22 +277,32 @@ func (payload *Payload) stopBuilding() {
 // missing the block), it attempts to retrieve the block header from peers and triggers
 //
 // blockHash: The hash of the latest block that needs to be recovered and fixed.
-func (w *worker) fix(blockHash common.Hash) {
+func (w *worker) fix(blockHash common.Hash, resultChan chan FixResult) {
 	log.Info("Fix operation started")
 
+	// Try to recover from local data
 	err := w.fixManager.RecoverFromLocal(w, blockHash)
 	if err != nil {
-		log.Warn("Local recovery failed, trying to recover from peers", "err", err)
+		// Only proceed to peer recovery if the error is "block not found in local chain"
+		if strings.Contains(err.Error(), "block not found") {
+			log.Warn("Local recovery failed, trying to recover from peers", "err", err)
 
-		err = w.fixManager.RecoverFromPeer(blockHash)
-		if err != nil {
-			log.Error("Failed to recover from peers", "err", err)
+			// Try to recover from peers
+			err = w.fixManager.RecoverFromPeer(blockHash)
+			if err != nil {
+				log.Error("Failed to recover from peers", "err", err)
+				resultChan <- FixResult{Success: false, Err: err}
+				return
+			}
+		} else {
+			log.Error("Failed to recover from local data", "err", err)
+			resultChan <- FixResult{Success: false, Err: err}
 			return
 		}
 	}
 
-	log.Info("Fix operation completed")
-
+	log.Info("Fix operation completed successfully")
+	resultChan <- FixResult{Success: true, Err: nil}
 }
 
 // buildPayload builds the payload according to the provided parameters.
@@ -439,7 +450,7 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 // This function reconstructs the block using the provided BuildPayloadArgs and
 // attempts to update the payload in the system. It performs validation of the
 // block parameters and updates the payload if the block is successfully built.
-func (w *worker) retryPayloadUpdate(args *BuildPayloadArgs, payload *Payload) {
+func (w *worker) retryPayloadUpdate(args *BuildPayloadArgs, payload *Payload) error {
 	fullParams := &generateParams{
 		timestamp:   args.Timestamp,
 		forceTime:   true,
@@ -457,7 +468,8 @@ func (w *worker) retryPayloadUpdate(args *BuildPayloadArgs, payload *Payload) {
 	// validate the BuildPayloadArgs here.
 	_, err := w.validateParams(fullParams)
 	if err != nil {
-		return
+		log.Error("Failed to validate payload parameters", "id", payload.id, "err", err)
+		return fmt.Errorf("failed to validate payload parameters: %w", err)
 	}
 
 	// set shared interrupt
@@ -466,13 +478,19 @@ func (w *worker) retryPayloadUpdate(args *BuildPayloadArgs, payload *Payload) {
 	r := w.getSealingBlock(fullParams)
 	if r.err != nil {
 		log.Error("Failed to build full payload after fix", "id", payload.id, "err", r.err)
-		return
+		return fmt.Errorf("failed to build full payload after fix: %w", r.err)
 	}
 
 	payload.update(r, 0, func() {
 		w.cacheMiningBlock(r.block, r.env)
 	})
+
+	if r.err == nil {
+		fullParams.isUpdate = true
+	}
+
 	log.Info("Successfully updated payload after fix", "id", payload.id)
+	return nil
 }
 
 func (w *worker) cacheMiningBlock(block *types.Block, env *environment) {

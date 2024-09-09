@@ -2204,8 +2204,8 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 	return 0, nil
 }
 
-func (bc *BlockChain) RecoverAncestors(block *types.Block) (common.Hash, error) {
-	return bc.recoverAncestorsWithSethead(block)
+func (bc *BlockChain) RecoverStateAndSetHead(block *types.Block) (common.Hash, error) {
+	return bc.recoverStateAndSetHead(block)
 }
 
 // recoverAncestors finds the closest ancestor with available state and re-execute
@@ -2253,57 +2253,6 @@ func (bc *BlockChain) recoverAncestors(block *types.Block) (common.Hash, error) 
 			b = bc.GetBlock(hashes[i], numbers[i])
 		}
 		if _, err := bc.insertChain(types.Blocks{b}, false); err != nil {
-			return b.ParentHash(), err
-		}
-	}
-	return block.Hash(), nil
-}
-
-// recoverAncestors finds the closest ancestor with available state and re-execute
-// all the ancestor blocks since that.
-// recoverAncestors is only used post-merge.
-// We return the hash of the latest block that we could correctly validate.
-func (bc *BlockChain) recoverAncestorsWithSethead(block *types.Block) (common.Hash, error) {
-	// Gather all the sidechain hashes (full blocks may be memory heavy)
-	var (
-		hashes  []common.Hash
-		numbers []uint64
-		parent  = block
-	)
-	for parent != nil && !bc.HasState(parent.Root()) {
-		if bc.stateRecoverable(parent.Root()) {
-			if err := bc.triedb.Recover(parent.Root()); err != nil {
-				return common.Hash{}, err
-			}
-			break
-		}
-		hashes = append(hashes, parent.Hash())
-		numbers = append(numbers, parent.NumberU64())
-		parent = bc.GetBlock(parent.ParentHash(), parent.NumberU64()-1)
-
-		// If the chain is terminating, stop iteration
-		if bc.insertStopped() {
-			log.Debug("Abort during blocks iteration")
-			return common.Hash{}, errInsertionInterrupted
-		}
-	}
-	if parent == nil {
-		return common.Hash{}, errors.New("missing parent")
-	}
-	// Import all the pruned blocks to make the state available
-	for i := len(hashes) - 1; i >= 0; i-- {
-		// If the chain is terminating, stop processing blocks
-		if bc.insertStopped() {
-			log.Debug("Abort during blocks processing")
-			return common.Hash{}, errInsertionInterrupted
-		}
-		var b *types.Block
-		if i == 0 {
-			b = block
-		} else {
-			b = bc.GetBlock(hashes[i], numbers[i])
-		}
-		if _, err := bc.insertChain(types.Blocks{b}, true); err != nil {
 			return b.ParentHash(), err
 		}
 	}
@@ -2762,6 +2711,55 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header) (int, error) {
 	defer bc.chainmu.Unlock()
 	_, err := bc.hc.InsertHeaderChain(chain, start, bc.forker)
 	return 0, err
+}
+
+// recoverStateAndSetHead attempts to recover the state of the blockchain by re-importing
+// missing blocks and advancing the chain head. It ensures the state is available
+// for the given block and its ancestors before updating the head.
+func (bc *BlockChain) recoverStateAndSetHead(block *types.Block) (common.Hash, error) {
+	var (
+		hashes  []common.Hash
+		numbers []uint64
+		parent  = block
+	)
+	for parent != nil && !bc.HasState(parent.Root()) {
+		if bc.stateRecoverable(parent.Root()) {
+			if err := bc.triedb.Recover(parent.Root()); err != nil {
+				return common.Hash{}, err
+			}
+			break
+		}
+		hashes = append(hashes, parent.Hash())
+		numbers = append(numbers, parent.NumberU64())
+		parent = bc.GetBlock(parent.ParentHash(), parent.NumberU64()-1)
+
+		// If the chain is terminating, stop iteration
+		if bc.insertStopped() {
+			log.Debug("Abort during blocks iteration")
+			return common.Hash{}, errInsertionInterrupted
+		}
+	}
+	if parent == nil {
+		return common.Hash{}, errors.New("missing parent")
+	}
+	// Import all the pruned blocks to make the state available
+	for i := len(hashes) - 1; i >= 0; i-- {
+		// If the chain is terminating, stop processing blocks
+		if bc.insertStopped() {
+			log.Debug("Abort during blocks processing")
+			return common.Hash{}, errInsertionInterrupted
+		}
+		var b *types.Block
+		if i == 0 {
+			b = block
+		} else {
+			b = bc.GetBlock(hashes[i], numbers[i])
+		}
+		if _, err := bc.insertChain(types.Blocks{b}, true); err != nil {
+			return b.ParentHash(), err
+		}
+	}
+	return block.Hash(), nil
 }
 
 // SetBlockValidatorAndProcessorForTesting sets the current validator and processor.

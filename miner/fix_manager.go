@@ -21,6 +21,12 @@ type FixManager struct {
 
 }
 
+// FixResult holds the result of the fix operation
+type FixResult struct {
+	Success bool
+	Err     error
+}
+
 // NewFixManager initializes a FixManager with required dependencies
 func NewFixManager(downloader *downloader.Downloader) *FixManager {
 	return &FixManager{
@@ -35,8 +41,8 @@ func (fm *FixManager) StartFix(worker *worker, id engine.PayloadID, parentHash c
 
 	if !fm.isFixInProgress {
 		fm.isFixInProgress = true
-		fixChan := make(chan struct{})
-		fm.fixChannels.Store(id, fixChan)
+		resultChan := make(chan FixResult, 1) // Channel to capture fix result (success or error)
+		fm.fixChannels.Store(id, resultChan)
 
 		go func() {
 			defer func() {
@@ -44,12 +50,12 @@ func (fm *FixManager) StartFix(worker *worker, id engine.PayloadID, parentHash c
 				fm.isFixInProgress = false
 				fm.mutex.Unlock()
 
-				// Notify listeners that the fix is complete
 				if ch, ok := fm.fixChannels.Load(id); ok {
-					close(ch.(chan struct{}))
+					resultChan := ch.(chan FixResult)
+					close(resultChan)
 				}
 			}()
-			worker.fix(parentHash) // Execute the fix logic
+			worker.fix(parentHash, resultChan) // processing fix logic
 		}()
 	}
 }
@@ -61,23 +67,34 @@ func (fm *FixManager) StartFix(worker *worker, id engine.PayloadID, parentHash c
 func (fm *FixManager) ListenFixCompletion(worker *worker, id engine.PayloadID, payload *Payload, args *BuildPayloadArgs) {
 	ch, exists := fm.fixChannels.Load(id)
 	if !exists {
-		log.Info("payload is not fixing or has been completed")
+		log.Info("Payload is not fixing or has been completed")
 		return
 	}
 
 	// Check if a listener goroutine has already been started
 	if _, listenerExists := fm.listenerStarted.LoadOrStore(id, true); listenerExists {
 		log.Info("Listener already started for payload", "payload", id)
-		return // If listener goroutine already exists, return immediately
+		return
 	}
 
 	go func() {
-		log.Info("start waiting")
-		<-ch.(chan struct{}) // Wait for the fix to complete
-		log.Info("Fix completed, retrying payload update", "id", id)
-		worker.retryPayloadUpdate(args, payload)
-		fm.fixChannels.Delete(id)     // Remove the id from fixChannels
-		fm.listenerStarted.Delete(id) // Remove the listener flag for this id
+		log.Info("Start waiting for fix completion")
+		result := <-ch.(chan FixResult) // Wait for the fix result
+
+		// Check the result and decide whether to retry the payload update
+		if result.Success {
+			if err := worker.retryPayloadUpdate(args, payload); err != nil {
+				log.Error("Failed to retry payload update after fix", "id", id, "err", err)
+			} else {
+				log.Info("Payload update after fix succeeded", "id", id)
+			}
+		} else {
+			log.Error("Fix failed, skipping payload update", "id", id, "err", result.Err)
+		}
+
+		// Clean up the fix state
+		fm.fixChannels.Delete(id)
+		fm.listenerStarted.Delete(id)
 	}()
 }
 
@@ -90,13 +107,13 @@ func (fm *FixManager) RecoverFromLocal(w *worker, blockHash common.Hash) error {
 		return fmt.Errorf("block not found in local chain")
 	}
 
-	log.Info("Fixing data for block", "blocknumber", block.NumberU64())
-	latestValid, err := w.chain.RecoverAncestors(block)
+	log.Info("Fixing data for block", "block number", block.NumberU64())
+	latestValid, err := w.chain.RecoverStateAndSetHead(block)
 	if err != nil {
-		return fmt.Errorf("failed to recover ancestors: %v", err)
+		return fmt.Errorf("failed to recover state: %v", err)
 	}
 
-	log.Info("Recovered ancestors up to block", "latestValid", latestValid)
+	log.Info("Recovered states up to block", "latestValid", latestValid)
 	return nil
 }
 

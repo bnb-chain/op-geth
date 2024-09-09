@@ -2653,8 +2653,9 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 	for hash, preimage := range slotDb.preimages {
 		s.preimages[hash] = preimage
 	}
+
 	if s.accessList != nil && slotDb.accessList != nil {
-		s.accessList = slotDb.accessList.Copy()
+		s.accessList.Append(slotDb.accessList)
 	}
 
 	for k := range slotDb.snapDestructs {

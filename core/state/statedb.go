@@ -84,7 +84,7 @@ func (s *StateObjectSyncMap) StoreStateObject(addr common.Address, stateObject *
 func (s *StateDB) loadStateObj(addr common.Address) (*stateObject, bool) {
 	if s.isParallel {
 		if s.parallel.isSlotDB {
-			if ret, ok := s.parallel.stateObjects.LoadStateObject(addr); ok {
+			if ret, ok := s.parallel.locatStateObjects[addr]; ok {
 				return ret, ok
 			} else {
 				ret, ok := s.parallel.baseStateDB.loadStateObj(addr)
@@ -102,7 +102,11 @@ func (s *StateDB) loadStateObj(addr common.Address) (*stateObject, bool) {
 // storeStateObj is the entry for storing state object to stateObjects in StateDB or stateObjects in parallel
 func (s *StateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 	if s.isParallel {
-		s.parallel.stateObjects.StoreStateObject(addr, stateObject)
+		if s.parallel.isSlotDB {
+			s.parallel.locatStateObjects[addr] = stateObject
+		} else {
+			s.parallel.stateObjects.StoreStateObject(addr, stateObject)
+		}
 	} else {
 		s.stateObjects[addr] = stateObject
 	}
@@ -111,6 +115,9 @@ func (s *StateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 // deleteStateObj is the entry for deleting state object to stateObjects in StateDB or stateObjects in parallel
 func (s *StateDB) deleteStateObj(addr common.Address) {
 	if s.isParallel {
+		if s.parallel.isSlotDB {
+			delete(s.parallel.locatStateObjects, addr)
+		}
 		s.parallel.stateObjects.Delete(addr)
 	} else {
 		delete(s.stateObjects, addr)
@@ -122,7 +129,8 @@ type ParallelState struct {
 	isSlotDB  bool // denotes StateDB is used in slot, we will try to remove it
 	SlotIndex int  // for debug
 	// stateObjects holds the state objects in the base slot db
-	stateObjects *StateObjectSyncMap
+	stateObjects      *StateObjectSyncMap
+	locatStateObjects map[common.Address]*stateObject
 
 	baseStateDB               *StateDB // for parallel mode, there will be a base StateDB in dispatcher routine.
 	baseTxIndex               int      // slotDB is created base on this tx index.
@@ -968,9 +976,13 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 
 func (s *StateDB) setStateObject(object *stateObject) {
 	if s.isParallel {
-		// When a state object is stored into s.parallel.stateObjects,
-		// it belongs to base StateDB, it is confirmed and valid.
-		s.parallel.stateObjects.Store(object.address, object)
+		if s.parallel.isSlotDB {
+			s.parallel.locatStateObjects[object.address] = object
+		} else {
+			// When a state object is stored into s.parallel.stateObjects,
+			// it belongs to base StateDB, it is confirmed and valid.
+			s.parallel.stateObjects.Store(object.address, object)
+		}
 	} else {
 		s.stateObjects[object.Address()] = object
 	}
@@ -1266,7 +1278,8 @@ func NewEmptySlotDB() *ParallelStateDB {
 		//
 		// We are not do simple copy (lightweight pointer copy) as the stateObject can be accessed by different thread.
 
-		stateObjects:                 &StateObjectSyncMap{}, // s.parallel.stateObjects,
+		stateObjects:                 nil, /* The parallel execution will not use this field, except the base DB */
+		locatStateObjects:            addressToStateObjectsPool.Get().(map[common.Address]*stateObject),
 		codeReadsInSlot:              addressToBytesPool.Get().(map[common.Address][]byte),
 		codeHashReadsInSlot:          addressToHashPool.Get().(map[common.Address]common.Hash),
 		codeChangesInSlot:            addressToStructPool.Get().(map[common.Address]struct{}),

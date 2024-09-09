@@ -139,6 +139,11 @@ func NewSlotDB(db *StateDB, txIndex int, baseTxIndex int, manager *ParallelDBMan
 }
 
 func (s *ParallelStateDB) PutSyncPool(parallelDBManager *ParallelDBManager) {
+	for key := range s.parallel.locatStateObjects {
+		delete(s.parallel.locatStateObjects, key)
+	}
+	addressToStateObjectsPool.Put(s.parallel.locatStateObjects)
+
 	for key := range s.parallel.codeReadsInSlot {
 		delete(s.parallel.codeReadsInSlot, key)
 	}
@@ -266,7 +271,7 @@ func (s *ParallelStateDB) getStateObject(addr common.Address) *stateObject {
 func (s *ParallelStateDB) storeStateObj(addr common.Address, stateObject *stateObject) {
 	// The object could be created in SlotDB, if it got the object from DB and
 	// update it to the `s.parallel.stateObjects`
-	s.parallel.stateObjects.Store(addr, stateObject)
+	s.parallel.locatStateObjects[addr] = stateObject
 }
 
 func (s *ParallelStateDB) getStateObjectNoSlot(addr common.Address) *stateObject {
@@ -1860,7 +1865,8 @@ func (s *ParallelStateDB) reset() {
 
 	s.parallel.isSlotDB = true
 	s.parallel.SlotIndex = -1
-	s.parallel.stateObjects = &StateObjectSyncMap{}
+	s.parallel.stateObjects = nil
+	s.parallel.locatStateObjects = nil
 	s.parallel.baseStateDB = nil
 	s.parallel.baseTxIndex = -1
 	s.parallel.dirtiedStateObjectsInSlot = addressToStateObjectsPool.Get().(map[common.Address]*stateObject)
@@ -1869,6 +1875,7 @@ func (s *ParallelStateDB) reset() {
 	s.parallel.nonceReadsInSlot = addressToUintPool.Get().(map[common.Address]uint64)
 	s.parallel.balanceChangesInSlot = addressToStructPool.Get().(map[common.Address]struct{})
 	s.parallel.balanceReadsInSlot = balancePool.Get().(map[common.Address]*big.Int)
+	s.parallel.locatStateObjects = addressToStateObjectsPool.Get().(map[common.Address]*stateObject)
 	s.parallel.codeReadsInSlot = addressToBytesPool.Get().(map[common.Address][]byte)
 	s.parallel.codeHashReadsInSlot = addressToHashPool.Get().(map[common.Address]common.Hash)
 	s.parallel.codeChangesInSlot = addressToStructPool.Get().(map[common.Address]struct{})

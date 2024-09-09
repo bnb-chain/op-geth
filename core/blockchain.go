@@ -1976,6 +1976,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 					log.Debug("Disable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
 				} else {
 					bc.UseParallelProcessor()
+					log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+
 				}
 			}
 			// If we have a followup block, run that against the current state to pre-cache

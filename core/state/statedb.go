@@ -1777,7 +1777,7 @@ func (s *StateDB) removeStateObjectsDestruct(addr common.Address) {
 	delete(s.stateObjectsDestructDirty, addr)
 }
 
-func (s *StateDB) ResolveTxDAG(txCnt int) (types.TxDAG, error) {
+func (s *StateDB) ResolveTxDAG(txCnt int, extraTxDeps ...types.TxDep) (types.TxDAG, error) {
 	if s.mvStates == nil {
 		return types.NewEmptyTxDAG(), nil
 	}
@@ -1787,7 +1787,7 @@ func (s *StateDB) ResolveTxDAG(txCnt int) (types.TxDAG, error) {
 		}(time.Now())
 	}
 
-	return s.mvStates.ResolveTxDAG(txCnt)
+	return s.mvStates.ResolveTxDAG(txCnt, extraTxDeps...)
 }
 
 func (s *StateDB) MVStates() *types.MVStates {

@@ -1074,12 +1074,11 @@ func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIn
 	}
 
 	// get txDAG data from the stateDB
-	txDAG, err := statedb.ResolveTxDAG(txIndex)
+	// txIndex is the index of this txDAG transaction
+	txDAG, err := statedb.ResolveTxDAG(txIndex, types.TxDep{Flags: &types.NonDependentRelFlag})
 	if txDAG == nil {
 		return nil, err
 	}
-	// txIndex is the index of this txDAG transaction
-	txDAG.SetTxDep(txIndex, types.TxDep{Flags: &types.NonDependentRelFlag})
 	if metrics.EnabledExpensive {
 		go types.EvaluateTxDAGPerformance(txDAG)
 	}

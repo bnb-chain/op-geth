@@ -1004,7 +1004,7 @@ func (s *stateObject) GetCommittedStateNoUpdate(key common.Hash) common.Hash {
 func (s *stateObject) fixUpOriginAndResetPendingStorage() {
 	if s.db.isParallel && s.db.parallel.isSlotDB {
 		mainDB := s.db.parallel.baseStateDB
-		origObj := mainDB.getStateObjectNoUpdate(s.address)
+		origObj := mainDB.getStateObject(s.address)
 		s.storageRecordsLock.Lock()
 		if origObj != nil && origObj.originStorage.Length() != 0 {
 			// There can be racing issue with CopyForSlot/LightCopy

@@ -40,7 +40,7 @@ var (
 	// Note, bumping this up might drastically increase the size of the bloom
 	// filters that's stored in every diff layer. Don't do that without fully
 	// understanding all the implications.
-	aggregatorMemoryLimit = uint64(4 * 1024 * 1024)
+	// aggregatorMemoryLimit = uint64(4 * 1024 * 1024)
 
 	// aggregatorItemLimit is an approximate number of items that will end up
 	// in the agregator layer before it's flushed out to disk. A plain account
@@ -48,7 +48,8 @@ var (
 	// 0B (+hash). Slots are mostly set/unset in lockstep, so that average at
 	// 16B (+hash). All in all, the average entry seems to be 15+32=47B. Use a
 	// smaller number to be on the safe side.
-	aggregatorItemLimit = aggregatorMemoryLimit / 42
+	aggregatorItemLimit   = uint64(15000 * 32) //
+	aggregatorMemoryLimit = aggregatorItemLimit * 42
 
 	// bloomTargetError is the target false positive rate when the aggregator
 	// layer is at its fullest. The actual value will probably move around up
@@ -61,12 +62,14 @@ var (
 
 	// bloomSize is the ideal bloom filter size given the maximum number of items
 	// it's expected to hold and the target false positive error rate.
-	bloomSize = math.Ceil(float64(aggregatorItemLimit) * math.Log(bloomTargetError) / math.Log(1/math.Pow(2, math.Log(2))))
+	// bloomSize = math.Ceil(float64(aggregatorItemLimit) * math.Log(bloomTargetError) / math.Log(1/math.Pow(2, math.Log(2))))
+	bloomSize = bloomfilter.OptimalM(aggregatorItemLimit, bloomTargetError)
 
 	// bloomFuncs is the ideal number of bits a single entry should set in the
 	// bloom filter to keep its size to a minimum (given it's size and maximum
 	// entry count).
-	bloomFuncs = math.Round((bloomSize / float64(aggregatorItemLimit)) * math.Log(2))
+	// bloomFuncs = math.Round((bloomSize / float64(aggregatorItemLimit)) * math.Log(2))
+	bloomFuncs = bloomfilter.OptimalK(bloomSize, aggregatorItemLimit)
 
 	// the bloom offsets are runtime constants which determines which part of the
 	// account/storage hash the hasher functions looks at, to determine the
@@ -229,6 +232,7 @@ func (dl *diffLayer) rebloom(origin *diskLayer) {
 		dl.diffed, _ = parent.diffed.Copy()
 		parent.lock.RUnlock()
 	} else {
+		// TODO: adjust bloomSize and bloomFuncs dynamically.
 		dl.diffed, _ = bloomfilter.New(uint64(bloomSize), uint64(bloomFuncs))
 	}
 	// Iterate over all the accounts and storage slots and index them

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,14 +64,18 @@ func TestMVStates_ResolveTxDAG_Compare(t *testing.T) {
 	rwSets := mockRandomRWSet(txCnt)
 	ms1 := NewMVStates(txCnt, nil).EnableAsyncGen()
 	ms2 := NewMVStates(txCnt, nil).EnableAsyncGen()
+	ms3 := NewMVStates(txCnt, nil).EnableAsyncGen()
 	for i, rwSet := range rwSets {
 		ms1.rwSets[i] = rwSet
 		require.NoError(t, ms2.FinaliseWithRWSet(rwSet))
+		ms3.handleRWEvents(mockRWEventItemsFromRWSet(i, rwSet))
 	}
 
 	d1 := resolveTxDAGInMVStates(ms1, txCnt)
 	d2 := resolveDepsMapCacheByWritesInMVStates(ms2)
+	d3 := resolveDepsMapCacheByWrites2InMVStates(ms3)
 	require.Equal(t, d1.(*PlainTxDAG).String(), d2.(*PlainTxDAG).String())
+	require.Equal(t, d1.(*PlainTxDAG).String(), d3.(*PlainTxDAG).String())
 }
 
 func TestMVStates_TxDAG_Compression(t *testing.T) {
@@ -129,6 +134,22 @@ func BenchmarkResolveTxDAGByWritesInMVStates(b *testing.B) {
 	}
 }
 
+func BenchmarkResolveTxDAGByWrites2InMVStates(b *testing.B) {
+	rwSets := mockRandomRWSet(mockRWSetSize)
+	items := make([][]RWEventItem, mockRWSetSize)
+	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
+	for i, rwSet := range rwSets {
+		items[i] = mockRWEventItemsFromRWSet(i, rwSet)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, item := range items {
+			ms1.handleRWEvents(item)
+		}
+		resolveDepsMapCacheByWrites2InMVStates(ms1)
+	}
+}
+
 func BenchmarkResolveTxDAGByWritesInMVStates_100PercentConflict(b *testing.B) {
 	rwSets := mockSameRWSet(mockRWSetSize)
 	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
@@ -164,6 +185,69 @@ func BenchmarkMVStates_Finalise(b *testing.B) {
 	}
 }
 
+func checkMap(m map[int][10]byte) {
+	for i, j := range m {
+		m[i] = j
+	}
+}
+
+func BenchmarkEmptyMap(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		m := make(map[int][10]byte)
+		for j := 0; j < 10000; j++ {
+			m[i] = [10]byte{byte(j)}
+		}
+		checkMap(m)
+	}
+}
+
+func BenchmarkInitMapWithSize(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		m := make(map[int][10]byte, 10)
+		for j := 0; j < 1000; j++ {
+			m[i] = [10]byte{byte(j)}
+		}
+	}
+}
+
+func BenchmarkReuseMap(b *testing.B) {
+	sp := sync.Pool{New: func() interface{} {
+		return make(map[int]struct{}, 10)
+	}}
+	for i := 0; i < b.N; i++ {
+		m := sp.Get().(map[int]struct{})
+		for j := 0; j < 1000; j++ {
+			m[i] = struct{}{}
+		}
+		for k := range m {
+			delete(m, k)
+		}
+		sp.Put(m)
+	}
+}
+
+func BenchmarkExistArray(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		m := make(map[[20]byte]struct{})
+		m[common.Address{1}] = struct{}{}
+		addr := common.Address{1}
+		if _, ok := m[addr]; ok {
+			continue
+		}
+	}
+}
+
+func BenchmarkDonotExistArray(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		m := make(map[[20]byte]struct{})
+		addr := common.Address{1}
+		if _, ok := m[addr]; !ok {
+			m[addr] = struct{}{}
+			delete(m, addr)
+		}
+	}
+}
+
 func resolveTxDAGInMVStates(s *MVStates, txCnt int) TxDAG {
 	txDAG := NewPlainTxDAG(txCnt)
 	for i := 0; i < txCnt; i++ {
@@ -178,6 +262,15 @@ func resolveDepsMapCacheByWritesInMVStates(s *MVStates) TxDAG {
 	txDAG := NewPlainTxDAG(txCnt)
 	for i := 0; i < txCnt; i++ {
 		s.resolveDepsMapCacheByWrites(i, s.rwSets[i])
+		txDAG.TxDeps[i] = s.txDepCache[i]
+	}
+	return txDAG
+}
+
+func resolveDepsMapCacheByWrites2InMVStates(s *MVStates) TxDAG {
+	txCnt := s.nextFinaliseIndex
+	txDAG := NewPlainTxDAG(txCnt)
+	for i := 0; i < txCnt; i++ {
 		txDAG.TxDeps[i] = s.txDepCache[i]
 	}
 	return txDAG
@@ -409,4 +502,49 @@ func randInRange(i, j int) (int, bool) {
 		return 0, false
 	}
 	return rand.Int()%(j-i) + i, true
+}
+
+func mockRWEventItemsFromRWSet(index int, rwSet *RWSet) []RWEventItem {
+	items := make([]RWEventItem, 0)
+	items = append(items, RWEventItem{
+		Event: NewTxRWEvent,
+		Index: index,
+	})
+	for addr, sub := range rwSet.accReadSet {
+		for state := range sub {
+			items = append(items, RWEventItem{
+				Event: ReadAccRWEvent,
+				Addr:  addr,
+				State: state,
+			})
+		}
+	}
+	for addr, sub := range rwSet.slotReadSet {
+		for slot := range sub {
+			items = append(items, RWEventItem{
+				Event: ReadSlotRWEvent,
+				Addr:  addr,
+				Slot:  slot,
+			})
+		}
+	}
+	for addr, sub := range rwSet.accWriteSet {
+		for state := range sub {
+			items = append(items, RWEventItem{
+				Event: WriteAccRWEvent,
+				Addr:  addr,
+				State: state,
+			})
+		}
+	}
+	for addr, sub := range rwSet.slotWriteSet {
+		for slot := range sub {
+			items = append(items, RWEventItem{
+				Event: WriteSlotRWEvent,
+				Addr:  addr,
+				Slot:  slot,
+			})
+		}
+	}
+	return items
 }

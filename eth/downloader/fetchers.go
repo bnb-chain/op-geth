@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -112,4 +113,17 @@ func (d *Downloader) fetchHeadersByNumber(p *peerConnection, number uint64, amou
 
 		return *res.Res.(*eth.BlockHeadersRequest), res.Meta.([]common.Hash), nil
 	}
+}
+
+func (d *Downloader) GetHeaderByHashFromPeer(peer *peerConnection, blockHash common.Hash) (*types.Header, error) {
+	headers, _, err := d.fetchHeadersByHash(peer, blockHash, 1, 0, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch header from peer: %v", err)
+	}
+
+	if len(headers) == 0 {
+		return nil, fmt.Errorf("no headers returned for hash: %v", blockHash)
+	}
+
+	return headers[0], nil
 }

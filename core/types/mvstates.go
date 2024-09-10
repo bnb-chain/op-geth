@@ -21,12 +21,12 @@ var (
 )
 
 const (
-	initRWEventCacheSize = 4
+	initRWEventCacheSize = 40
 )
 
 func init() {
 	for i := 0; i < initRWEventCacheSize; i++ {
-		cache := make([]RWEventItem, 10000)
+		cache := make([]RWEventItem, 200)
 		rwEventCachePool.Put(&cache)
 	}
 }
@@ -52,6 +52,12 @@ func NewRWSet(index int) *RWSet {
 		accWriteSet:  make(map[common.Address]map[AccountState]struct{}),
 		slotReadSet:  make(map[common.Address]map[common.Hash]struct{}),
 		slotWriteSet: make(map[common.Address]map[common.Hash]struct{}),
+	}
+}
+
+func NewEmptyRWSet(index int) *RWSet {
+	return &RWSet{
+		index: index,
 	}
 }
 
@@ -362,69 +368,82 @@ func (s *MVStates) asyncRWEventLoop() {
 			if !ok {
 				return
 			}
-			for _, item := range items {
-				s.handleRWEvent(item)
-			}
+			s.handleRWEvents(items)
 			rwEventCachePool.Put(&items)
 		}
 	}
 }
 
-func (s *MVStates) handleRWEvent(item RWEventItem) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	// init next RWSet, and finalise previous RWSet
-	if item.Event == NewTxRWEvent {
-		s.finalisePreviousRWSet()
-		s.asyncRWSet = NewRWSet(item.Index)
-		return
+func (s *MVStates) handleRWEvents(items []RWEventItem) {
+	readFrom, readTo := -1, -1
+	recordNewTx := false
+	for i, item := range items {
+		// init next RWSet, and finalise previous RWSet
+		if item.Event == NewTxRWEvent {
+			// handle previous rw set
+			if recordNewTx {
+				var prevItems []RWEventItem
+				if readFrom >= 0 && readTo > readFrom {
+					prevItems = items[readFrom:readTo]
+				}
+				s.finalisePreviousRWSet(prevItems)
+				readFrom, readTo = -1, -1
+			}
+			recordNewTx = true
+			s.asyncRWSet = NewEmptyRWSet(item.Index)
+			continue
+		}
+		if s.asyncRWSet == nil {
+			continue
+		}
+		switch item.Event {
+		// recorde current read/write event
+		case ReadAccRWEvent, ReadSlotRWEvent:
+			if readFrom < 0 {
+				readFrom = i
+			}
+			readTo = i + 1
+		case WriteAccRWEvent:
+			s.finaliseAccWrite(s.asyncRWSet.index, item.Addr, item.State)
+		case WriteSlotRWEvent:
+			s.finaliseSlotWrite(s.asyncRWSet.index, item.Addr, item.Slot)
+		// recorde current as cannot gas fee delay
+		case CannotGasFeeDelayRWEvent:
+			s.asyncRWSet.cannotGasFeeDelay = true
+		}
 	}
-	if s.asyncRWSet == nil {
-		return
-	}
-	switch item.Event {
-	// recorde current read/write event
-	case ReadAccRWEvent:
-		s.asyncRWSet.RecordAccountRead(item.Addr, item.State)
-	case ReadSlotRWEvent:
-		s.asyncRWSet.RecordStorageRead(item.Addr, item.Slot)
-	case WriteAccRWEvent:
-		s.finaliseAccWrite(s.asyncRWSet.index, item.Addr, item.State)
-	case WriteSlotRWEvent:
-		s.finaliseSlotWrite(s.asyncRWSet.index, item.Addr, item.Slot)
-	// recorde current as cannot gas fee delay
-	case CannotGasFeeDelayRWEvent:
-		s.asyncRWSet.cannotGasFeeDelay = true
+	// handle last tx rw set
+	if recordNewTx {
+		var prevItems []RWEventItem
+		if readFrom >= 0 && readTo > readFrom {
+			prevItems = items[readFrom:readTo]
+		}
+		s.finalisePreviousRWSet(prevItems)
 	}
 }
 
-func (s *MVStates) finalisePreviousRWSet() {
+func (s *MVStates) finalisePreviousRWSet(reads []RWEventItem) {
 	if s.asyncRWSet == nil {
 		return
 	}
 	index := s.asyncRWSet.index
 	s.rwSets[index] = s.asyncRWSet
 
-	// check if there are RW with gas fee receiver for gas delay calculation
-	for _, addr := range s.gasFeeReceivers {
-		if _, exist := s.asyncRWSet.accReadSet[addr]; !exist {
-			continue
-		}
-		if _, exist := s.asyncRWSet.accReadSet[addr][AccountSelf]; exist {
-			s.rwSets[index].cannotGasFeeDelay = true
-			break
-		}
-	}
-	if err := s.innerFinalise(index, false); err != nil {
-		log.Error("Finalise err when handle NewTxRWEvent", "tx", index, "err", err)
+	if index > s.nextFinaliseIndex {
+		log.Error("finalise in wrong order", "next", s.nextFinaliseIndex, "input", index)
 		return
 	}
-	s.resolveDepsMapCacheByWrites(index, s.asyncRWSet)
+	// reset nextFinaliseIndex to index+1, it may revert to previous txs
+	s.nextFinaliseIndex = index + 1
+	s.resolveDepsMapCacheByWrites2(index, reads)
 }
 
 func (s *MVStates) RecordNewTx(index int) {
 	if !s.asyncRunning {
 		return
+	}
+	if index%10 == 0 {
+		s.BatchRecordHandle()
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
 		s.rwEventCache[s.rwEventCacheIndex].Event = NewTxRWEvent
@@ -438,9 +457,6 @@ func (s *MVStates) RecordNewTx(index int) {
 	s.rwEventCacheIndex++
 	s.recordingRead = true
 	s.recordingWrite = true
-	if index%10 == 0 {
-		s.BatchRecordHandle()
-	}
 }
 
 func (s *MVStates) RecordReadDone() {
@@ -557,6 +573,7 @@ func (s *MVStates) stopAsyncRecorder() {
 		s.BatchRecordHandle()
 		s.asyncRunning = false
 		close(s.rwEventCh)
+		rwEventCachePool.Put(&s.rwEventCache)
 		s.asyncWG.Wait()
 	}
 }
@@ -670,7 +687,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 		s.txDepCache[index] = NewTxDep([]uint64{}, ExcludedTxFlag)
 		return
 	}
-	depMap := NewTxDepMap(0)
+	depSlice := NewTxDepSlice(0)
 	// check tx dependency, only check key, skip version
 	for addr, sub := range rwSet.accReadSet {
 		for state := range sub {
@@ -687,10 +704,10 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 				continue
 			}
 			tx := uint64(find)
-			if depMap.exist(tx) {
+			if depSlice.exist(tx) {
 				continue
 			}
-			depMap.add(tx)
+			depSlice.add(tx)
 		}
 	}
 	for addr, sub := range rwSet.slotReadSet {
@@ -704,22 +721,91 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
 				continue
 			}
 			tx := uint64(find)
-			if depMap.exist(tx) {
+			if depSlice.exist(tx) {
 				continue
 			}
-			depMap.add(tx)
+			depSlice.add(tx)
 		}
 	}
-	//log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depMap.deps())
 	// clear redundancy deps compared with prev
-	preDeps := depMap.deps()
+	preDeps := depSlice.deps()
+	var removed []uint64
 	for _, prev := range preDeps {
 		for _, tx := range s.txDepCache[int(prev)].TxIndexes {
-			depMap.remove(tx)
+			if depSlice.exist(tx) {
+				removed = append(removed, tx)
+			}
 		}
 	}
-	//log.Debug("resolveDepsMapCacheByWrites after clean", "tx", index, "deps", depMap.deps())
-	s.txDepCache[index] = NewTxDep(depMap.deps())
+	for _, tx := range removed {
+		depSlice.remove(tx)
+	}
+	//log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depMap.deps())
+	s.txDepCache[index] = NewTxDep(depSlice.deps())
+}
+
+// resolveDepsMapCacheByWrites2 must be executed in order
+func (s *MVStates) resolveDepsMapCacheByWrites2(index int, reads []RWEventItem) {
+	rwSet := s.rwSets[index]
+	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
+	if rwSet.excludedTx {
+		s.txDepCache[index] = NewTxDep([]uint64{}, ExcludedTxFlag)
+		return
+	}
+	depSlice := NewTxDepSlice(0)
+	addrMap := make(map[common.Address]struct{})
+	// check tx dependency, only check key
+	for _, item := range reads {
+		// check account states & slots
+		var writes *StateWrites
+		if item.Event == ReadAccRWEvent {
+			writes = s.queryAccWrites(item.Addr, item.State)
+		} else {
+			writes = s.querySlotWrites(item.Addr, item.Slot)
+		}
+		if writes != nil {
+			if find := writes.FindLastWrite(index); find >= 0 {
+				if tx := uint64(find); !depSlice.exist(tx) {
+					depSlice.add(tx)
+				}
+			}
+		}
+
+		// check again account self with Suicide
+		if _, ok := addrMap[item.Addr]; ok {
+			continue
+		}
+		addrMap[item.Addr] = struct{}{}
+		writes = s.queryAccWrites(item.Addr, AccountSuicide)
+		if writes != nil {
+			if find := writes.FindLastWrite(index); find >= 0 {
+				if tx := uint64(find); !depSlice.exist(tx) {
+					depSlice.add(tx)
+				}
+			}
+		}
+	}
+	for _, addr := range s.gasFeeReceivers {
+		if _, ok := addrMap[addr]; ok {
+			rwSet.cannotGasFeeDelay = true
+			break
+		}
+	}
+	// clear redundancy deps compared with prev
+	preDeps := depSlice.deps()
+	var removed []uint64
+	for _, prev := range preDeps {
+		for _, tx := range s.txDepCache[int(prev)].TxIndexes {
+			if depSlice.exist(tx) {
+				removed = append(removed, tx)
+			}
+		}
+	}
+	for _, tx := range removed {
+		depSlice.remove(tx)
+	}
+	//log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depSlice.deps())
+	s.txDepCache[index] = NewTxDep(depSlice.deps())
 }
 
 // resolveDepsCache must be executed in order
@@ -765,33 +851,36 @@ func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
 }
 
 // ResolveTxDAG generate TxDAG from RWSets
-func (s *MVStates) ResolveTxDAG(txCnt int) (TxDAG, error) {
+func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...TxDep) (TxDAG, error) {
 	s.stopAsyncRecorder()
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.finalisePreviousRWSet()
 	if s.nextFinaliseIndex != txCnt {
 		return nil, fmt.Errorf("cannot resolve with wrong FinaliseIndex, expect: %v, now: %v", txCnt, s.nextFinaliseIndex)
 	}
 
-	txDAG := NewPlainTxDAG(txCnt)
+	totalCnt := txCnt + len(extraTxDeps)
+	txDAG := NewPlainTxDAG(totalCnt)
 	for i := 0; i < txCnt; i++ {
 		if s.rwSets[i].cannotGasFeeDelay {
 			return NewEmptyTxDAG(), nil
 		}
-		deps := s.txDepCache[i].TxIndexes
-		if len(deps) <= (txCnt-1)/2 {
-			txDAG.TxDeps[i] = s.txDepCache[i]
+		cache := s.txDepCache[i]
+		if len(cache.TxIndexes) <= (txCnt-1)/2 {
+			txDAG.TxDeps[i] = cache
 			continue
 		}
 		// if tx deps larger than half of txs, then convert with NonDependentRelFlag
 		txDAG.TxDeps[i].SetFlag(NonDependentRelFlag)
 		for j := uint64(0); j < uint64(txCnt); j++ {
-			if !slices.Contains(deps, j) && j != uint64(i) {
+			if !slices.Contains(cache.TxIndexes, j) && j != uint64(i) {
 				txDAG.TxDeps[i].TxIndexes = append(txDAG.TxDeps[i].TxIndexes, j)
 			}
 		}
+	}
+	for i, j := txCnt, 0; i < totalCnt && j < len(extraTxDeps); i, j = i+1, j+1 {
+		txDAG.TxDeps[i] = extraTxDeps[j]
 	}
 
 	return txDAG, nil
@@ -881,4 +970,50 @@ func (m *TxDepMap) remove(index uint64) {
 
 func (m *TxDepMap) len() int {
 	return len(m.tm)
+}
+
+type TxDepSlice struct {
+	indexes []uint64
+}
+
+func NewTxDepSlice(cap int) *TxDepSlice {
+	return &TxDepSlice{
+		indexes: make([]uint64, 0, cap),
+	}
+}
+
+func (m *TxDepSlice) add(index uint64) {
+	if m.exist(index) {
+		return
+	}
+	m.indexes = append(m.indexes, index)
+	for i := len(m.indexes) - 1; i > 0; i-- {
+		if m.indexes[i] < m.indexes[i-1] {
+			m.indexes[i-1], m.indexes[i] = m.indexes[i], m.indexes[i-1]
+		}
+	}
+}
+
+func (m *TxDepSlice) exist(index uint64) bool {
+	_, ok := slices.BinarySearch(m.indexes, index)
+	return ok
+}
+
+func (m *TxDepSlice) deps() []uint64 {
+	return m.indexes
+}
+
+func (m *TxDepSlice) remove(index uint64) {
+	pos, ok := slices.BinarySearch(m.indexes, index)
+	if !ok {
+		return
+	}
+	for i := pos; i < len(m.indexes)-1; i++ {
+		m.indexes[i] = m.indexes[i+1]
+	}
+	m.indexes = m.indexes[:len(m.indexes)-1]
+}
+
+func (m *TxDepSlice) len() int {
+	return len(m.indexes)
 }

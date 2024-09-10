@@ -253,6 +253,8 @@ func (d *EmptyTxDAG) String() string {
 }
 
 // PlainTxDAG indicate how to use the dependency of txs, and delay the distribution of GasFee
+//
+//go:generate go run ../../rlp/rlpgen -type PlainTxDAG -out gen_plaintxdag_rlp.go
 type PlainTxDAG struct {
 	// Tx Dependency List, the list index is equal to TxIndex
 	TxDeps []TxDep

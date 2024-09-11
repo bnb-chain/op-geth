@@ -144,7 +144,7 @@ func (p *ParallelStateProcessor) init() {
 
 	p.parallelDBManager = state.NewParallelDBManager(20000, state.NewEmptySlotDB)
 
-	quickMergeNum := 2 // p.parallelNum / 2
+	quickMergeNum := 0 // p.parallelNum / 2
 	for i := 0; i < p.parallelNum-quickMergeNum; i++ {
 		p.slotState[i] = &SlotState{
 			primaryWakeUpChan: make(chan struct{}, 1),

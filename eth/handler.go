@@ -659,9 +659,9 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 			largeTxs++
 		default:
 			numDirect = int(math.Sqrt(float64(len(peers))))
-			// Split the peers into trusted and strangers
-			// trusted peers we send the tx directly; all static nodes are trusted
-			// strangers we announce the tx
+			// Split the peers into direct-peers and announce-peers
+			// we send the tx directly to direct-peers; all static nodes are direct-peers
+			// we announce the tx to announce-peers
 			direct = make([]*ethPeer, 0, numDirect)
 			announce = make([]*ethPeer, 0, len(peers)-numDirect)
 			for _, peer := range peers {
@@ -672,7 +672,7 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 				}
 			}
 
-			// if tructed peers are not enough, move some strangers into trusted
+			// if directly-peers are not enough, move some announce-peers into directly pool
 			for len(direct) < numDirect && len(announce) > 0 {
 				// shift one peer to trusted
 				direct = append(direct, announce[0])

@@ -105,8 +105,6 @@ func (p *Peer) broadcastTransactions() {
 			}
 			queue = queue[:copy(queue, queue[hashesCount:])]
 
-			txP2PBroadQueueGauge.Update(int64(len(queue)))
-
 			// If there's anything available to transfer, fire up an async writer
 			if len(txs) > 0 {
 				done = make(chan struct{})
@@ -136,6 +134,8 @@ func (p *Peer) broadcastTransactions() {
 				// Fancy copy and resize to ensure buffer doesn't grow indefinitely
 				queue = queue[:copy(queue, queue[len(queue)-maxQueuedTxs:])]
 			}
+
+			txP2PBroadQueueGauge.Update(int64(len(queue)))
 
 		case <-done:
 			done = nil
@@ -181,8 +181,6 @@ func (p *Peer) announceTransactions() {
 			// Shift and trim queue
 			queue = queue[:copy(queue, queue[count:])]
 
-			txP2PAnnQueueGauge.Update(int64(len(queue)))
-
 			// If there's anything available to transfer, fire up an async writer
 			if len(pending) > 0 {
 				done = make(chan struct{})
@@ -213,6 +211,8 @@ func (p *Peer) announceTransactions() {
 				// Fancy copy and resize to ensure buffer doesn't grow indefinitely
 				queue = queue[:copy(queue, queue[len(queue)-maxQueuedTxAnns:])]
 			}
+
+			txP2PAnnQueueGauge.Update(int64(len(queue)))
 
 		case <-done:
 			done = nil

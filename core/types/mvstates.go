@@ -31,12 +31,6 @@ func init() {
 		cache := make([]RWEventItem, 400)
 		rwEventCachePool.Put(&cache)
 	}
-	for i := 0; i < initSyncPoolSize; i++ {
-		rwSets := make([]RWSet, 4000)
-		rwSetsPool.Put(&rwSets)
-		txDeps := make([]TxDep, 4000)
-		txDepsPool.Put(&txDeps)
-	}
 }
 
 type ChanPool struct {
@@ -313,26 +307,12 @@ func (w *StateWrites) Copy() *StateWrites {
 var (
 	rwEventsAllocMeter = metrics.GetOrRegisterMeter("mvstate/alloc/rwevents/cnt", nil)
 	rwEventsAllocGauge = metrics.GetOrRegisterGauge("mvstate/alloc/rwevents/gauge", nil)
-	rwSetsAllocMeter   = metrics.GetOrRegisterMeter("mvstate/alloc/rwsets/cnt", nil)
-	rwSetsAllocGauge   = metrics.GetOrRegisterGauge("mvstate/alloc/rwsets/gauge", nil)
-	txDepsAllocMeter   = metrics.GetOrRegisterMeter("mvstate/alloc/txdeps/cnt", nil)
-	txDepsAllocGauge   = metrics.GetOrRegisterGauge("mvstate/alloc/txdeps/gauge", nil)
 )
 
 var (
 	rwEventCachePool = NewChanPool(initSyncPoolSize*4, func() any {
 		rwEventsAllocMeter.Mark(1)
 		buf := make([]RWEventItem, 0)
-		return &buf
-	})
-	rwSetsPool = NewChanPool(initSyncPoolSize, func() any {
-		rwSetsAllocMeter.Mark(1)
-		buf := make([]RWSet, 0)
-		return &buf
-	})
-	txDepsPool = NewChanPool(initSyncPoolSize, func() any {
-		txDepsAllocMeter.Mark(1)
-		buf := make([]TxDep, 0)
 		return &buf
 	})
 )
@@ -367,11 +347,6 @@ func NewMVStates(txCount int, gasFeeReceivers []common.Address) *MVStates {
 		rwEventCh:       make(chan []RWEventItem, 100),
 		gasFeeReceivers: gasFeeReceivers,
 	}
-
-	s.rwSets = *rwSetsPool.Get().(*[]RWSet)
-	s.rwSets = s.rwSets[:0]
-	s.txDepCache = *txDepsPool.Get().(*[]TxDep)
-	s.txDepCache = s.txDepCache[:0]
 	return s
 }
 
@@ -388,7 +363,6 @@ func (s *MVStates) EnableAsyncGen() *MVStates {
 
 func (s *MVStates) Stop() {
 	s.stopAsyncRecorder()
-	s.ReuseMem()
 }
 
 func (s *MVStates) Copy() *MVStates {
@@ -506,8 +480,6 @@ func (s *MVStates) RecordNewTx(index int) {
 	}
 	if index%2000 == 0 {
 		rwEventsAllocGauge.Update(int64(len(rwEventCachePool.ch)))
-		rwSetsAllocGauge.Update(int64(len(rwSetsPool.ch)))
-		txDepsAllocGauge.Update(int64(len(txDepsPool.ch)))
 	}
 	if index%asyncSendInterval == 0 {
 		s.BatchRecordHandle()
@@ -971,11 +943,6 @@ func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...TxDep) (TxDAG, error) 
 
 func (s *MVStates) FeeReceivers() []common.Address {
 	return s.gasFeeReceivers
-}
-
-func (s *MVStates) ReuseMem() {
-	rwSetsPool.Put(&s.rwSets)
-	txDepsPool.Put(&s.txDepCache)
 }
 
 func checkAccDependency(writeSet map[common.Address]map[AccountState]struct{}, readSet map[common.Address]map[AccountState]struct{}) bool {

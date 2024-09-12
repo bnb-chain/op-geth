@@ -2512,7 +2512,12 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 		mainObj, exist := s.loadStateObj(addr)
 		if !exist || mainObj.deleted {
 			// addr not exist on main DB, the object is created in the merging tx.
-			mainObj = dirtyObj.deepCopy(s)
+			if slotDb.parallel.useDAG {
+				// if use DAG, unconfirmed DB is not touched, so the dirtyObj can be used directly
+				mainObj = dirtyObj.rebase(s)
+			} else {
+				mainObj = dirtyObj.deepCopy(s)
+			}
 			if !dirtyObj.deleted {
 				mainObj.finalise(true)
 			}
@@ -2554,7 +2559,12 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 					// may not empty until block validation. so the pendingStorage filled by the execution of previous txs
 					// in same block may get overwritten by deepCopy here, which causes issue in root calculation.
 					if _, created := s.parallel.createdObjectRecord[addr]; created {
-						newMainObj = dirtyObj.deepCopy(s)
+						if slotDb.parallel.useDAG {
+							// if use DAG, unconfirmed DB is not touched, so the dirtyObj can be used directly
+							newMainObj = dirtyObj.rebase(s)
+						} else {
+							newMainObj = dirtyObj.deepCopy(s)
+						}
 					} else {
 						// Merge the dirtyObject with mainObject
 						if _, balanced := slotDb.parallel.balanceChangesInSlot[addr]; balanced {
@@ -2579,7 +2589,12 @@ func (s *StateDB) MergeSlotDB(slotDb *ParallelStateDB, slotReceipt *types.Receip
 					}
 				} else {
 					// The object is deleted in the TX.
-					newMainObj = dirtyObj.deepCopy(s)
+					if slotDb.parallel.useDAG {
+						// if use DAG, unconfirmed DB is not touched, so the dirtyObj can be used directly
+						newMainObj = dirtyObj.rebase(s)
+					} else {
+						newMainObj = dirtyObj.deepCopy(s)
+					}
 				}
 
 				// All cases with addrStateChange set to true/false can be deleted. so handle it here.

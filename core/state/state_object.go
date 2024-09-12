@@ -798,6 +798,15 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	return object
 }
 
+// rebase is similar with deepCopy, instead of do copy, it just rebase the db of the Object.
+// it is used for the case that the original state object in the mainDB is obsoleted or does not exist,
+// so that we can reuse the one generated in slot execution.
+func (object *stateObject) rebase(db *StateDB) *stateObject {
+	object.db = db.getBaseStateDB()
+	object.dbItf = db
+	return object
+}
+
 func (s *stateObject) MergeSlotObject(db Database, dirtyObjs *stateObject, keys StateKeys) {
 	for key := range keys {
 		// In parallel mode, always GetState by StateDB, not by StateObject directly,

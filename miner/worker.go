@@ -1075,12 +1075,12 @@ func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIn
 
 	// get txDAG data from the stateDB
 	// txIndex is the index of this txDAG transaction
+	defer func() {
+		statedb.MVStates().Stop()
+	}()
 	txDAG, err := statedb.ResolveTxDAG(txIndex, types.TxDep{Flags: &types.NonDependentRelFlag})
 	if txDAG == nil {
 		return nil, err
-	}
-	if metrics.EnabledExpensive {
-		go types.EvaluateTxDAGPerformance(txDAG)
 	}
 
 	publicKey := sender.Public()

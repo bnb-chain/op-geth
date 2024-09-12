@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -66,7 +65,7 @@ func TestMVStates_ResolveTxDAG_Compare(t *testing.T) {
 	ms2 := NewMVStates(txCnt, nil).EnableAsyncGen()
 	ms3 := NewMVStates(txCnt, nil).EnableAsyncGen()
 	for i, rwSet := range rwSets {
-		ms1.rwSets[i] = rwSet
+		ms1.rwSets = append(ms1.rwSets, *rwSet)
 		require.NoError(t, ms2.FinaliseWithRWSet(rwSet))
 		ms3.handleRWEvents(mockRWEventItemsFromRWSet(i, rwSet))
 	}
@@ -110,11 +109,37 @@ func TestMVStates_TxDAG_Compression(t *testing.T) {
 		"time", float64(time.Since(start).Microseconds())/1000)
 }
 
+var (
+	mockRandRWSets       []*RWSet
+	mockSameRWSets       []*RWSet
+	mockDiffRWSets       []*RWSet
+	mockRWEventItems     [][]RWEventItem
+	mockSameRWEventItems [][]RWEventItem
+	mockDiffRWEventItems [][]RWEventItem
+)
+
+func init() {
+	mockRandRWSets = mockRandomRWSet(mockRWSetSize)
+	mockSameRWSets = mockSameRWSet(mockRWSetSize)
+	mockDiffRWSets = mockDifferentRWSet(mockRWSetSize)
+	mockRWEventItems = make([][]RWEventItem, mockRWSetSize)
+	for i, rwSet := range mockRandRWSets {
+		mockRWEventItems[i] = mockRWEventItemsFromRWSet(i, rwSet)
+	}
+	mockSameRWEventItems = make([][]RWEventItem, mockRWSetSize)
+	for i, rwSet := range mockSameRWSets {
+		mockSameRWEventItems[i] = mockRWEventItemsFromRWSet(i, rwSet)
+	}
+	mockDiffRWEventItems = make([][]RWEventItem, mockRWSetSize)
+	for i, rwSet := range mockDiffRWSets {
+		mockDiffRWEventItems[i] = mockRWEventItemsFromRWSet(i, rwSet)
+	}
+}
+
 func BenchmarkResolveTxDAGInMVStates(b *testing.B) {
-	rwSets := mockRandomRWSet(mockRWSetSize)
 	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
-	for i, rwSet := range rwSets {
-		ms1.rwSets[i] = rwSet
+	for _, rwSet := range mockRandRWSets {
+		ms1.rwSets = append(ms1.rwSets, *rwSet)
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -123,9 +148,8 @@ func BenchmarkResolveTxDAGInMVStates(b *testing.B) {
 }
 
 func BenchmarkResolveTxDAGByWritesInMVStates(b *testing.B) {
-	rwSets := mockRandomRWSet(mockRWSetSize)
 	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
-	for _, rwSet := range rwSets {
+	for _, rwSet := range mockRandRWSets {
 		ms1.FinaliseWithRWSet(rwSet)
 	}
 	b.ResetTimer()
@@ -135,25 +159,55 @@ func BenchmarkResolveTxDAGByWritesInMVStates(b *testing.B) {
 }
 
 func BenchmarkResolveTxDAGByWrites2InMVStates(b *testing.B) {
-	rwSets := mockRandomRWSet(mockRWSetSize)
-	items := make([][]RWEventItem, mockRWSetSize)
 	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
-	for i, rwSet := range rwSets {
-		items[i] = mockRWEventItemsFromRWSet(i, rwSet)
-	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for _, item := range items {
+		for _, item := range mockRWEventItems {
 			ms1.handleRWEvents(item)
 		}
 		resolveDepsMapCacheByWrites2InMVStates(ms1)
 	}
 }
 
+func BenchmarkResolveTxDAG_RWEvent_RandRWSet(b *testing.B) {
+	benchmarkResolveTxDAGRWEvent(b, mockRWEventItems)
+}
+
+func BenchmarkResolveTxDAG_RWEvent_SameRWSet(b *testing.B) {
+	benchmarkResolveTxDAGRWEvent(b, mockSameRWEventItems)
+}
+
+func BenchmarkResolveTxDAG_RWEvent_DiffRWSet(b *testing.B) {
+	benchmarkResolveTxDAGRWEvent(b, mockDiffRWEventItems)
+}
+
+func benchmarkResolveTxDAGRWEvent(b *testing.B, eventItems [][]RWEventItem) {
+	for i := 0; i < b.N; i++ {
+		s := NewMVStates(0, nil).EnableAsyncGen()
+		for _, items := range eventItems {
+			for _, item := range items {
+				switch item.Event {
+				case NewTxRWEvent:
+					s.RecordNewTx(item.Index)
+				case ReadAccRWEvent:
+					s.RecordAccountRead(item.Addr, item.State)
+				case ReadSlotRWEvent:
+					s.RecordStorageRead(item.Addr, item.Slot)
+				case WriteAccRWEvent:
+					s.RecordAccountWrite(item.Addr, item.State)
+				case WriteSlotRWEvent:
+					s.RecordStorageWrite(item.Addr, item.Slot)
+				}
+			}
+		}
+		s.ResolveTxDAG(mockRWSetSize)
+		s.Stop()
+	}
+}
+
 func BenchmarkResolveTxDAGByWritesInMVStates_100PercentConflict(b *testing.B) {
-	rwSets := mockSameRWSet(mockRWSetSize)
 	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
-	for _, rwSet := range rwSets {
+	for _, rwSet := range mockSameRWSets {
 		ms1.FinaliseWithRWSet(rwSet)
 	}
 	b.ResetTimer()
@@ -163,9 +217,8 @@ func BenchmarkResolveTxDAGByWritesInMVStates_100PercentConflict(b *testing.B) {
 }
 
 func BenchmarkResolveTxDAGByWritesInMVStates_0PercentConflict(b *testing.B) {
-	rwSets := mockDifferentRWSet(mockRWSetSize)
 	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
-	for _, rwSet := range rwSets {
+	for _, rwSet := range mockDiffRWSets {
 		ms1.FinaliseWithRWSet(rwSet)
 	}
 	b.ResetTimer()
@@ -185,73 +238,10 @@ func BenchmarkMVStates_Finalise(b *testing.B) {
 	}
 }
 
-func checkMap(m map[int][10]byte) {
-	for i, j := range m {
-		m[i] = j
-	}
-}
-
-func BenchmarkEmptyMap(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		m := make(map[int][10]byte)
-		for j := 0; j < 10000; j++ {
-			m[i] = [10]byte{byte(j)}
-		}
-		checkMap(m)
-	}
-}
-
-func BenchmarkInitMapWithSize(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		m := make(map[int][10]byte, 10)
-		for j := 0; j < 1000; j++ {
-			m[i] = [10]byte{byte(j)}
-		}
-	}
-}
-
-func BenchmarkReuseMap(b *testing.B) {
-	sp := sync.Pool{New: func() interface{} {
-		return make(map[int]struct{}, 10)
-	}}
-	for i := 0; i < b.N; i++ {
-		m := sp.Get().(map[int]struct{})
-		for j := 0; j < 1000; j++ {
-			m[i] = struct{}{}
-		}
-		for k := range m {
-			delete(m, k)
-		}
-		sp.Put(m)
-	}
-}
-
-func BenchmarkExistArray(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		m := make(map[[20]byte]struct{})
-		m[common.Address{1}] = struct{}{}
-		addr := common.Address{1}
-		if _, ok := m[addr]; ok {
-			continue
-		}
-	}
-}
-
-func BenchmarkDonotExistArray(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		m := make(map[[20]byte]struct{})
-		addr := common.Address{1}
-		if _, ok := m[addr]; !ok {
-			m[addr] = struct{}{}
-			delete(m, addr)
-		}
-	}
-}
-
 func resolveTxDAGInMVStates(s *MVStates, txCnt int) TxDAG {
 	txDAG := NewPlainTxDAG(txCnt)
 	for i := 0; i < txCnt; i++ {
-		s.resolveDepsCache(i, s.rwSets[i])
+		s.resolveDepsCache(i, &s.rwSets[i])
 		txDAG.TxDeps[i] = s.txDepCache[i]
 	}
 	return txDAG
@@ -261,7 +251,7 @@ func resolveDepsMapCacheByWritesInMVStates(s *MVStates) TxDAG {
 	txCnt := s.nextFinaliseIndex
 	txDAG := NewPlainTxDAG(txCnt)
 	for i := 0; i < txCnt; i++ {
-		s.resolveDepsMapCacheByWrites(i, s.rwSets[i])
+		s.resolveDepsMapCacheByWrites(i, &s.rwSets[i])
 		txDAG.TxDeps[i] = s.txDepCache[i]
 	}
 	return txDAG

@@ -125,6 +125,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), withdrawals)
 	if p.bc.enableTxDAG {
+		defer func() {
+			statedb.MVStates().Stop()
+		}()
 		// compare input TxDAG when it enable in consensus
 		dag, err := statedb.ResolveTxDAG(len(block.Transactions()))
 		if err == nil {

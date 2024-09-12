@@ -1709,7 +1709,7 @@ func (s *StateDB) StartTxRecorder(isExcludeTx bool) {
 	}
 	//log.Debug("StartTxRecorder", "tx", s.txIndex)
 	if isExcludeTx {
-		rwSet := types.NewRWSet(s.txIndex).WithExcludedTxFlag()
+		rwSet := types.NewEmptyRWSet(s.txIndex).WithExcludedTxFlag()
 		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {
 			log.Error("MVStates SystemTx Finalise err", "err", err)
 		}

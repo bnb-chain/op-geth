@@ -1726,10 +1726,10 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 			//   obj.finalise(true) will clear its dirtyStorage, will make prefetch broken.
 			if !s.isParallel || !s.parallel.isSlotDB {
 				obj.finalise(true) // Prefetch slots in the background
-			} else {
+			} /* else {
 				// don't do finalise() here as to keep dirtyObjects unchanged in dirtyStorages, which avoid contention issue.
-				obj.fixUpOriginAndResetPendingStorage()
-			}
+				//	obj.fixUpOriginAndResetPendingStorage()
+			}*/
 		}
 
 		if obj.created {

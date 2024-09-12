@@ -810,10 +810,12 @@ func (s *stateObject) MergeSlotObject(db Database, dirtyObjs *stateObject, keys 
 	dirtyObjs.originStorage.Range(func(keyItf, valueItf interface{}) bool {
 		key := keyItf.(common.Hash)
 		value := valueItf.(common.Hash)
+		s.storageRecordsLock.Lock()
 		// Skip noop changes, persist actual changes
 		if _, ok := s.originStorage.GetValue(key); !ok {
 			s.originStorage.StoreValue(key, value)
 		}
+		s.storageRecordsLock.Unlock()
 		return true
 	})
 }

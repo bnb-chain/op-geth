@@ -350,7 +350,7 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserve txpool.A
 	pool.gasTip.Store(uint256.NewInt(gasTip))
 
 	// set dumper
-	pool.pendingCache.sync2cache(pool, pool.createFilter(gasTip, head.BaseFee))
+	pool.pendingCache.sync2cache(pool, pool.createFilter(pool.gasTip.Load().ToBig(), head.BaseFee))
 
 	// Initialize the state with head block, or fallback to empty one in
 	// case the head state is not available (might occur when node is not
@@ -402,7 +402,7 @@ func (pool *LegacyPool) loopOfSync() {
 			if gasTip == nil || currHead == nil {
 				continue
 			}
-			pool.pendingCache.sync2cache(pool, pool.createFilter(gasTip, currHead.BaseFee))
+			pool.pendingCache.sync2cache(pool, pool.createFilter(gasTip.ToBig(), currHead.BaseFee))
 		}
 	}
 }
@@ -645,11 +645,21 @@ func (pool *LegacyPool) ContentFrom(addr common.Address) ([]*types.Transaction, 
 // The transactions can also be pre-filtered by the dynamic fee components to
 // reduce allocations and load on downstream subsystems.
 func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address][]*txpool.LazyTransaction {
-	// TODO need to confirm
+	empty := txpool.PendingFilter{}
+	if filter == empty {
+		// return all pending transactions, no filtering
+		return pool.pendingCache.dump(false)
+	}
+	// If only blob transactions are requested, this pool is unsuitable as it
+	// contains none, don't even bother.
+	if filter.OnlyBlobTxs {
+		return nil
+	}
 	defer func(t0 time.Time) {
 		getPendingDurationTimer.Update(time.Since(t0))
 	}(time.Now())
-	return pool.pendingCache.dump(enforceTips)
+	// It is a bit tricky here, we don't do the filtering here.
+	return pool.pendingCache.dump(true)
 }
 
 func (pool *LegacyPool) createFilter(gasPrice, baseFee *big.Int) func(txs types.Transactions, addr common.Address) types.Transactions {

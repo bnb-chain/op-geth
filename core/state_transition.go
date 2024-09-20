@@ -442,7 +442,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	return result, err
 }
 
-func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
+func (st *StateTransition) innerTransitionDb() (_ *ExecutionResult, err error) {
 	// First check this message satisfies all consensus rules before
 	// applying the message. The rules include these clauses
 	//
@@ -458,23 +458,26 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		return nil, err
 	}
 
-	if tracer := st.evm.Config.Tracer; tracer != nil {
-		tracer.CaptureTxStart(st.initialGas)
-		defer func() {
-			if st.msg.IsDepositTx {
-				tracer.CaptureTxEnd(0)
-			} else {
-				tracer.CaptureTxEnd(st.gasRemaining)
-			}
-		}()
-	}
-
 	var (
 		msg              = st.msg
 		sender           = vm.AccountRef(msg.From)
 		rules            = st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 		contractCreation = msg.To == nil
 	)
+
+	if tracer := st.evm.Config.Tracer; tracer != nil {
+		tracer.CaptureTxStart(st.initialGas)
+		defer func() {
+			if st.msg.IsDepositTx && !rules.IsOptimismRegolith && err == nil {
+				if st.msg.IsSystemTx {
+					tracer.CaptureTxEnd(st.msg.GasLimit)
+				}
+				tracer.CaptureTxEnd(0)
+			} else {
+				tracer.CaptureTxEnd(st.gasRemaining)
+			}
+		}()
+	}
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
 	gas, err := IntrinsicGas(msg.Data, msg.AccessList, contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)

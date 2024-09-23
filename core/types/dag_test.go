@@ -8,14 +8,8 @@ import (
 
 	"github.com/cometbft/cometbft/libs/rand"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
-
-var (
-	mockAddr = common.HexToAddress("0x482bA86399ab6Dcbe54071f8d22258688B4509b1")
-	mockHash = common.HexToHash("0xdc13f8d7bdb8ec4de02cd4a50a1aa2ab73ec8814e0cdb550341623be3dd8ab7a")
 )
 
 func TestEncodeTxDAGCalldata(t *testing.T) {
@@ -52,105 +46,12 @@ func TestEvaluateTxDAG(t *testing.T) {
 	EvaluateTxDAGPerformance(dag)
 }
 
-func TestMergeTxDAGExecutionPaths_Simple(t *testing.T) {
-	tests := []struct {
-		d      TxDAG
-		from   uint64
-		to     uint64
-		expect [][]uint64
-	}{
-		{
-			d:    mockSimpleDAG(),
-			from: 0,
-			to:   9,
-			expect: [][]uint64{
-				{0, 3, 4},
-				{1, 2, 5, 6, 7},
-				{8, 9},
-			},
-		},
-		{
-			d:    mockSimpleDAG(),
-			from: 1,
-			to:   1,
-			expect: [][]uint64{
-				{1},
-			},
-		},
-		{
-			d:    mockSimpleDAGWithLargeDeps(),
-			from: 0,
-			to:   9,
-			expect: [][]uint64{
-				{5, 6},
-				{0, 1, 2, 3, 4, 7, 8, 9},
-			},
-		},
-		{
-			d:    mockSystemTxDAGWithLargeDeps(),
-			from: 0,
-			to:   11,
-			expect: [][]uint64{
-				{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
-				{10},
-				{11},
-			},
-		},
-		{
-			d:    mockSimpleDAGWithLargeDeps(),
-			from: 5,
-			to:   8,
-			expect: [][]uint64{
-				{5, 6},
-				{7},
-				{8},
-			},
-		},
-		{
-			d:    mockSimpleDAGWithLargeDeps(),
-			from: 5,
-			to:   9,
-			expect: [][]uint64{
-				{5, 6},
-				{7},
-				{8, 9},
-			},
-		},
-	}
-	for i, item := range tests {
-		paths, err := MergeTxDAGExecutionPaths(item.d, item.from, item.to)
-		require.NoError(t, err)
-		require.Equal(t, item.expect, paths, i)
-	}
-}
-
-func TestMergeTxDAGExecutionPaths_Random(t *testing.T) {
-	dag := mockRandomDAG(10000)
-	paths, _ := MergeTxDAGExecutionPaths(dag, 0, uint64(dag.TxCount()-1))
-	txMap := make(map[uint64]uint64, dag.TxCount())
-	for _, path := range paths {
-		for _, index := range path {
-			old, ok := txMap[index]
-			require.False(t, ok, index, path, old)
-			txMap[index] = path[0]
-		}
-	}
-	require.Equal(t, dag.TxCount(), len(txMap))
-}
-
 func TestTxDAG_Compression(t *testing.T) {
 	dag := mockRandomDAG(10000)
 	enc, err := EncodeTxDAG(dag)
 	require.NoError(t, err)
 	encoded := snappy.Encode(nil, enc)
 	t.Log("enc", len(enc), "compressed", len(encoded), "ratio", 1-(float64(len(encoded))/float64(len(enc))))
-}
-
-func BenchmarkMergeTxDAGExecutionPaths(b *testing.B) {
-	dag := mockRandomDAG(100000)
-	for i := 0; i < b.N; i++ {
-		MergeTxDAGExecutionPaths(dag, 0, uint64(dag.TxCount()-1))
-	}
 }
 
 func BenchmarkTxDAG_Encode(b *testing.B) {
@@ -180,22 +81,6 @@ func mockSimpleDAG() TxDAG {
 	dag.TxDeps[7].TxIndexes = []uint64{6}
 	dag.TxDeps[8].TxIndexes = []uint64{}
 	dag.TxDeps[9].TxIndexes = []uint64{8}
-	return dag
-}
-
-func mockSimpleDAGWithLargeDeps() TxDAG {
-	dag := NewPlainTxDAG(10)
-	dag.TxDeps[0].TxIndexes = []uint64{}
-	dag.TxDeps[1].TxIndexes = []uint64{}
-	dag.TxDeps[2].TxIndexes = []uint64{}
-	dag.TxDeps[3].TxIndexes = []uint64{0}
-	dag.TxDeps[4].TxIndexes = []uint64{0}
-	dag.TxDeps[5].TxIndexes = []uint64{}
-	dag.TxDeps[6].TxIndexes = []uint64{5}
-	dag.TxDeps[7].TxIndexes = []uint64{2, 4}
-	dag.TxDeps[8].TxIndexes = []uint64{}
-	//dag.TxDeps[9].TxIndexes = []uint64{0, 1, 3, 4, 8}
-	dag.TxDeps[9] = NewTxDep([]uint64{2, 5, 6, 7}, NonDependentRelFlag)
 	return dag
 }
 
@@ -352,60 +237,4 @@ func TestTxDep_Flags(t *testing.T) {
 	require.Equal(t, NonDependentRelFlag, *dep.Flags)
 	require.True(t, dep.CheckFlag(NonDependentRelFlag))
 	require.False(t, dep.CheckFlag(ExcludedTxFlag))
-}
-
-func TestDepExcludeTxRange(t *testing.T) {
-	tests := []struct {
-		src    []uint64
-		from   uint64
-		to     uint64
-		expect []uint64
-	}{
-		{
-			src:    nil,
-			from:   0,
-			to:     4,
-			expect: nil,
-		},
-		{
-			src:    []uint64{},
-			from:   0,
-			to:     4,
-			expect: []uint64{},
-		},
-		{
-			src:    []uint64{0, 1, 2, 3, 4},
-			from:   4,
-			to:     4,
-			expect: []uint64{4},
-		},
-		{
-			src:    []uint64{0, 1, 2, 3, 4},
-			from:   1,
-			to:     3,
-			expect: []uint64{1, 2, 3},
-		},
-		{
-			src:    []uint64{0, 1, 2, 3, 4},
-			from:   5,
-			to:     6,
-			expect: nil,
-		},
-		{
-			src:    []uint64{2, 3, 4},
-			from:   0,
-			to:     1,
-			expect: nil,
-		},
-		{
-			src:    []uint64{0, 1, 2, 3, 4},
-			from:   0,
-			to:     4,
-			expect: []uint64{0, 1, 2, 3, 4},
-		},
-	}
-
-	for i, item := range tests {
-		require.Equal(t, item.expect, depExcludeTxRange(item.src, item.from, item.to), i)
-	}
 }

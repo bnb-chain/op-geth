@@ -902,7 +902,6 @@ func (w *worker) applyTransaction(env *environment, tx *types.Transaction) (*typ
 	)
 	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
-		//log.Debug("ApplyTransaction err", "block", env.header.Number.Uint64(), "tx", env.tcount, "err", err)
 		env.state.RevertToSnapshot(snap)
 		env.gasPool.SetGas(gp)
 	}
@@ -1098,7 +1097,6 @@ func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIn
 		return nil, fmt.Errorf("failed to encode txDAG, err: %v", err)
 	}
 
-	//log.Debug("EncodeTxDAGCalldata", "tx", txDAG.TxCount(), "data", len(data), "dag", txDAG)
 	// Create the transaction
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    nonce,

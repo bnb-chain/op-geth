@@ -9,7 +9,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
-	"golang.org/x/exp/slices"
 )
 
 const TxDAGAbiJson = `
@@ -316,83 +315,6 @@ func (d *PlainTxDAG) Size() int {
 		return 0
 	}
 	return len(enc)
-}
-
-// MergeTxDAGExecutionPaths will merge duplicate tx path for scheduling parallel.
-// Any tx cannot exist in >= 2 paths.
-func MergeTxDAGExecutionPaths(d TxDAG, from, to uint64) ([][]uint64, error) {
-	if from > to || to >= uint64(d.TxCount()) {
-		return nil, fmt.Errorf("input wrong from: %v, to: %v, txCnt:%v", from, to, d.TxCount())
-	}
-	mergeMap := make(map[uint64][]uint64, d.TxCount())
-	txMap := make(map[uint64]uint64, d.TxCount())
-	for i := int(to); i >= int(from); i-- {
-		index, merge := uint64(i), uint64(i)
-		deps := TxDependency(d, i)
-		// drop the out range txs
-		deps = depExcludeTxRange(deps, from, to)
-		if oldIdx, exist := findTxPathIndex(deps, index, txMap); exist {
-			merge = oldIdx
-		}
-		for _, tx := range deps {
-			txMap[tx] = merge
-		}
-		txMap[index] = merge
-	}
-
-	// result by index order
-	for f, t := range txMap {
-		if mergeMap[t] == nil {
-			mergeMap[t] = make([]uint64, 0)
-		}
-		if f < from || f > to {
-			continue
-		}
-		mergeMap[t] = append(mergeMap[t], f)
-	}
-	mergePaths := make([][]uint64, 0, len(mergeMap))
-	for i := from; i <= to; i++ {
-		path, ok := mergeMap[i]
-		if !ok {
-			continue
-		}
-		slices.Sort(path)
-		mergePaths = append(mergePaths, path)
-	}
-
-	return mergePaths, nil
-}
-
-// depExcludeTxRange drop all from~to items, and deps is ordered.
-func depExcludeTxRange(deps []uint64, from uint64, to uint64) []uint64 {
-	if len(deps) == 0 {
-		return deps
-	}
-	start, end := 0, len(deps)-1
-	for start < len(deps) && deps[start] < from {
-		start++
-	}
-	for end >= 0 && deps[end] > to {
-		end--
-	}
-	if start > end {
-		return nil
-	}
-	return deps[start : end+1]
-}
-
-func findTxPathIndex(path []uint64, cur uint64, txMap map[uint64]uint64) (uint64, bool) {
-	if old, ok := txMap[cur]; ok {
-		return old, true
-	}
-
-	for _, index := range path {
-		if old, ok := txMap[index]; ok {
-			return old, true
-		}
-	}
-
-	return 0, false
 }
 
 // TxDep store the current tx dependency relation with other txs

@@ -471,7 +471,7 @@ func (s *MVStates) finalisePreviousRWSet(reads []RWEventItem) {
 	}
 	// reset nextFinaliseIndex to index+1, it may revert to previous txs
 	s.nextFinaliseIndex = index + 1
-	s.resolveDepsMapCacheByWrites2(index, reads)
+	s.resolveDepsMapCacheByWrites(index, reads)
 }
 
 func (s *MVStates) RecordNewTx(index int) {
@@ -635,10 +635,26 @@ func (s *MVStates) FinaliseWithRWSet(rwSet *RWSet) error {
 		if err := s.innerFinalise(i, true); err != nil {
 			return err
 		}
-		s.resolveDepsMapCacheByWrites(i, &(s.rwSets[i]))
-		//log.Debug("Finalise the reads/writes", "index", i,
-		//	"readCnt", len(s.rwSets[i].accReadSet)+len(s.rwSets[i].slotReadSet),
-		//	"writeCnt", len(s.rwSets[i].accWriteSet)+len(s.rwSets[i].slotWriteSet))
+		reads := make([]RWEventItem, 0, len(s.rwSets[i].accReadSet)+len(s.rwSets[i].slotReadSet))
+		for addr, sub := range s.rwSets[i].accReadSet {
+			for state := range sub {
+				reads = append(reads, RWEventItem{
+					Event: ReadAccRWEvent,
+					Addr:  addr,
+					State: state,
+				})
+			}
+		}
+		for addr, sub := range s.rwSets[i].slotReadSet {
+			for slot := range sub {
+				reads = append(reads, RWEventItem{
+					Event: ReadSlotRWEvent,
+					Addr:  addr,
+					Slot:  slot,
+				})
+			}
+		}
+		s.resolveDepsMapCacheByWrites(i, reads)
 	}
 
 	return nil
@@ -723,74 +739,7 @@ func (s *MVStates) querySlotWrites(addr common.Address, slot common.Hash) *State
 }
 
 // resolveDepsMapCacheByWrites must be executed in order
-func (s *MVStates) resolveDepsMapCacheByWrites(index int, rwSet *RWSet) {
-	for index >= len(s.txDepCache) {
-		s.txDepCache = append(s.txDepCache, TxDep{})
-	}
-	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
-	if rwSet.excludedTx {
-		s.txDepCache[index] = NewTxDep([]uint64{}, ExcludedTxFlag)
-		return
-	}
-	depSlice := NewTxDepSlice(0)
-	// check tx dependency, only check key, skip version
-	for addr, sub := range rwSet.accReadSet {
-		for state := range sub {
-			// check self destruct
-			if state == AccountSelf {
-				state = AccountSuicide
-			}
-			writes := s.queryAccWrites(addr, state)
-			if writes == nil {
-				continue
-			}
-			find := writes.FindLastWrite(index)
-			if find < 0 {
-				continue
-			}
-			tx := uint64(find)
-			if depSlice.exist(tx) {
-				continue
-			}
-			depSlice.add(tx)
-		}
-	}
-	for addr, sub := range rwSet.slotReadSet {
-		for slot := range sub {
-			writes := s.querySlotWrites(addr, slot)
-			if writes == nil {
-				continue
-			}
-			find := writes.FindLastWrite(index)
-			if find < 0 {
-				continue
-			}
-			tx := uint64(find)
-			if depSlice.exist(tx) {
-				continue
-			}
-			depSlice.add(tx)
-		}
-	}
-	// clear redundancy deps compared with prev
-	preDeps := depSlice.deps()
-	var removed []uint64
-	for _, prev := range preDeps {
-		for _, tx := range s.txDepCache[int(prev)].TxIndexes {
-			if depSlice.exist(tx) {
-				removed = append(removed, tx)
-			}
-		}
-	}
-	for _, tx := range removed {
-		depSlice.remove(tx)
-	}
-	//log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depMap.deps())
-	s.txDepCache[index] = NewTxDep(depSlice.deps())
-}
-
-// resolveDepsMapCacheByWrites2 must be executed in order
-func (s *MVStates) resolveDepsMapCacheByWrites2(index int, reads []RWEventItem) {
+func (s *MVStates) resolveDepsMapCacheByWrites(index int, reads []RWEventItem) {
 	for index >= len(s.txDepCache) {
 		s.txDepCache = append(s.txDepCache, TxDep{})
 	}
@@ -852,53 +801,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites2(index int, reads []RWEventItem) 
 	for _, tx := range removed {
 		depSlice.remove(tx)
 	}
-	//log.Debug("resolveDepsMapCacheByWrites", "tx", index, "deps", depSlice.deps())
 	s.txDepCache[index] = NewTxDep(depSlice.deps())
-}
-
-// resolveDepsCache must be executed in order
-func (s *MVStates) resolveDepsCache(index int, rwSet *RWSet) {
-	for index >= len(s.txDepCache) {
-		s.txDepCache = append(s.txDepCache, TxDep{})
-	}
-	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
-	if rwSet.excludedTx {
-		s.txDepCache[index] = NewTxDep([]uint64{}, ExcludedTxFlag)
-		return
-	}
-	depMap := NewTxDepMap(0)
-	for prev := 0; prev < index; prev++ {
-		// if there are some parallel execution or system txs, it will fulfill in advance
-		// it's ok, and try re-generate later
-		if prev >= len(s.rwSets) {
-			continue
-		}
-		prevSet := s.rwSets[prev]
-		// if prev tx is tagged ExcludedTxFlag, just skip the check
-		if prevSet.excludedTx {
-			continue
-		}
-		// check if there has written op before i
-		if checkAccDependency(prevSet.accWriteSet, rwSet.accReadSet) {
-			depMap.add(uint64(prev))
-			// clear redundancy deps compared with prev
-			for _, dep := range depMap.deps() {
-				if slices.Contains(s.txDepCache[prev].TxIndexes, dep) {
-					depMap.remove(dep)
-				}
-			}
-		}
-		if checkSlotDependency(prevSet.slotWriteSet, rwSet.slotReadSet) {
-			depMap.add(uint64(prev))
-			// clear redundancy deps compared with prev
-			for _, dep := range depMap.deps() {
-				if slices.Contains(s.txDepCache[prev].TxIndexes, dep) {
-					depMap.remove(dep)
-				}
-			}
-		}
-	}
-	s.txDepCache[index] = NewTxDep(depMap.deps())
 }
 
 // ResolveTxDAG generate TxDAG from RWSets
@@ -943,88 +846,6 @@ func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...TxDep) (TxDAG, error) 
 
 func (s *MVStates) FeeReceivers() []common.Address {
 	return s.gasFeeReceivers
-}
-
-func checkAccDependency(writeSet map[common.Address]map[AccountState]struct{}, readSet map[common.Address]map[AccountState]struct{}) bool {
-	// check tx dependency, only check key, skip version
-	for addr, sub := range writeSet {
-		if _, ok := readSet[addr]; !ok {
-			continue
-		}
-		for state := range sub {
-			// check suicide, add read address flag, it only for check suicide quickly, and cannot for other scenarios.
-			if state == AccountSuicide {
-				if _, ok := readSet[addr][AccountSelf]; ok {
-					return true
-				}
-				continue
-			}
-			if _, ok := readSet[addr][state]; ok {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-func checkSlotDependency(writeSet map[common.Address]map[common.Hash]struct{}, readSet map[common.Address]map[common.Hash]struct{}) bool {
-	// check tx dependency, only check key, skip version
-	for addr, sub := range writeSet {
-		if _, ok := readSet[addr]; !ok {
-			continue
-		}
-		for slot := range sub {
-			if _, ok := readSet[addr][slot]; ok {
-				return true
-			}
-		}
-	}
-
-	return false
-}
-
-type TxDepMap struct {
-	tm    map[uint64]struct{}
-	cache []uint64
-}
-
-func NewTxDepMap(cap int) *TxDepMap {
-	return &TxDepMap{
-		tm: make(map[uint64]struct{}, cap),
-	}
-}
-
-func (m *TxDepMap) add(index uint64) {
-	m.cache = nil
-	m.tm[index] = struct{}{}
-}
-
-func (m *TxDepMap) exist(index uint64) bool {
-	_, ok := m.tm[index]
-	return ok
-}
-
-func (m *TxDepMap) deps() []uint64 {
-	if m.cache != nil {
-		return m.cache
-	}
-	res := make([]uint64, 0, len(m.tm))
-	for index := range m.tm {
-		res = append(res, index)
-	}
-	slices.Sort(res)
-	m.cache = res
-	return m.cache
-}
-
-func (m *TxDepMap) remove(index uint64) {
-	m.cache = nil
-	delete(m.tm, index)
-}
-
-func (m *TxDepMap) len() int {
-	return len(m.tm)
 }
 
 type TxDepSlice struct {

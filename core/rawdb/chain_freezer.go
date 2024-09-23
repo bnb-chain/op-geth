@@ -184,21 +184,6 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 
 		// use finalized block as the chain freeze indicator was used for multiDatabase feature, if multiDatabase is false, keep 9W blocks in db
 		if f.multiDatabase {
-			threshold, err = f.freezeThreshold(nfdb)
-			if err != nil {
-				backoff = true
-				log.Debug("Current full block not old enough to freeze", "err", err)
-				continue
-			}
-			frozen = f.frozen.Load()
-
-			// Short circuit if the blocks below threshold are already frozen.
-			if frozen != 0 && frozen-1 >= threshold {
-				backoff = true
-				log.Debug("Ancient blocks frozen already", "threshold", threshold, "frozen", frozen)
-				continue
-			}
-
 			hash = ReadHeadBlockHash(nfdb)
 			if hash == (common.Hash{}) {
 				log.Debug("Current full block hash unavailable") // new chain, empty database
@@ -215,6 +200,21 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 			if head == nil {
 				log.Error("Current full block unavailable", "number", *number, "hash", hash)
 				backoff = true
+				continue
+			}
+
+			threshold, err = f.freezeThreshold(nfdb)
+			if err != nil {
+				backoff = true
+				log.Debug("Current full block not old enough to freeze", "err", err)
+				continue
+			}
+			frozen = f.frozen.Load()
+
+			// Short circuit if the blocks below threshold are already frozen.
+			if frozen != 0 && frozen-1 >= threshold {
+				backoff = true
+				log.Debug("Ancient blocks frozen already", "threshold", threshold, "frozen", frozen)
 				continue
 			}
 

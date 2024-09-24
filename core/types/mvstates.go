@@ -915,7 +915,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, reads []RWEventItem, w
 			}
 		}
 	}
-	// Looking for read operations before write operations, similar to a read->read->read/write execution sequence,
+	// Looking for read operations before write operations, e.g: read->read->read/write execution sequence,
 	// we need the write transaction to occur after the read transactions.
 	for _, item := range writes {
 		var depReads *RWTxList

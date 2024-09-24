@@ -28,6 +28,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/exp/slices"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/common/mclock"
@@ -50,7 +52,6 @@ import (
 	"github.com/ethereum/go-ethereum/triedb"
 	"github.com/ethereum/go-ethereum/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/triedb/pathdb"
-	"golang.org/x/exp/slices"
 )
 
 var (
@@ -396,6 +397,22 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	// Make sure the state associated with the block is available, or log out
 	// if there is no available state, waiting for state sync.
 	head := bc.CurrentBlock()
+
+	//fix pbss snapshot if needed
+	if bc.triedb.Scheme() == rawdb.PathScheme {
+		log.Info("pbss snapshot validation")
+		currentSafe := bc.CurrentSafeBlock()
+		currentFinalize := bc.CurrentFinalBlock()
+
+		if currentSafe.Number.Uint64() > head.Number.Uint64() || currentFinalize.Number.Uint64() > head.Number.Uint64() {
+			log.Info("current unsafe is behind safe, reset")
+			bc.hc.SetHead(head.Number.Uint64(), nil, createDelFn(bc))
+			//想办法
+			bc.SetSafe(head)
+			bc.SetFinalized(head)
+		}
+	}
+
 	if !bc.NoTries() && !bc.HasState(head.Root) {
 		if head.Number.Uint64() == 0 {
 			// The genesis state is missing, which is only possible in the path-based

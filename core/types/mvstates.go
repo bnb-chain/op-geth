@@ -446,6 +446,7 @@ func (s *MVStates) handleRWEvents(items []RWEventItem) {
 		switch item.Event {
 		// recorde current read/write event
 		case ReadAccRWEvent, ReadSlotRWEvent:
+			// TODO: maintain read list here
 			if readFrom < 0 {
 				readFrom = i
 			}
@@ -796,6 +797,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, reads []RWEventItem) {
 			}
 		}
 	}
+	// TODO: check read before write dependency here
 	for _, addr := range s.gasFeeReceivers {
 		if _, ok := addrMap[addr]; ok {
 			rwSet.cannotGasFeeDelay = true

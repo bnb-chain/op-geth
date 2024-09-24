@@ -245,17 +245,17 @@ type RWEventItem struct {
 	Slot  common.Hash
 }
 
-type StateWrites struct {
+type RWTxList struct {
 	list []int
 }
 
-func NewStateWrites() *StateWrites {
-	return &StateWrites{
+func NewStateWrites() *RWTxList {
+	return &RWTxList{
 		list: make([]int, 0),
 	}
 }
 
-func (w *StateWrites) Append(pw int) {
+func (w *RWTxList) Append(pw int) {
 	if i, found := w.SearchTxIndex(pw); found {
 		w.list[i] = pw
 		return
@@ -270,7 +270,7 @@ func (w *StateWrites) Append(pw int) {
 	}
 }
 
-func (w *StateWrites) SearchTxIndex(txIndex int) (int, bool) {
+func (w *RWTxList) SearchTxIndex(txIndex int) (int, bool) {
 	n := len(w.list)
 	i, j := 0, n
 	for i < j {
@@ -285,7 +285,7 @@ func (w *StateWrites) SearchTxIndex(txIndex int) (int, bool) {
 	return i, i < n && w.list[i] == txIndex
 }
 
-func (w *StateWrites) FindLastWrite(txIndex int) int {
+func (w *RWTxList) FindLastWrite(txIndex int) int {
 	var i, _ = w.SearchTxIndex(txIndex)
 	for j := i - 1; j >= 0; j-- {
 		if w.list[j] < txIndex {
@@ -296,8 +296,19 @@ func (w *StateWrites) FindLastWrite(txIndex int) int {
 	return -1
 }
 
-func (w *StateWrites) Copy() *StateWrites {
-	np := &StateWrites{}
+func (w *RWTxList) FindPrevWrites(txIndex int) []int {
+	var i, _ = w.SearchTxIndex(txIndex)
+	for j := i - 1; j >= 0; j-- {
+		if w.list[j] < txIndex {
+			return w.list[:j+1]
+		}
+	}
+
+	return nil
+}
+
+func (w *RWTxList) Copy() *RWTxList {
+	np := &RWTxList{}
 	for i, item := range w.list {
 		np.list[i] = item
 	}
@@ -318,9 +329,12 @@ var (
 )
 
 type MVStates struct {
-	rwSets            []RWSet
-	accWriteSet       map[common.Address]map[AccountState]*StateWrites
-	slotWriteSet      map[common.Address]map[common.Hash]*StateWrites
+	rwSets       []RWSet
+	accWriteSet  map[common.Address]map[AccountState]*RWTxList
+	slotWriteSet map[common.Address]map[common.Hash]*RWTxList
+	// TODO: maintain read tx list for states here
+	accReadSet        map[common.Address]map[AccountState]*RWTxList
+	slotReadSet       map[common.Address]map[common.Hash]*RWTxList
 	nextFinaliseIndex int
 	gasFeeReceivers   []common.Address
 	// dependency map cache for generating TxDAG
@@ -342,8 +356,8 @@ type MVStates struct {
 
 func NewMVStates(txCount int, gasFeeReceivers []common.Address) *MVStates {
 	s := &MVStates{
-		accWriteSet:     make(map[common.Address]map[AccountState]*StateWrites, txCount),
-		slotWriteSet:    make(map[common.Address]map[common.Hash]*StateWrites, txCount),
+		accWriteSet:     make(map[common.Address]map[AccountState]*RWTxList, txCount),
+		slotWriteSet:    make(map[common.Address]map[common.Hash]*RWTxList, txCount),
 		rwEventCh:       make(chan []RWEventItem, 100),
 		gasFeeReceivers: gasFeeReceivers,
 	}
@@ -375,7 +389,7 @@ func (s *MVStates) Copy() *MVStates {
 	for addr, sub := range s.accWriteSet {
 		for state, writes := range sub {
 			if _, ok := ns.accWriteSet[addr]; !ok {
-				ns.accWriteSet[addr] = make(map[AccountState]*StateWrites)
+				ns.accWriteSet[addr] = make(map[AccountState]*RWTxList)
 			}
 			ns.accWriteSet[addr][state] = writes.Copy()
 		}
@@ -383,7 +397,7 @@ func (s *MVStates) Copy() *MVStates {
 	for addr, sub := range s.slotWriteSet {
 		for slot, writes := range sub {
 			if _, ok := ns.slotWriteSet[addr]; !ok {
-				ns.slotWriteSet[addr] = make(map[common.Hash]*StateWrites)
+				ns.slotWriteSet[addr] = make(map[common.Hash]*RWTxList)
 			}
 			ns.slotWriteSet[addr][slot] = writes.Copy()
 		}
@@ -679,7 +693,7 @@ func (s *MVStates) innerFinalise(index int, applyWriteSet bool) error {
 	// append to pending write set
 	for addr, sub := range rwSet.accWriteSet {
 		if _, exist := s.accWriteSet[addr]; !exist {
-			s.accWriteSet[addr] = make(map[AccountState]*StateWrites)
+			s.accWriteSet[addr] = make(map[AccountState]*RWTxList)
 		}
 		for state := range sub {
 			if _, exist := s.accWriteSet[addr][state]; !exist {
@@ -690,7 +704,7 @@ func (s *MVStates) innerFinalise(index int, applyWriteSet bool) error {
 	}
 	for addr, sub := range rwSet.slotWriteSet {
 		if _, exist := s.slotWriteSet[addr]; !exist {
-			s.slotWriteSet[addr] = make(map[common.Hash]*StateWrites)
+			s.slotWriteSet[addr] = make(map[common.Hash]*RWTxList)
 		}
 		for slot := range sub {
 			if _, exist := s.slotWriteSet[addr][slot]; !exist {
@@ -705,7 +719,7 @@ func (s *MVStates) innerFinalise(index int, applyWriteSet bool) error {
 func (s *MVStates) finaliseSlotWrite(index int, addr common.Address, slot common.Hash) {
 	// append to pending write set
 	if _, exist := s.slotWriteSet[addr]; !exist {
-		s.slotWriteSet[addr] = make(map[common.Hash]*StateWrites)
+		s.slotWriteSet[addr] = make(map[common.Hash]*RWTxList)
 	}
 	if _, exist := s.slotWriteSet[addr][slot]; !exist {
 		s.slotWriteSet[addr][slot] = NewStateWrites()
@@ -716,7 +730,7 @@ func (s *MVStates) finaliseSlotWrite(index int, addr common.Address, slot common
 func (s *MVStates) finaliseAccWrite(index int, addr common.Address, state AccountState) {
 	// append to pending write set
 	if _, exist := s.accWriteSet[addr]; !exist {
-		s.accWriteSet[addr] = make(map[AccountState]*StateWrites)
+		s.accWriteSet[addr] = make(map[AccountState]*RWTxList)
 	}
 	if _, exist := s.accWriteSet[addr][state]; !exist {
 		s.accWriteSet[addr][state] = NewStateWrites()
@@ -724,14 +738,14 @@ func (s *MVStates) finaliseAccWrite(index int, addr common.Address, state Accoun
 	s.accWriteSet[addr][state].Append(index)
 }
 
-func (s *MVStates) queryAccWrites(addr common.Address, state AccountState) *StateWrites {
+func (s *MVStates) queryAccWrites(addr common.Address, state AccountState) *RWTxList {
 	if _, exist := s.accWriteSet[addr]; !exist {
 		return nil
 	}
 	return s.accWriteSet[addr][state]
 }
 
-func (s *MVStates) querySlotWrites(addr common.Address, slot common.Hash) *StateWrites {
+func (s *MVStates) querySlotWrites(addr common.Address, slot common.Hash) *RWTxList {
 	if _, exist := s.slotWriteSet[addr]; !exist {
 		return nil
 	}
@@ -754,7 +768,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, reads []RWEventItem) {
 	// check tx dependency, only check key
 	for _, item := range reads {
 		// check account states & slots
-		var writes *StateWrites
+		var writes *RWTxList
 		if item.Event == ReadAccRWEvent {
 			writes = s.queryAccWrites(item.Addr, item.State)
 		} else {

@@ -245,6 +245,24 @@ type RWEventItem struct {
 	Slot  common.Hash
 }
 
+func (e RWEventItem) String() string {
+	switch e.Event {
+	case NewTxRWEvent:
+		return fmt.Sprintf("(%v)%v", e.Event, e.Index)
+	case ReadAccRWEvent:
+		return fmt.Sprintf("(%v)%v|%v", e.Event, e.Addr, e.State)
+	case WriteAccRWEvent:
+		return fmt.Sprintf("(%v)%v|%v", e.Event, e.Addr, e.State)
+	case ReadSlotRWEvent:
+		return fmt.Sprintf("(%v)%v|%v", e.Event, e.Addr, e.Slot)
+	case WriteSlotRWEvent:
+		return fmt.Sprintf("(%v)%v|%v", e.Event, e.Addr, e.Slot)
+	case CannotGasFeeDelayRWEvent:
+		return fmt.Sprintf("(%v)", e.Event)
+	}
+	return "Unknown"
+}
+
 type RWTxList struct {
 	list []int
 }
@@ -914,13 +932,20 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, reads []RWEventItem, w
 				}
 			}
 		}
+		// append AccountSelf event
+		s.finaliseAccRead(index, item.Addr, AccountSelf)
 	}
 	// Looking for read operations before write operations, e.g: read->read->read/write execution sequence,
 	// we need the write transaction to occur after the read transactions.
 	for _, item := range writes {
 		var depReads *RWTxList
 		if item.Event == WriteAccRWEvent {
-			depReads = s.queryAccReads(item.Addr, item.State)
+			// if here is AccountSuicide write, check AccountSelf read
+			state := item.State
+			if state == AccountSuicide {
+				state = AccountSelf
+			}
+			depReads = s.queryAccReads(item.Addr, state)
 		} else {
 			depReads = s.querySlotReads(item.Addr, item.Slot)
 		}

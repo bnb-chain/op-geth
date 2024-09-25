@@ -493,11 +493,9 @@ func (s *StateDB) GetBalance(addr common.Address) (ret *uint256.Int) {
 	defer func() {
 		s.RecordRead(types.AccountStateKey(addr, types.AccountBalance), ret)
 	}()
-
-	object := s.getStateObject(addr)
-
-	if object != nil {
-		return object.Balance()
+	stateObject := s.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Balance()
 	}
 	return common.U2560
 }
@@ -507,9 +505,9 @@ func (s *StateDB) GetNonce(addr common.Address) (ret uint64) {
 	defer func() {
 		s.RecordRead(types.AccountStateKey(addr, types.AccountNonce), ret)
 	}()
-	object := s.getStateObject(addr)
-	if object != nil {
-		return object.Nonce()
+	stateObject := s.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Nonce()
 	}
 	return 0
 }
@@ -517,9 +515,9 @@ func (s *StateDB) GetNonce(addr common.Address) (ret uint64) {
 // GetStorageRoot retrieves the storage root from the given address or empty
 // if object not found.
 func (s *StateDB) GetStorageRoot(addr common.Address) common.Hash {
-	object := s.getStateObject(addr)
-	if object != nil {
-		return object.Root()
+	stateObject := s.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Root()
 	}
 	return common.Hash{}
 }
@@ -538,9 +536,9 @@ func (s *StateDB) GetCode(addr common.Address) []byte {
 	defer func() {
 		s.RecordRead(types.AccountStateKey(addr, types.AccountCodeHash), s.GetCodeHash(addr))
 	}()
-	object := s.getStateObject(addr)
-	if object != nil {
-		return object.Code()
+	stateObject := s.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.Code()
 	}
 	return nil
 }
@@ -549,9 +547,9 @@ func (s *StateDB) GetCodeSize(addr common.Address) int {
 	defer func() {
 		s.RecordRead(types.AccountStateKey(addr, types.AccountCodeHash), s.GetCodeHash(addr))
 	}()
-	object := s.getStateObject(addr)
-	if object != nil {
-		return object.CodeSize()
+	stateObject := s.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.CodeSize()
 	}
 	return 0
 }
@@ -564,8 +562,8 @@ func (s *StateDB) GetCodeHash(addr common.Address) (ret common.Hash) {
 	defer func() {
 		s.RecordRead(types.AccountStateKey(addr, types.AccountCodeHash), ret.Bytes())
 	}()
-	object := s.getStateObject(addr)
-	if object == nil {
+	stateObject := s.getStateObject(addr)
+	if stateObject == nil {
 		return common.Hash{}
 	}
 	return common.Hash{}
@@ -576,9 +574,9 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) (ret common.Ha
 	defer func() {
 		s.RecordRead(types.StorageStateKey(addr, hash), ret)
 	}()
-	object := s.getStateObject(addr)
-	if object != nil {
-		return object.GetState(hash)
+	stateObject := s.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.GetState(hash)
 	}
 	return common.Hash{}
 }
@@ -588,9 +586,9 @@ func (s *StateDB) GetCommittedState(addr common.Address, hash common.Hash) (ret 
 	defer func() {
 		s.RecordRead(types.StorageStateKey(addr, hash), ret)
 	}()
-	object := s.getStateObject(addr)
-	if object != nil {
-		return object.GetCommittedState(hash)
+	stateObject := s.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.GetCommittedState(hash)
 	}
 	return common.Hash{}
 }
@@ -601,9 +599,9 @@ func (s *StateDB) Database() Database {
 }
 
 func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
-	object := s.getStateObject(addr)
-	if object != nil {
-		return object.selfDestructed
+	stateObject := s.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.selfDestructed
 	}
 	return false
 }
@@ -614,10 +612,10 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
-	object := s.getOrNewStateObject(addr)
-	if object != nil {
-		s.RecordRead(types.AccountStateKey(addr, types.AccountBalance), object.Balance())
-		object.AddBalance(amount)
+	stateObject := s.getOrNewStateObject(addr)
+	if stateObject != nil {
+		s.RecordRead(types.AccountStateKey(addr, types.AccountBalance), stateObject.Balance())
+		stateObject.AddBalance(amount)
 		return
 	}
 	s.RecordRead(types.AccountStateKey(addr, types.AccountBalance), common.U2560)
@@ -625,10 +623,10 @@ func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
 
 // SubBalance subtracts amount from the account associated with addr.
 func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int) {
-	object := s.getOrNewStateObject(addr)
-	if object != nil {
-		s.RecordRead(types.AccountStateKey(addr, types.AccountBalance), object.Balance())
-		object.SubBalance(amount)
+	stateObject := s.getOrNewStateObject(addr)
+	if stateObject != nil {
+		s.RecordRead(types.AccountStateKey(addr, types.AccountBalance), stateObject.Balance())
+		stateObject.SubBalance(amount)
 		return
 	}
 	s.RecordRead(types.AccountStateKey(addr, types.AccountBalance), common.U2560)
@@ -700,15 +698,15 @@ func (s *StateDB) SelfDestruct(addr common.Address) {
 		prevbalance: new(uint256.Int).Set(stateObject.Balance()),
 	})
 	stateObject.markSelfdestructed()
-	stateObject.data.Balance = new(uint256.Int)
+	stateObject.setBalance(new(uint256.Int))
 }
 
 func (s *StateDB) Selfdestruct6780(addr common.Address) {
-	object := s.getStateObject(addr)
-	if object == nil {
+	stateObject := s.getStateObject(addr)
+	if stateObject == nil {
 		return
 	}
-	if object.created {
+	if stateObject.created {
 		s.SelfDestruct(addr)
 	}
 }
@@ -746,10 +744,12 @@ func (s *StateDB) GetTransientState(addr common.Address, key common.Hash) common
 
 // updateStateObject writes the given object to the trie.
 func (s *StateDB) updateStateObject(obj *stateObject) {
-	if !(s.isParallel && s.parallel.isSlotDB) {
-		obj.storageRecordsLock.Lock()
-		defer obj.storageRecordsLock.Unlock()
-	}
+	/*
+		if !(s.isParallel && s.parallel.isSlotDB) {
+			obj.storageRecordsLock.Lock()
+			defer obj.storageRecordsLock.Unlock()
+		}
+	*/
 	if !s.noTrie {
 		// Track the amount of time wasted on updating the account from the trie
 		if metrics.EnabledExpensive {
@@ -799,7 +799,6 @@ func (s *StateDB) deleteStateObject(obj *stateObject) {
 	}
 	// Delete the account from the trie
 	addr := obj.Address()
-
 	if err := s.trie.DeleteAccount(addr); err != nil {
 		s.setError(fmt.Errorf("deleteStateObject (%x) error: %v", addr[:], err))
 	}
@@ -809,8 +808,7 @@ func (s *StateDB) deleteStateObject(obj *stateObject) {
 // the object is not found or was deleted in this execution context. If you need
 // to differentiate between non-existent/just-deleted, use getDeletedStateObject.
 func (s *StateDB) getStateObject(addr common.Address) *stateObject {
-	obj := s.getDeletedStateObject(addr)
-	if obj != nil && !obj.deleted {
+	if obj := s.getDeletedStateObject(addr); obj != nil && !obj.deleted {
 		return obj
 	}
 	return nil
@@ -901,7 +899,7 @@ func (s *StateDB) getStateObjectFromSnapshotOrTrie(addr common.Address) (data *t
 				Root:     common.BytesToHash(acc.Root),
 			}
 			if len(data.CodeHash) == 0 {
-				data.CodeHash = emptyCodeHash
+				data.CodeHash = types.EmptyCodeHash.Bytes()
 			}
 			if data.Root == (common.Hash{}) {
 				data.Root = types.EmptyRootHash
@@ -970,7 +968,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	}
 	// Insert into the live set
 	obj := newObject(s, s.isParallel, addr, data)
-	s.storeStateObj(addr, obj)
+	s.setStateObject(obj)
 	return obj
 }
 
@@ -992,7 +990,7 @@ func (s *StateDB) setStateObject(object *stateObject) {
 func (s *StateDB) getOrNewStateObject(addr common.Address) *stateObject {
 	stateObject := s.getStateObject(addr)
 	if stateObject == nil {
-		stateObject = s.createObject(addr)
+		stateObject, _ = s.createObject(addr)
 	}
 	return stateObject
 }
@@ -1012,8 +1010,8 @@ func (s *StateDB) getOrNewStateObject(addr common.Address) *stateObject {
 //	a.if it is not in SlotDB, `revert` will remove it from the SlotDB
 //	b.if it is existed in SlotDB, `revert` will recover to the `prev` in SlotDB
 //	c.as `snapDestructs` it is the same
-func (s *StateDB) createObject(addr common.Address) (newobj *stateObject) {
-	prev := s.getDeletedStateObject(addr) // Note, prev might have been deleted, we need that!
+func (s *StateDB) createObject(addr common.Address) (newobj *stateObject, prev *stateObject) {
+	prev = s.getDeletedStateObject(addr) // Note, prev might have been deleted, we need that!
 	newobj = newObject(s, s.isParallel, addr, nil)
 	if prev == nil {
 		s.journal.append(createObjectChange{account: &addr})
@@ -1054,7 +1052,10 @@ func (s *StateDB) createObject(addr common.Address) (newobj *stateObject) {
 
 	newobj.created = true
 	s.setStateObject(newobj)
-	return newobj
+	if prev != nil && prev.deleted {
+		return newobj, prev
+	}
+	return newobj, nil
 }
 
 // CreateAccount explicitly creates a state object. If a state object with the address
@@ -1071,9 +1072,10 @@ func (s *StateDB) CreateAccount(addr common.Address) {
 	// no matter it is got from dirty, unconfirmed or main DB
 	// if addr not exist, preBalance will be common.U2560, it is same as new(big.Int) which
 	// is the value newObject(),
-	preBalance := s.GetBalance(addr)
-	newObj := s.createObject(addr)
-	newObj.setBalance(new(uint256.Int).Set(preBalance)) // new big.Int for newObj
+	newObj, prev := s.createObject(addr)
+	if prev != nil {
+		newObj.setBalance(prev.Balance())
+	}
 }
 
 // CopyWithMvStates will copy state with MVStates
@@ -1417,14 +1419,12 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			// Thus, we can safely ignore it here
 			continue
 		}
-
 		if obj.selfDestructed || (deleteEmptyObjects && obj.empty()) {
 			obj.deleted = true
 
 			// We need to maintain account deletions explicitly (will remain
 			// set indefinitely). Note only the first occurred self-destruct
 			// event is tracked.
-			// The finalise of stateDB is called at verify & commit phase, which is global, no need to acquire the lock.
 			if _, ok := s.stateObjectsDestruct[obj.address]; !ok {
 				s.stateObjectsDestruct[obj.address] = obj.origin
 			}
@@ -1595,7 +1595,7 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	// so it should be save to clear pending here.
 	// otherwise there can be a case that the deleted object get ignored and processes as live object in verify phase.
 
-	if /*s.isParallel == false &&*/ len(s.stateObjectsPending) > 0 {
+	if len(s.stateObjectsPending) > 0 {
 		s.stateObjectsPending = make(map[common.Address]struct{})
 	}
 	// Track the amount of time wasted on hashing the account trie
@@ -1788,7 +1788,6 @@ func (s *StateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[common.A
 		return incomplete, nil
 	}
 
-	// Commit phase, no need to acquire lock.
 	for addr, prev := range s.stateObjectsDestruct {
 		// The original account was non-existing, and it's marked as destructed
 		// in the scope of block. It can be case (a) or (b).

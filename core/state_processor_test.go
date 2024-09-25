@@ -111,6 +111,7 @@ func TestStateProcessorErrors(t *testing.T) {
 		}
 		return tx
 	}
+
 	{ // Tests against a 'recent' chain definition
 		var (
 			db    = rawdb.NewMemoryDatabase()

@@ -1874,7 +1874,7 @@ func (s *ParallelStateDB) reset() {
 	s.parallel.nonceChangesInSlot = addressToStructPool.Get().(map[common.Address]struct{})
 	s.parallel.nonceReadsInSlot = addressToUintPool.Get().(map[common.Address]uint64)
 	s.parallel.balanceChangesInSlot = addressToStructPool.Get().(map[common.Address]struct{})
-	s.parallel.balanceReadsInSlot = balancePool.Get().(map[common.Address]*big.Int)
+	s.parallel.balanceReadsInSlot = balancePool.Get().(map[common.Address]*uint256.Int)
 	s.parallel.locatStateObjects = addressToStateObjectsPool.Get().(map[common.Address]*stateObject)
 	s.parallel.codeReadsInSlot = addressToBytesPool.Get().(map[common.Address][]byte)
 	s.parallel.codeHashReadsInSlot = addressToHashPool.Get().(map[common.Address]common.Hash)

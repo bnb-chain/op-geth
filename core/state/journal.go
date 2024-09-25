@@ -177,7 +177,7 @@ func (ch resetObjectChange) revert(dber StateDBer) {
 		s.parallel.dirtiedStateObjectsInSlot[ch.prev.address] = ch.prev
 	} else {
 		// ch.prev was got from main DB, put it back to main DB.
-		s.storeStateObj(ch.prev.address, ch.prev)
+		s.setStateObject(ch.prev)
 	}
 
 	if !ch.prevdestruct {

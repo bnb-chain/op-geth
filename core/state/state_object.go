@@ -604,7 +604,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	go func() {
 		defer wg.Done()
 		maindb.StorageMux.Lock()
-		defer maindb.StorageMux.Unlock()
+
 		// The snapshot storage map for the object
 		storage = maindb.storages[s.addrHash]
 		if storage == nil {
@@ -617,6 +617,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 			origin = make(map[common.Hash][]byte)
 			maindb.storagesOrigin[s.address] = origin
 		}
+		maindb.StorageMux.Unlock()
 		for key, value := range dirtyStorage {
 			khash := crypto.HashData(hasher, key[:])
 
@@ -654,6 +655,14 @@ func (s *stateObject) updateTrie() (Trie, error) {
 // updateRoot flushes all cached storage mutations to trie, recalculating the
 // new storage trie root.
 func (s *stateObject) updateRoot() {
+
+	// If node runs in no trie mode, set root to empty
+	defer func() {
+		if s.db.db.NoTries() {
+			s.data.Root = types.EmptyRootHash
+		}
+	}()
+
 	// Flush cached storage mutations into trie, short circuit if any error
 	// is occurred or there is not change in the trie.
 	s.db.trieParallelLock.Lock()

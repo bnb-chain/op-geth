@@ -563,7 +563,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			ReturnData: ret,
 		}, nil
 	}
-
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
 	// changing the sender's balance
@@ -626,9 +625,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		}
 		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.Time) {
 			if st.delayGasFee {
-				baseFee = uint256.NewInt(0)
+				l1Fee = uint256.NewInt(0)
 			} else {
-				st.state.AddBalance(params.OptimismBaseFeeRecipient, uint256.NewInt(0))
+				st.state.AddBalance(params.OptimismL1FeeRecipient, uint256.NewInt(0))
 			}
 		} else if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
 			amtU256, overflow = uint256.FromBig(l1Cost)
@@ -636,9 +635,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 				return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)
 			}
 			if st.delayGasFee {
-				baseFee = amtU256
+				l1Fee = amtU256
 			} else {
-				st.state.AddBalance(params.OptimismBaseFeeRecipient, amtU256)
+				st.state.AddBalance(params.OptimismL1FeeRecipient, amtU256)
 			}
 		}
 	}

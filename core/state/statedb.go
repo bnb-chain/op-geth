@@ -744,12 +744,6 @@ func (s *StateDB) GetTransientState(addr common.Address, key common.Hash) common
 
 // updateStateObject writes the given object to the trie.
 func (s *StateDB) updateStateObject(obj *stateObject) {
-	/*
-		if !(s.isParallel && s.parallel.isSlotDB) {
-			obj.storageRecordsLock.Lock()
-			defer obj.storageRecordsLock.Unlock()
-		}
-	*/
 	if !s.noTrie {
 		// Track the amount of time wasted on updating the account from the trie
 		if metrics.EnabledExpensive {
@@ -1052,7 +1046,7 @@ func (s *StateDB) createObject(addr common.Address) (newobj *stateObject, prev *
 
 	newobj.created = true
 	s.setStateObject(newobj)
-	if prev != nil && prev.deleted {
+	if prev != nil && !prev.deleted {
 		return newobj, prev
 	}
 	return newobj, nil
@@ -2462,8 +2456,6 @@ func (s *StateDB) AddrPrefetch(slotDb *ParallelStateDB) {
 	}
 
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
-		// log.Info("AddrPrefetch", "slotDb.TxIndex", slotDb.TxIndex(),
-		//	"len(addressesToPrefetch)", len(slotDb.parallel.addressesToPrefetch))
 		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, emptyAddr, addressesToPrefetch)
 	}
 }

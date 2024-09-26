@@ -537,9 +537,9 @@ func (s *MVStates) finalisePreviousRWSet(reads []RWEventItem, writes []RWEventIt
 
 	for _, item := range writes {
 		if item.Event == WriteAccRWEvent {
-			s.finaliseAccWrite(item.Index, item.Addr, item.State)
+			s.finaliseAccWrite(index, item.Addr, item.State)
 		} else if item.Event == WriteSlotRWEvent {
-			s.finaliseSlotWrite(item.Index, item.Addr, item.Slot)
+			s.finaliseSlotWrite(index, item.Addr, item.Slot)
 		}
 	}
 
@@ -547,19 +547,19 @@ func (s *MVStates) finalisePreviousRWSet(reads []RWEventItem, writes []RWEventIt
 		if item.Event == ReadAccRWEvent {
 			accWrites := s.queryAccWrites(item.Addr, item.State)
 			if accWrites != nil {
-				if _, ok := accWrites.SearchTxIndex(item.Index); ok {
+				if _, ok := accWrites.SearchTxIndex(index); ok {
 					continue
 				}
 			}
-			s.finaliseAccRead(item.Index, item.Addr, item.State)
+			s.finaliseAccRead(index, item.Addr, item.State)
 		} else if item.Event == ReadSlotRWEvent {
 			slotWrites := s.querySlotWrites(item.Addr, item.Slot)
 			if slotWrites != nil {
-				if _, ok := slotWrites.SearchTxIndex(item.Index); ok {
+				if _, ok := slotWrites.SearchTxIndex(index); ok {
 					continue
 				}
 			}
-			s.finaliseSlotRead(item.Index, item.Addr, item.Slot)
+			s.finaliseSlotRead(index, item.Addr, item.Slot)
 		}
 	}
 

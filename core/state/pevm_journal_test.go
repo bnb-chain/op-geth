@@ -8,7 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-func TestJournalOfState(t *testing.T) {
+func TestPevmJournalOfState(t *testing.T) {
 	var snapid int
 	var (
 		Address1 = common.Address{0x01}
@@ -69,7 +69,7 @@ func TestJournalOfState(t *testing.T) {
 	}
 }
 
-func TestJournal(t *testing.T) {
+func TestPevmJournal(t *testing.T) {
 	var snapid int
 	var tx1 = common.Hash{0x012}
 	var txIndex = 20

@@ -1,15 +1,14 @@
 package state
 
 import (
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/holiman/uint256"
 )
 
 type jBalance struct {
 	created bool // whether the object is newly created in the uncommitted db
 	addr    common.Address
-	prev    *big.Int
+	prev    *uint256.Int
 }
 
 func newJBalance(obj *state, addr common.Address) *jBalance {
@@ -23,7 +22,7 @@ func newJBalance(obj *state, addr common.Address) *jBalance {
 		return &jBalance{
 			created: false,
 			addr:    addr,
-			prev:    new(big.Int).Set(obj.balance),
+			prev:    new(uint256.Int).Set(obj.balance),
 		}
 	}
 }
@@ -192,7 +191,7 @@ func newJSelfDestruct(obj *state) *jSelfDestruct {
 		obj: &state{
 			modified: obj.modified,
 			addr:     obj.addr,
-			balance:  new(big.Int).Set(obj.balance),
+			balance:  new(uint256.Int).Set(obj.balance),
 			nonce:    obj.nonce,
 			code:     append([]byte(nil), obj.code...),
 			codeHash: append([]byte(nil), obj.codeHash...),

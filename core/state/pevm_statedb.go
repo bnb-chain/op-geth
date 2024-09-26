@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 )
 
 // UncommittedDB is a wrapper of StateDB, which records all the writes of the state.
@@ -152,25 +152,25 @@ func (pst *UncommittedDB) Prepare(rules params.Rules, sender, coinbase common.Ad
 //  1. journal
 //  2. object
 
-func (pst *UncommittedDB) SubBalance(addr common.Address, amount *big.Int) {
+func (pst *UncommittedDB) SubBalance(addr common.Address, amount *uint256.Int) {
 	pst.journal.append(newJBalance(pst.cache[addr], addr))
 	obj := pst.getOrNewObject(addr)
-	newb := new(big.Int).Sub(obj.balance, amount)
+	newb := new(uint256.Int).Sub(obj.balance, amount)
 	pst.cache.setBalance(addr, newb)
 }
 
-func (pst *UncommittedDB) AddBalance(addr common.Address, amount *big.Int) {
+func (pst *UncommittedDB) AddBalance(addr common.Address, amount *uint256.Int) {
 	pst.journal.append(newJBalance(pst.cache[addr], addr))
 	obj := pst.getOrNewObject(addr)
-	newb := new(big.Int).Add(obj.balance, amount)
+	newb := new(uint256.Int).Add(obj.balance, amount)
 	pst.cache.setBalance(addr, newb)
 }
 
-func (pst *UncommittedDB) GetBalance(addr common.Address) *big.Int {
+func (pst *UncommittedDB) GetBalance(addr common.Address) *uint256.Int {
 	if obj := pst.getObject(addr); obj != nil {
-		return new(big.Int).Set(obj.balance)
+		return new(uint256.Int).Set(obj.balance)
 	}
-	return big.NewInt(0)
+	return uint256.NewInt(0)
 }
 
 func (pst *UncommittedDB) GetNonce(addr common.Address) uint64 {
@@ -444,9 +444,9 @@ func (pst *UncommittedDB) hasLogConflict(maindb *StateDB) error {
 		}
 	} else {
 		// this is not the first transaction in the block
-		//if maindb.txIndex != int(pst.txIndex)-1 {
-		//	return fmt.Errorf("conflict txIndex, txIndex: %d, expected %d", maindb.txIndex, pst.txIndex-1)
-		//}
+		if maindb.txIndex != int(pst.txIndex)-1 {
+			return fmt.Errorf("conflict txIndex, txIndex: %d, expected %d", maindb.txIndex, pst.txIndex-1)
+		}
 	}
 	return nil
 }
@@ -662,7 +662,7 @@ type state struct {
 	// object states
 	modified int32 //records all the modified fields
 	addr     common.Address
-	balance  *big.Int
+	balance  *uint256.Int
 	nonce    uint64
 	//@TODO code is lazy loaded, be careful to record its state
 	code         []byte
@@ -682,7 +682,7 @@ func (c *state) clone() *state {
 	return &state{
 		modified:     c.modified,
 		addr:         c.addr,
-		balance:      new(big.Int).Set(c.balance),
+		balance:      new(uint256.Int).Set(c.balance),
 		nonce:        c.nonce,
 		code:         append([]byte(nil), c.code...),
 		codeHash:     append([]byte(nil), c.codeHash...),
@@ -753,7 +753,7 @@ func (s state) merge(maindb *StateDB) {
 		maindb.SelfDestruct(s.addr)
 		return
 	}
-	obj := maindb.GetOrNewStateObject(s.addr)
+	obj := maindb.getOrNewStateObject(s.addr)
 	if s.modified&ModifyBalance != 0 {
 		obj.SetBalance(s.balance)
 	}
@@ -789,7 +789,7 @@ func copyObj(obj *stateObject) *state {
 	return &state{
 		addr:         obj.Address(),
 		nonce:        obj.Nonce(),
-		balance:      new(big.Int).Set(obj.Balance()),
+		balance:      new(uint256.Int).Set(obj.Balance()),
 		selfDestruct: obj.selfDestructed,
 		deleted:      obj.deleted, // deleted is true when a "selfDestruct=true" object is finalized. more details can be found in the method Finalize() of StateDB
 		codeSize:     -1,          // mark the code "unloaded"
@@ -854,7 +854,7 @@ const (
 	ModifySelfDestruct6780
 )
 
-func (wst writes) setBalance(addr common.Address, balance *big.Int) {
+func (wst writes) setBalance(addr common.Address, balance *uint256.Int) {
 	wst[addr].balance = balance
 	wst[addr].modified |= ModifyBalance
 }
@@ -880,7 +880,7 @@ func (wst writes) setCode(addr common.Address, code []byte) {
 func (wst writes) create(addr common.Address) *state {
 	wst[addr] = &state{
 		addr:    addr,
-		balance: big.NewInt(0),
+		balance: uint256.NewInt(0),
 		nonce:   0,
 		//need to init code & codeHash
 		code:     nil,
@@ -902,7 +902,7 @@ func (wst writes) selfDestruct(addr common.Address) {
 	}
 	obj.modified |= ModifySelfDestruct
 	obj.selfDestruct = true
-	obj.balance = big.NewInt(0)
+	obj.balance = uint256.NewInt(0)
 }
 
 func (wst writes) merge(maindb *StateDB) {

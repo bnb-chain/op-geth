@@ -563,8 +563,8 @@ func (s *StateDB) GetCodeHash(addr common.Address) (ret common.Hash) {
 		s.RecordRead(types.AccountStateKey(addr, types.AccountCodeHash), ret.Bytes())
 	}()
 	stateObject := s.getStateObject(addr)
-	if stateObject == nil {
-		return common.Hash{}
+	if stateObject != nil {
+		return common.BytesToHash(stateObject.CodeHash())
 	}
 	return common.Hash{}
 }

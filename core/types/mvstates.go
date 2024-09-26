@@ -333,10 +333,6 @@ func (w *RWTxList) Copy() *RWTxList {
 	return np
 }
 
-func (w *RWTxList) Remove(idx int) {
-	w.list = append(w.list[:idx], w.list[idx+1:]...)
-}
-
 var (
 	rwEventsAllocMeter = metrics.GetOrRegisterMeter("mvstate/alloc/rwevents/cnt", nil)
 	rwEventsAllocGauge = metrics.GetOrRegisterGauge("mvstate/alloc/rwevents/gauge", nil)

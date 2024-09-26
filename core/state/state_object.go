@@ -35,8 +35,6 @@ import (
 	"github.com/holiman/uint256"
 )
 
-var emptyCodeHash = crypto.Keccak256(nil)
-
 type Code []byte
 
 func (c Code) String() string {
@@ -230,14 +228,15 @@ func (s *stateObject) empty() bool {
 	//   Slot 1 tx 1: sub balance 100, it is empty and deleted
 	//   Slot 0 tx 2: GetNonce, lightCopy based on main DB(balance = 100) , not empty
 
-	if s.dbItf.GetBalance(s.address).Sign() != 0 { // check balance first, since it is most likely not zero
+	if !s.dbItf.GetBalance(s.address).IsZero() { // check balance first, since it is most likely not zero
+
 		return false
 	}
 	if s.dbItf.GetNonce(s.address) != 0 {
 		return false
 	}
 	codeHash := s.dbItf.GetCodeHash(s.address)
-	return bytes.Equal(codeHash.Bytes(), emptyCodeHash) // code is empty, the object is empty
+	return bytes.Equal(codeHash.Bytes(), types.EmptyCodeHash.Bytes()) // code is empty, the object is empty
 }
 
 // newObject creates a state object.

@@ -464,7 +464,7 @@ func (s *ParallelStateDB) Empty(addr common.Address) bool {
 			return false
 		}
 		codeHash := s.GetCodeHash(addr)
-		return bytes.Equal(codeHash.Bytes(), emptyCodeHash) // code is empty, the object is empty
+		return bytes.Equal(codeHash.Bytes(), types.EmptyCodeHash.Bytes()) // code is empty, the object is empty
 	}
 	// 2.Try to get from unconfirmed & main DB
 	// 2.1 Already read before
@@ -725,7 +725,7 @@ func (s *ParallelStateDB) GetCodeHash(addr common.Address) common.Hash {
 	//                    wrong 'empty' hash.
 	if dirtyObj != nil {
 		// found one
-		if dirtyObj.CodeHash() == nil || bytes.Equal(dirtyObj.CodeHash(), emptyCodeHash) {
+		if dirtyObj.CodeHash() == nil || bytes.Equal(dirtyObj.CodeHash(), types.EmptyCodeHash.Bytes()) {
 			dirtyObj.data.CodeHash = codeHash.Bytes()
 		}
 	}

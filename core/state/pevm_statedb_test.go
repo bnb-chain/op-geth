@@ -18,9 +18,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/trie"
-	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
-	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
+	"github.com/ethereum/go-ethereum/triedb"
+	"github.com/ethereum/go-ethereum/triedb/hashdb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
+	"github.com/holiman/uint256"
 )
 
 var Address1 = common.HexToAddress("0x1")
@@ -1408,7 +1409,7 @@ func (c Check) Verify(state vm.StateDB) error {
 
 	case "balance":
 		addr := c[1].(common.Address)
-		balance := c[2].(*big.Int)
+		balance, _ := uint256.FromBig(c[2].(*big.Int))
 		if state.GetBalance(addr).Cmp(balance) == 0 {
 			return nil
 		} else {
@@ -1545,12 +1546,12 @@ func (op Op) Call(db vm.StateDB) error {
 
 	case "AddBalance":
 		addr := op[1].(common.Address)
-		balance := op[2].(*big.Int)
+		balance, _ := uint256.FromBig(op[2].(*big.Int))
 		db.AddBalance(addr, balance)
 		return nil
 	case "SubBalance":
 		addr := op[1].(common.Address)
-		balance := op[2].(*big.Int)
+		balance, _ := uint256.FromBig(op[2].(*big.Int))
 		db.SubBalance(addr, balance)
 		return nil
 
@@ -1629,8 +1630,8 @@ func (txs Txs) Call(db vm.StateDB) error {
 	return nil
 }
 
-func triedbConfig(StateScheme string) *trie.Config {
-	config := &trie.Config{
+func triedbConfig(StateScheme string) *triedb.Config {
+	config := &triedb.Config{
 		Preimages: true,
 		NoTries:   false,
 	}
@@ -1657,7 +1658,7 @@ func triedbConfig(StateScheme string) *trie.Config {
 func newStateDB() *StateDB {
 	memdb := rawdb.NewMemoryDatabase()
 	// Open trie database with provided config
-	triedb := trie.NewDatabase(memdb, triedbConfig(rawdb.HashScheme))
+	triedb := triedb.NewDatabase(memdb, triedbConfig(rawdb.HashScheme))
 	stateCache := NewDatabaseWithNodeDB(memdb, triedb)
 	st, err := New(common.Hash{}, stateCache, nil)
 	if err != nil {

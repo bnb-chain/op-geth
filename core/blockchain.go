@@ -398,19 +398,28 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	// if there is no available state, waiting for state sync.
 	head := bc.CurrentBlock()
 
-	//fix pbss snapshot if needed
+	// Fix pbss snapshot if needed
 	if bc.triedb.Scheme() == rawdb.PathScheme {
-		log.Info("pbss snapshot validation")
+		log.Debug("pbss snapshot validation")
 		currentSafe := bc.CurrentSafeBlock()
 		currentFinalize := bc.CurrentFinalBlock()
 
-		if currentSafe.Number.Uint64() > head.Number.Uint64() || currentFinalize.Number.Uint64() > head.Number.Uint64() {
-			log.Info("current unsafe is behind safe, reset")
-			bc.hc.SetHead(head.Number.Uint64(), nil, createDelFn(bc))
-			//想办法
-			bc.SetSafe(head)
-			bc.SetFinalized(head)
+		// Check if either safe or finalized block is ahead of the head block
+		if currentSafe != nil && currentFinalize != nil {
+			if currentSafe.Number.Uint64() > head.Number.Uint64() || currentFinalize.Number.Uint64() > head.Number.Uint64() {
+				log.Info("current unsafe is behind safe, reset")
+				bc.hc.SetHead(head.Number.Uint64(), nil, createDelFn(bc))
+
+				// Update the safe and finalized block conditionally
+				if currentSafe.Number.Uint64() > head.Number.Uint64() {
+					bc.SetSafe(head)
+				}
+				if currentFinalize.Number.Uint64() > head.Number.Uint64() {
+					bc.SetFinalized(head)
+				}
+			}
 		}
+
 	}
 
 	if !bc.NoTries() && !bc.HasState(head.Root) {

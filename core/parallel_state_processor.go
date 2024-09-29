@@ -1007,7 +1007,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 			break
 		}
 		unconfirmedResult := <-p.txResultChan
-		if unconfirmedResult.txReq == nil && int(p.mergedTxIndex.Load())+1 == allTxCount {
+		if unconfirmedResult.txReq == nil {
 			// all tx results are merged.
 			break
 		}

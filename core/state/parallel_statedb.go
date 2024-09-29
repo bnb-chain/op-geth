@@ -588,6 +588,8 @@ func (s *ParallelStateDB) GetCode(addr common.Address) []byte {
 			return nil
 		}
 		dirtyObj = o
+	} else {
+		dirtyObj = nil
 	}
 
 	// 1.Try to get from dirty
@@ -617,8 +619,13 @@ func (s *ParallelStateDB) GetCode(addr common.Address) []byte {
 		s.parallel.codeReadsInSlot[addr] = code
 	}
 	// fixup dirties
-	if dirtyObj != nil && !bytes.Equal(dirtyObj.code, code) {
-		dirtyObj.code = code
+	if dirtyObj != nil {
+		if dirtyObj.code == nil {
+			dirtyObj.code = code
+		}
+		if !bytes.Equal(dirtyObj.code, code) {
+			dirtyObj.code = code
+		}
 	}
 	return code
 }

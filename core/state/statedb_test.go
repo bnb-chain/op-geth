@@ -1209,7 +1209,7 @@ func TestSuicide(t *testing.T) {
 	slotDb := NewSlotDB(state, 0, 0, manager, unconfirmedDBs, false)
 
 	addr := common.BytesToAddress([]byte("so"))
-	slotDb.SetBalance(addr, big.NewInt(1))
+	slotDb.SetBalance(addr, uint256.NewInt(1))
 
 	slotDb.SelfDestruct(addr)
 
@@ -1237,7 +1237,7 @@ func TestSetAndGetState(t *testing.T) {
 	state, _ := New(types.EmptyRootHash, db, nil)
 
 	addr := common.BytesToAddress([]byte("so"))
-	state.SetBalance(addr, big.NewInt(1))
+	state.SetBalance(addr, uint256.NewInt(1))
 	unconfirmedDBs := new(sync.Map)
 	state.PrepareForParallel()
 	manager := NewParallelDBManager(1, NewEmptySlotDB)
@@ -1274,7 +1274,7 @@ func TestSetAndGetCode(t *testing.T) {
 	state, _ := New(common.Hash{}, db, nil)
 
 	addr := common.BytesToAddress([]byte("so"))
-	state.SetBalance(addr, big.NewInt(1))
+	state.SetBalance(addr, uint256.NewInt(1))
 	state.PrepareForParallel()
 
 	unconfirmedDBs := new(sync.Map)
@@ -1310,7 +1310,7 @@ func TestGetCodeSize(t *testing.T) {
 	state, _ := New(common.Hash{}, db, nil)
 
 	addr := common.BytesToAddress([]byte("so"))
-	state.SetBalance(addr, big.NewInt(1))
+	state.SetBalance(addr, uint256.NewInt(1))
 	state.PrepareForParallel()
 
 	unconfirmedDBs := new(sync.Map)
@@ -1334,7 +1334,7 @@ func TestGetCodeHash(t *testing.T) {
 	state, _ := New(common.Hash{}, db, nil)
 
 	addr := common.BytesToAddress([]byte("so"))
-	state.SetBalance(addr, big.NewInt(1))
+	state.SetBalance(addr, uint256.NewInt(1))
 	state.PrepareForParallel()
 	unconfirmedDBs := new(sync.Map)
 	manager := NewParallelDBManager(1, NewEmptySlotDB)
@@ -1358,7 +1358,7 @@ func TestSetNonce(t *testing.T) {
 	state, _ := New(common.Hash{}, db, nil)
 
 	addr := common.BytesToAddress([]byte("so"))
-	state.SetBalance(addr, big.NewInt(1))
+	state.SetBalance(addr, uint256.NewInt(1))
 	state.SetNonce(addr, 1)
 	state.PrepareForParallel()
 
@@ -1387,16 +1387,16 @@ func TestSetAndGetBalance(t *testing.T) {
 	state, _ := New(common.Hash{}, db, nil)
 
 	addr := testAddress
-	state.SetBalance(addr, big.NewInt(1))
+	state.SetBalance(addr, uint256.NewInt(1))
 	state.PrepareForParallel()
 	unconfirmedDBs := new(sync.Map)
 	manager := NewParallelDBManager(1, NewEmptySlotDB)
 	slotDb := NewSlotDB(state, 0, 0, manager, unconfirmedDBs, false)
 
-	slotDb.SetBalance(addr, big.NewInt(2))
+	slotDb.SetBalance(addr, uint256.NewInt(2))
 
 	oldBalance := state.GetBalance(addr)
-	if oldBalance.Int64() != 1 {
+	if oldBalance.Uint64() != 1 {
 		t.Fatalf("old balance should be 1")
 	}
 
@@ -1409,7 +1409,7 @@ func TestSetAndGetBalance(t *testing.T) {
 	}
 
 	newBalance := slotDb.GetBalance(addr)
-	if newBalance.Int64() != 2 {
+	if newBalance.Uint64() != 2 {
 		t.Fatalf("new nonce should be 2")
 	}
 
@@ -1423,16 +1423,16 @@ func TestSubBalance(t *testing.T) {
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
 	addr := testAddress
-	state.SetBalance(addr, big.NewInt(2))
+	state.SetBalance(addr, uint256.NewInt(2))
 
 	state.PrepareForParallel()
 	unconfirmedDBs := new(sync.Map)
 	manager := NewParallelDBManager(1, NewEmptySlotDB)
 	slotDb := NewSlotDB(state, 0, 0, manager, unconfirmedDBs, false)
-	slotDb.SubBalance(addr, big.NewInt(1))
+	slotDb.SubBalance(addr, uint256.NewInt(1))
 
 	oldBalance := state.GetBalance(addr)
-	if oldBalance.Int64() != 2 {
+	if oldBalance.Uint64() != 2 {
 		t.Fatalf("old balance should be 1")
 	}
 
@@ -1449,7 +1449,7 @@ func TestSubBalance(t *testing.T) {
 	}
 
 	newBalance := slotDb.GetBalance(addr)
-	if newBalance.Int64() != 1 {
+	if newBalance.Uint64() != 1 {
 		t.Fatalf("new nonce should be 2")
 	}
 }
@@ -1459,15 +1459,15 @@ func TestAddBalance(t *testing.T) {
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
 	addr := testAddress
-	state.SetBalance(addr, big.NewInt(2))
+	state.SetBalance(addr, uint256.NewInt(2))
 	state.PrepareForParallel()
 	unconfirmedDBs := new(sync.Map)
 	manager := NewParallelDBManager(1, NewEmptySlotDB)
 	slotDb := NewSlotDB(state, 0, 0, manager, unconfirmedDBs, false)
-	slotDb.AddBalance(addr, big.NewInt(1))
+	slotDb.AddBalance(addr, uint256.NewInt(1))
 
 	oldBalance := state.GetBalance(addr)
-	if oldBalance.Int64() != 2 {
+	if oldBalance.Uint64() != 2 {
 		t.Fatalf("old balance should be 1")
 	}
 
@@ -1484,7 +1484,7 @@ func TestAddBalance(t *testing.T) {
 	}
 
 	newBalance := slotDb.GetBalance(addr)
-	if newBalance.Int64() != 3 {
+	if newBalance.Uint64() != 3 {
 		t.Fatalf("new nonce should be 2")
 	}
 }
@@ -1494,7 +1494,7 @@ func TestEmpty(t *testing.T) {
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
 	addr := testAddress
-	state.SetBalance(addr, big.NewInt(2))
+	state.SetBalance(addr, uint256.NewInt(2))
 	state.PrepareForParallel()
 
 	unconfirmedDBs := new(sync.Map)
@@ -1516,7 +1516,7 @@ func TestExist(t *testing.T) {
 	db := NewDatabase(memDb)
 	state, _ := New(common.Hash{}, db, nil)
 	addr := testAddress
-	state.SetBalance(addr, big.NewInt(2))
+	state.SetBalance(addr, uint256.NewInt(2))
 	state.PrepareForParallel()
 	unconfirmedDBs := new(sync.Map)
 	manager := NewParallelDBManager(1, NewEmptySlotDB)
@@ -1544,7 +1544,7 @@ func TestMergeSlotDB(t *testing.T) {
 	newSlotDb := NewSlotDB(state, 0, 0, manager, unconfirmedDBs, false)
 
 	addr := testAddress
-	newSlotDb.SetBalance(addr, big.NewInt(2))
+	newSlotDb.SetBalance(addr, uint256.NewInt(2))
 	newSlotDb.SetState(addr, common.BytesToHash([]byte("test key")), common.BytesToHash([]byte("test store")))
 	newSlotDb.SetCode(addr, []byte("test code"))
 	newSlotDb.SelfDestruct(addr)
@@ -1560,7 +1560,7 @@ func TestMergeSlotDB(t *testing.T) {
 		t.Fatalf("address should exist in StateChangeSet")
 	}
 
-	if ok := changeList.GetBalance(addr); ok != common.Big0 {
+	if ok := changeList.GetBalance(addr); ok != common.U2560 {
 		t.Fatalf("address should exist in StateChangeSet")
 	}
 

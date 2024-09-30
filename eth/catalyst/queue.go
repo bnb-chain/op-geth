@@ -126,6 +126,23 @@ func (q *payloadQueue) has(id engine.PayloadID) bool {
 	return false
 }
 
+// getBlock retrieves block from a previously stored payload or nil if it does not exist.
+func (q *payloadQueue) getBlockByHash(hash common.Hash) *types.Block {
+	q.lock.RLock()
+	defer q.lock.RUnlock()
+
+	for _, item := range q.payloads {
+		if item == nil {
+			return nil
+		}
+		block := item.payload.GetBlock()
+		if block.Hash() == hash {
+			return block
+		}
+	}
+	return nil
+}
+
 // headerQueueItem represents an hash->header tuple to store until it's retrieved
 // or evicted.
 type headerQueueItem struct {

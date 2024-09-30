@@ -399,11 +399,17 @@ func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, hea
 	// Finalize and assemble the block.
 	beacon.Finalize(chain, header, state, txs, uncles, withdrawals)
 
-	// Assign the final state root to header.
-	header.Root = state.IntermediateRoot(true)
+	rootCh := make(chan common.Hash)
+	go func() {
+		rootCh <- state.IntermediateRoot(true)
+	}()
+
+	block := types.NewBlockWithWithdrawals(header, txs, uncles, receipts, withdrawals, trie.NewStackTrie(nil))
+	headerWithRoot := block.Header()
+	headerWithRoot.Root = <-rootCh
 
 	// Assemble and return the final block.
-	return types.NewBlockWithWithdrawals(header, txs, uncles, receipts, withdrawals, trie.NewStackTrie(nil)), nil
+	return block.WithSeal(headerWithRoot), nil
 }
 
 // Seal generates a new sealing request for the given input block and pushes

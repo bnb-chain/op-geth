@@ -233,6 +233,15 @@ func (payload *Payload) resolve(onlyFull bool) *engine.ExecutionPayloadEnvelope 
 	return nil
 }
 
+func (payload *Payload) GetBlock() *types.Block {
+	if payload.full != nil {
+		return payload.full
+	} else if payload.empty != nil {
+		return payload.empty
+	}
+	return nil
+}
+
 // interruptBuilding sets an interrupt for a potentially ongoing
 // block building process.
 // This will prevent it from adding new transactions to the block, and if it is

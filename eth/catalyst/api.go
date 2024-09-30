@@ -99,6 +99,7 @@ var caps = []string{
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
 	"engine_getClientVersionV1",
+	"engine_opSealPayload",
 }
 
 type ConsensusAPI struct {
@@ -602,11 +603,17 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	defer api.newPayloadLock.Unlock()
 
 	log.Trace("Engine API request received", "method", "NewPayload", "number", params.Number, "hash", params.BlockHash)
-	block, err := engine.ExecutableDataToBlock(params, versionedHashes, beaconRoot)
-	if err != nil {
-		log.Warn("Invalid NewPayload params", "params", params, "error", err)
-		return api.invalid(err, nil), nil
+
+	block := api.localBlocks.getBlockByHash(params.BlockHash)
+	if block == nil {
+		var err error
+		block, err = engine.ExecutableDataToBlock(params, versionedHashes, beaconRoot)
+		if err != nil {
+			log.Warn("Invalid NewPayload params", "params", params, "error", err)
+			return api.invalid(err, nil), nil
+		}
 	}
+
 	// Stash away the last update to warn the user if the beacon client goes offline
 	api.lastNewPayloadLock.Lock()
 	api.lastNewPayloadUpdate = time.Now()
@@ -689,6 +696,36 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	}
 	hash := block.Hash()
 	return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
+}
+
+// OpSealPayload is combination API of payload sealing: getPayload, newPayload, forkchoiceUpdated.
+// TODO add API version
+func (api *ConsensusAPI) OpSealPayload(payloadID engine.PayloadID, update engine.ForkchoiceStateV1) (engine.OpSealPayloadResponse, error) {
+	return api.opSealPayload(payloadID, update)
+}
+
+func (api *ConsensusAPI) opSealPayload(payloadID engine.PayloadID, update engine.ForkchoiceStateV1) (engine.OpSealPayloadResponse, error) {
+	payloadEnvelope, err := api.getPayload(payloadID, false)
+	if err != nil {
+		log.Error("Seal payload error when get payload", "error", err, "payloadID", payloadID)
+		return engine.OpSealPayloadResponse{Stage: engine.GetPayloadStage}, err
+	}
+
+	payloadStatus, err := api.newPayload(*payloadEnvelope.ExecutionPayload, []common.Hash{}, payloadEnvelope.ParentBeaconBlockRoot)
+	if err != nil || payloadStatus.Status != engine.VALID {
+		log.Error("Seal payload error when new payload", "error", err, "payloadStatus", payloadStatus)
+		return engine.OpSealPayloadResponse{Stage: engine.NewPayloadStage, PayloadStatus: payloadStatus}, err
+	}
+
+	// TODO check update input
+	updateResponse, err := api.forkchoiceUpdated(update, nil, engine.PayloadV3, false)
+	if err != nil || updateResponse.PayloadStatus.Status != engine.VALID {
+		log.Error("Seal payload error when forkchoiceUpdated", "error", err, "payloadStatus", updateResponse.PayloadStatus)
+		return engine.OpSealPayloadResponse{Stage: engine.ForkchoiceUpdate, PayloadStatus: updateResponse.PayloadStatus}, err
+	}
+
+	log.Info("Seal payload succeed", "payloadStatus", updateResponse.PayloadStatus)
+	return engine.OpSealPayloadResponse{PayloadStatus: updateResponse.PayloadStatus, Payload: payloadEnvelope}, nil
 }
 
 // delayPayloadImport stashes the given block away for import at a later time,

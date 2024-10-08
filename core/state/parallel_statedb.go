@@ -1798,7 +1798,9 @@ func (s *ParallelStateDB) FinaliseForParallel(deleteEmptyObjects bool, mainDB *S
 	}
 
 	if mainDB.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		mainDB.trieParallelLock.Lock()
 		mainDB.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
+		mainDB.trieParallelLock.Unlock()
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()

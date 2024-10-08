@@ -35,6 +35,7 @@ type Config struct {
 	EnablePreimageRecording     bool                // Enables recording of SHA3/keccak preimages
 	ExtraEips                   []int               // Additional EIPS that are to be enabled
 	EnableParallelExec          bool                // Whether to execute transaction in parallel mode when do full sync
+	EnableParallelExecV2        bool                // Whether to execute transaction in parallel mode when do full sync
 	ParallelTxNum               int                 // Number of slot for transaction execution
 	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
 	EnableOpcodeOptimizations   bool                // Enable opcode optimization

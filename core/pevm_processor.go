@@ -23,12 +23,11 @@ type PEVMProcessor struct {
 	delayGasFee          bool
 	commonTxs            []*types.Transaction
 	receipts             types.Receipts
-	error                error
 	debugConflictRedoNum uint64
 }
 
-func newPEVmProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine) *ParallelStateProcessor {
-	processor := &ParallelStateProcessor{
+func newPEVMProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine) *PEVMProcessor {
+	processor := &PEVMProcessor{
 		StateProcessor: *NewStateProcessor(config, bc, engine),
 	}
 	log.Info("Parallel execution mode is enabled", "Parallel Num", runtime.NumCPU(),
@@ -266,12 +265,21 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 
 	// len(commonTxs) could be 0, such as: https://bscscan.com/block/14580486
 	// all txs have been merged at this point, no need to acquire the lock of commonTxs
-	log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", *usedGas,
-		"txNum", txNum,
-		"len(commonTxs)", len(p.commonTxs),
-		"conflictNum", p.debugConflictRedoNum,
-		"redoRate(%)", 100*(int(p.debugConflictRedoNum))/len(p.commonTxs),
-		"txDAG", txDAG != nil)
+	if len(p.commonTxs) == 0 {
+		log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", *usedGas,
+			"txNum", txNum,
+			"len(commonTxs)", len(p.commonTxs),
+			"conflictNum", p.debugConflictRedoNum,
+			"redoRate(%)", 100*(int(p.debugConflictRedoNum))/1,
+			"txDAG", txDAG != nil)
+	} else {
+		log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", *usedGas,
+			"txNum", txNum,
+			"len(commonTxs)", len(p.commonTxs),
+			"conflictNum", p.debugConflictRedoNum,
+			"redoRate(%)", 100*(int(p.debugConflictRedoNum))/len(p.commonTxs),
+			"txDAG", txDAG != nil)
+	}
 	if metrics.EnabledExpensive {
 		parallelTxNumMeter.Mark(int64(len(p.commonTxs)))
 		parallelConflictTxNumMeter.Mark(int64(p.debugConflictRedoNum))

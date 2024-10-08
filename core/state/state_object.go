@@ -490,7 +490,9 @@ func (s *stateObject) finalise(prefetch bool) {
 		s.dirtyCodeHash = nil
 	}
 	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
+		s.db.trieParallelLock.Lock()
 		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, slotsToPrefetch)
+		s.db.trieParallelLock.Unlock()
 	}
 	if s.dirtyStorage.Length() > 0 {
 		s.dirtyStorage = newStorage(s.isParallel)

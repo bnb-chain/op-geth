@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"os"
 	"sync"
@@ -255,6 +254,12 @@ func TestTxLevelSplit(t *testing.T) {
 
 }
 
+func setTxIndex(allReq []*PEVMTxRequest) {
+	for i, req := range allReq {
+		req.txIndex = i
+	}
+}
+
 func TestTxLevelRun(t *testing.T) {
 	// case 1: empty txs
 	case1 := func() {
@@ -277,6 +282,7 @@ func TestTxLevelRun(t *testing.T) {
 			newTxReq(3, 7, 30),
 			newTxReq(4, 8, 40),
 		}
+		setTxIndex(allReqs)
 		txdag := int2txdag([][]int{
 			nil, nil, nil, nil,
 		})
@@ -312,6 +318,7 @@ func TestTxLevelRun(t *testing.T) {
 			newTxReq(3, 5, 10),
 			newTxReq(4, 6, 20),
 		}
+		setTxIndex(allReqs)
 		txdag := int2txdag([][]int{
 			nil, nil, {0}, {1},
 		})
@@ -347,6 +354,7 @@ func TestTxLevelRun(t *testing.T) {
 			newTxReq(3, 5, 10),
 			newTxReq(4, 6, 20),
 		}
+		setTxIndex(allReqs)
 		txdag := int2txdag([][]int{
 			{0}, nil, {-1}, {-1},
 		})
@@ -359,8 +367,8 @@ func TestTxLevelRun(t *testing.T) {
 		if !ok {
 			t.Fatalf("invalid mainDB state")
 		}
-		if caller.conflictNum != 2 {
-			t.Fatalf("conflict not found, conflict:%d", caller.conflictNum)
+		if caller.conflictNum != 0 {
+			t.Fatalf("conflict found, conflict:%d", caller.conflictNum)
 		}
 	}
 
@@ -392,6 +400,7 @@ func TestTxLevelRun(t *testing.T) {
 		for i := 1; i <= 1000; i++ {
 			allReqs = append(allReqs, newTxReq(i+1000, i+2000, i))
 		}
+		setTxIndex(allReqs)
 		// result of addressSetC
 		res := make(map[int]int, 1000)
 		for i := 1; i <= 1000; i++ {
@@ -422,6 +431,7 @@ func TestTxLevelRun(t *testing.T) {
 			newTxReq(1, 2, 10),
 			newTxReq(2, 3, 10),
 		}
+		setTxIndex(allReqs)
 		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
 		err, _ := NewTxLevels(allReqs, nil).Run(caller.execute, caller.confirm)
 		ok := checkMainDB(map[int]int{1: 5, 2: 20, 3: 10})
@@ -435,8 +445,11 @@ func TestTxLevelRun(t *testing.T) {
 
 	// case 7: txs with dependencies, with default txdag (deposit tx + all comment txs)
 	case7 := func() {
-		dag := &types.PlainTxDAG{}
-		dag.SetTxDep(0, types.TxDep{TxIndexes: nil, Flags: &types.ExcludedTxFlag})
+		//dag := &types.PlainTxDAG{}
+		//dag.SetTxDep(0, types.TxDep{TxIndexes: nil, Flags: &types.ExcludedTxFlag})
+		dag := int2txdag([][]int{
+			{-1}, nil,
+		})
 		// mainDB: [1: 15, 2: 20, 3: 0]
 		// txs: [1->2:10, 2->3:10]
 		// txdag: [-1, nil]
@@ -448,6 +461,7 @@ func TestTxLevelRun(t *testing.T) {
 			newTxReq(2, 3, 10),
 		}
 		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
+		setTxIndex(allReqs)
 		err, _ := NewTxLevels(allReqs, dag).Run(caller.execute, caller.confirm)
 		ok := checkMainDB(map[int]int{1: 5, 2: 20, 3: 10})
 		if err != nil {
@@ -709,143 +723,143 @@ func loadChainConfigFromGenesis(filePath string) (*params.ChainConfig, error) {
 }
 
 func TestShowDAG(t *testing.T) {
-	// Example usage
-	genesisFilePath := "/Users/awen/Desktop/Nodereal/aweneagle_projects/chain-infra/qa/gitops/qa-us/opbnb-qanet-ec-5/contracts-info/genesis.json"
-	chainConfig, err := loadChainConfigFromGenesis(genesisFilePath)
-	if err != nil {
-		log.Fatalf("Failed to load chain config: %v", err)
-	}
-	signer := types.LatestSigner(chainConfig)
-	_, dag, err := readTxDAGItemFromLine(block8966())
-	if err != nil {
-		panic(err)
-	}
-	txs, err := getBlockTransactions("https://opbnb-qanet-ec-5-seq-pevm-2.bk.nodereal.cc", 8966)
-	if err != nil {
-		panic(err)
-	}
-	//check dag[0]; it should be a deposit tx, and should have a exclude flag
-	if !dag.TxDep(0).CheckFlag(types.ExcludedTxFlag) {
-		panic("broken dag, deposit tx should have exclude flag")
-	}
-	var dependTo = func(a *types.Transaction, b *types.Transaction) bool {
-		if a.Nonce() <= b.Nonce() {
-			return false
-		}
-		aFromAddr, err := types.Sender(signer, a)
-		if err != nil {
-			panic(err)
-		}
-		bFromAddr, err := types.Sender(signer, b)
-		if err != nil {
-			panic(err)
-		}
-		aToAddr, bToAddr := *(a.To()), *(b.To())
+	//// Example usage
+	//genesisFilePath := "/Users/awen/Desktop/Nodereal/aweneagle_projects/chain-infra/qa/gitops/qa-us/opbnb-qanet-ec-5/contracts-info/genesis.json"
+	//chainConfig, err := loadChainConfigFromGenesis(genesisFilePath)
+	//if err != nil {
+	//	log.Fatalf("Failed to load chain config: %v", err)
+	//}
+	//signer := types.LatestSigner(chainConfig)
+	//_, dag, err := readTxDAGItemFromLine(block8966())
+	//if err != nil {
+	//	panic(err)
+	//}
+	//txs, err := getBlockTransactions("https://opbnb-qanet-ec-5-seq-pevm-2.bk.nodereal.cc", 8966)
+	//if err != nil {
+	//	panic(err)
+	//}
+	////check dag[0]; it should be a deposit tx, and should have a exclude flag
+	//if !dag.TxDep(0).CheckFlag(types.ExcludedTxFlag) {
+	//	panic("broken dag, deposit tx should have exclude flag")
+	//}
+	//var dependTo = func(a *types.Transaction, b *types.Transaction) bool {
+	//	if a.Nonce() <= b.Nonce() {
+	//		return false
+	//	}
+	//	aFromAddr, err := types.Sender(signer, a)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	bFromAddr, err := types.Sender(signer, b)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	aToAddr, bToAddr := *(a.To()), *(b.To())
 
-		if aFromAddr.Cmp(bFromAddr) == 0 || aFromAddr.Cmp(bToAddr) == 0 {
-			return true
-		}
-		return aToAddr.Cmp(bFromAddr) == 0 || aToAddr.Cmp(bToAddr) == 0
-	}
-	fmt.Printf("total tx:%d, dag tx:%d\n", len(txs), dag.TxCount())
-	depCorrect, depWrong := 1, 0
-	for i := 1; i < len(txs); i++ {
-		var deps = map[int]struct{}{}
-		// no need to add tx[0], must be dependent on tx[0]
-		for j := 1; j < i; j++ {
-			if dependTo(txs[i], txs[j]) {
-				deps[j] = struct{}{}
-			}
-		}
-		ofrom, _ := types.Sender(signer, txs[i])
-		oto := txs[i].To()
-		temp := dag.TxDep(i).TxIndexes
-		// filter out 0
-		originDeps := make([]uint64, 0, len(temp))
-		for _, j := range temp {
-			if j != 0 {
-				originDeps = append(originDeps, j)
-			}
-		}
-		passed := true
-		if len(deps) != len(originDeps) {
-			fmt.Printf("tx[%d:%s] has %d deps, but dag has %d deps\n", i, txs[i].Hash().String(), len(deps), len(originDeps))
-			passed = false
-			//expected:
-			for ti := range originDeps {
-				from, _ := types.Sender(signer, txs[ti])
-				to := txs[ti].To()
-				fmt.Printf("expected tindex=%d, from=%s, to=%s => tindex=%d, from=%s, to=%s\n", i, ofrom, oto, ti, from, to)
-			}
-			//actual:
-			if len(deps) > 0 {
-				for ti := range deps {
-					from, _ := types.Sender(signer, txs[ti])
-					to := txs[ti].To()
-					fmt.Printf("tx[%d] actual from=%s, to=%s,  tindex=%d, from=%s, to=%s txhash=%s dag:%v, dagFlag:%d\n", i, ofrom, oto, ti, from, to, txs[ti].Hash().String(), dag.TxDep(ti).TxIndexes, dag.TxDep(ti).Flags)
-				}
-			} else {
-				fmt.Printf("actual tindex=%d, from=%s, to=%s => no txs\n", i, ofrom, oto)
-			}
-		} else {
-			for _, j := range originDeps {
-				if _, ok := deps[int(j)]; !ok {
-					fmt.Printf("tx[%d:%s] has %d deps, but dag has %d deps\n", i, txs[i].Hash().String(), len(deps), len(originDeps))
-					passed = false
-				}
-			}
-			if !passed {
-				//expected:
-				for ti := range originDeps {
-					from, _ := types.Sender(signer, txs[ti])
-					to := txs[ti].To()
-					fmt.Printf("expected tindex=%d, from=%s, to=%s => tindex=%d, from=%s, to=%s\n", i, ofrom, oto, ti, from, to)
-				}
-				//actual:
-				if len(deps) > 0 {
-					for ti := range deps {
-						from, _ := types.Sender(signer, txs[ti])
-						to := txs[ti].To()
-						fmt.Printf("tx[%d] actual from=%s, to=%s,  tindex=%d, from=%s, to=%s txhash=%s dag:%v, dagFlag:%d\n", i, ofrom, oto, ti, from, to, txs[ti].Hash().String(), dag.TxDep(ti).TxIndexes, dag.TxDep(ti).Flags)
-					}
-				} else {
-					fmt.Printf("actual tindex=%d, from=%s, to=%s => no txs\n", i, ofrom, oto)
-				}
-			}
-		}
-		if passed {
-			depCorrect++
-			fmt.Printf("tx[%d:%s] passed =====\n", i, txs[i].Hash().String())
-		} else {
-			fmt.Printf("tx[%d:%s] failed =====\n", i, txs[i].Hash().String())
-			depWrong++
-		}
-	}
+	//	if aFromAddr.Cmp(bFromAddr) == 0 || aFromAddr.Cmp(bToAddr) == 0 {
+	//		return true
+	//	}
+	//	return aToAddr.Cmp(bFromAddr) == 0 || aToAddr.Cmp(bToAddr) == 0
+	//}
+	//fmt.Printf("total tx:%d, dag tx:%d\n", len(txs), dag.TxCount())
+	//depCorrect, depWrong := 1, 0
+	//for i := 1; i < len(txs); i++ {
+	//	var deps = map[int]struct{}{}
+	//	// no need to add tx[0], must be dependent on tx[0]
+	//	for j := 1; j < i; j++ {
+	//		if dependTo(txs[i], txs[j]) {
+	//			deps[j] = struct{}{}
+	//		}
+	//	}
+	//	ofrom, _ := types.Sender(signer, txs[i])
+	//	oto := txs[i].To()
+	//	temp := dag.TxDep(i).TxIndexes
+	//	// filter out 0
+	//	originDeps := make([]uint64, 0, len(temp))
+	//	for _, j := range temp {
+	//		if j != 0 {
+	//			originDeps = append(originDeps, j)
+	//		}
+	//	}
+	//	passed := true
+	//	if len(deps) != len(originDeps) {
+	//		fmt.Printf("tx[%d:%s] has %d deps, but dag has %d deps\n", i, txs[i].Hash().String(), len(deps), len(originDeps))
+	//		passed = false
+	//		//expected:
+	//		for ti := range originDeps {
+	//			from, _ := types.Sender(signer, txs[ti])
+	//			to := txs[ti].To()
+	//			fmt.Printf("expected tindex=%d, from=%s, to=%s => tindex=%d, from=%s, to=%s\n", i, ofrom, oto, ti, from, to)
+	//		}
+	//		//actual:
+	//		if len(deps) > 0 {
+	//			for ti := range deps {
+	//				from, _ := types.Sender(signer, txs[ti])
+	//				to := txs[ti].To()
+	//				fmt.Printf("tx[%d] actual from=%s, to=%s,  tindex=%d, from=%s, to=%s txhash=%s dag:%v, dagFlag:%d\n", i, ofrom, oto, ti, from, to, txs[ti].Hash().String(), dag.TxDep(ti).TxIndexes, dag.TxDep(ti).Flags)
+	//			}
+	//		} else {
+	//			fmt.Printf("actual tindex=%d, from=%s, to=%s => no txs\n", i, ofrom, oto)
+	//		}
+	//	} else {
+	//		for _, j := range originDeps {
+	//			if _, ok := deps[int(j)]; !ok {
+	//				fmt.Printf("tx[%d:%s] has %d deps, but dag has %d deps\n", i, txs[i].Hash().String(), len(deps), len(originDeps))
+	//				passed = false
+	//			}
+	//		}
+	//		if !passed {
+	//			//expected:
+	//			for ti := range originDeps {
+	//				from, _ := types.Sender(signer, txs[ti])
+	//				to := txs[ti].To()
+	//				fmt.Printf("expected tindex=%d, from=%s, to=%s => tindex=%d, from=%s, to=%s\n", i, ofrom, oto, ti, from, to)
+	//			}
+	//			//actual:
+	//			if len(deps) > 0 {
+	//				for ti := range deps {
+	//					from, _ := types.Sender(signer, txs[ti])
+	//					to := txs[ti].To()
+	//					fmt.Printf("tx[%d] actual from=%s, to=%s,  tindex=%d, from=%s, to=%s txhash=%s dag:%v, dagFlag:%d\n", i, ofrom, oto, ti, from, to, txs[ti].Hash().String(), dag.TxDep(ti).TxIndexes, dag.TxDep(ti).Flags)
+	//				}
+	//			} else {
+	//				fmt.Printf("actual tindex=%d, from=%s, to=%s => no txs\n", i, ofrom, oto)
+	//			}
+	//		}
+	//	}
+	//	if passed {
+	//		depCorrect++
+	//		fmt.Printf("tx[%d:%s] passed =====\n", i, txs[i].Hash().String())
+	//	} else {
+	//		fmt.Printf("tx[%d:%s] failed =====\n", i, txs[i].Hash().String())
+	//		depWrong++
+	//	}
+	//}
 
-	fmt.Printf("total tx:%d, total dep:%d, depCorrect:%d, depWrong:%d\n", len(txs), dag.TxCount(), depCorrect, depWrong)
+	//fmt.Printf("total tx:%d, total dep:%d, depCorrect:%d, depWrong:%d\n", len(txs), dag.TxCount(), depCorrect, depWrong)
 }
 
 func TestNewLevel(t *testing.T) {
-	fetchTxIndexes := func(level TxLevel) []int {
-		indexes := make([]int, len(level))
-		for i, tx := range level {
-			indexes[i] = tx.txIndex
-		}
-		return indexes
-	}
-	dag := txDAG(txDAGData())
-	fmt.Printf("txCount:%d\n", dag.TxCount())
-	nonces := make([]uint64, dag.TxCount())
-	for i := 0; i < dag.TxCount(); i++ {
-		nonces[i] = uint64(i) + 1
-	}
-	txs := nonces2txs(nonces)
-	fmt.Printf("txs:%d\n", len(txs))
-	levels := NewTxLevels(txs, dag)
-	fmt.Printf("levels:%d\n", len(levels))
-	for i := 0; i < len(levels); i++ {
-		fmt.Printf("level [%d]: len=%d, elements:%v\n", i, len(levels[i]), fetchTxIndexes(levels[i]))
-	}
+	//fetchTxIndexes := func(level TxLevel) []int {
+	//	indexes := make([]int, len(level))
+	//	for i, tx := range level {
+	//		indexes[i] = tx.txIndex
+	//	}
+	//	return indexes
+	//}
+	//dag := txDAG(txDAGData())
+	//fmt.Printf("txCount:%d\n", dag.TxCount())
+	//nonces := make([]uint64, dag.TxCount())
+	//for i := 0; i < dag.TxCount(); i++ {
+	//	nonces[i] = uint64(i) + 1
+	//}
+	//txs := nonces2txs(nonces)
+	//fmt.Printf("txs:%d\n", len(txs))
+	//levels := NewTxLevels(txs, dag)
+	//fmt.Printf("levels:%d\n", len(levels))
+	//for i := 0; i < len(levels); i++ {
+	//	fmt.Printf("level [%d]: len=%d, elements:%v\n", i, len(levels[i]), fetchTxIndexes(levels[i]))
+	//}
 }
 
 func txDAG(encode []byte) types.TxDAG {

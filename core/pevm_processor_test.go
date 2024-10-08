@@ -85,18 +85,18 @@ func genesisAlloc(addresses []*keypair, funds *big.Int) GenesisAlloc {
 }
 
 func TestPevmInsertChain(t *testing.T) {
-	from := 8000
-	to := 8001
-	endpoint := "https://opbnb-qanet-ec-5-seq-pevm-2.bk.nodereal.cc"
-	gJson := "/Users/awen/Desktop/Nodereal/aweneagle_projects/chain-infra/qa/gitops/qa-us/opbnb-qanet-ec-5/contracts-info/genesis.json"
-	genesis := loadGenesis(gJson)
-	blocks := fetchBlocks(uint64(from), uint64(to), endpoint)
-	//preapare parent header
-	chain := buildBlockChain(genesis, false)
-	chain.hc.headerCache.Add(blocks[0].Hash(), blocks[0].Header())
-	if err := InsertChain(chain, blocks[1:]); err != nil {
-		t.Fatal(err)
-	}
+	//from := 8000
+	//to := 8001
+	//endpoint := "https://opbnb-qanet-ec-5-seq-pevm-2.bk.nodereal.cc"
+	//gJson := "/Users/awen/Desktop/Nodereal/aweneagle_projects/chain-infra/qa/gitops/qa-us/opbnb-qanet-ec-5/contracts-info/genesis.json"
+	//genesis := loadGenesis(gJson)
+	//blocks := fetchBlocks(uint64(from), uint64(to), endpoint)
+	////preapare parent header
+	//chain := buildBlockChain(genesis, false)
+	//chain.hc.headerCache.Add(blocks[0].Hash(), blocks[0].Header())
+	//if err := InsertChain(chain, blocks[1:]); err != nil {
+	//	t.Fatal(err)
+	//}
 }
 
 func fetchBlocks(from, to uint64, endpoint string) []*types.Block {

@@ -278,12 +278,13 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	})
 	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
-		log.Error("ProcessParallel tx failed", "txIndex", txIndex, "err", err)
-		return nil, nil, 0, err
+		tx := allTxs[txIndex]
+		log.Error("ProcessParallel tx failed", "txIndex", txIndex, "txHash", tx.Hash().Hex(), "err", err)
+		return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", txIndex, tx.Hash().Hex(), err)
 	}
 
-	fmt.Printf("ProcessParallel tx all done, parallelNum:%d, txNum: %d, conflictNum: %d, executeDuration:%s, confirmDurations:%s, buildLevelsDuration:%s, runDuration:%s\n",
-		ParallelNum(), txNum, p.debugConflictRedoNum, time.Duration(executeDurations), time.Duration(confirmDurations), buildLevelsDuration, parallelRunDuration)
+	//fmt.Printf("ProcessParallel tx all done, parallelNum:%d, txNum: %d, conflictNum: %d, executeDuration:%s, confirmDurations:%s, buildLevelsDuration:%s, runDuration:%s\n",
+	//	ParallelNum(), txNum, p.debugConflictRedoNum, time.Duration(executeDurations), time.Duration(confirmDurations), buildLevelsDuration, parallelRunDuration)
 
 	// len(commonTxs) could be 0, such as: https://bscscan.com/block/14580486
 	var redoRate int = 0
@@ -331,7 +332,8 @@ func buildMessage(txReq *PEVMTxRequest, signer types.Signer, header *types.Heade
 	}
 	msg, err := TransactionToMessage(txReq.tx, signer, header.BaseFee)
 	if err != nil {
-		return fmt.Errorf("could not apply tx %d [%v]: %w", txReq.txIndex, txReq.tx.Hash().Hex(), err)
+		return err
+		//return fmt.Errorf("could not apply tx %d [%v]: %w", txReq.txIndex, txReq.tx.Hash().Hex(), err)
 	}
 	txReq.msg = msg
 	return nil

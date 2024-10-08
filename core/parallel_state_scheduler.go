@@ -192,16 +192,13 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 		confirmed: -1,
 	}
 
-	trustDAG := true
+	trustDAG := false
 
 	// execute all transactions in parallel
 	for _, txLevel := range tls {
 		wait := sync.WaitGroup{}
-		//wait.Add(len(txLevel))
 		trunks := txLevel.Split(runtime.NumCPU())
-		//trunks := TxLevels{txLevel}
 		wait.Add(len(trunks))
-		//fmt.Printf("total:%d, trunks:%d, parallelNum:%d\n", len(txLevel), len(trunks), ParallelNum())
 		// split tx into chunks, to save the cost of channel communication
 		for _, txs := range trunks {
 			// execute the transactions in parallel

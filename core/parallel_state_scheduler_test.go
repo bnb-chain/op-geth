@@ -35,7 +35,7 @@ import (
 //   2. merge the "slotDB"(addresses->balances) into maindb
 
 type mockTx struct {
-	req    *ParallelTxRequest
+	req    *PEVMTxRequest
 	reads  map[int]int
 	slotDB map[int]int
 }
@@ -61,12 +61,12 @@ func checkMainDB(data map[int]int) bool {
 	return true
 }
 
-func newTxReq(from, to, value int) *ParallelTxRequest {
+func newTxReq(from, to, value int) *PEVMTxRequest {
 	usedGas := uint64(value)
-	return &ParallelTxRequest{
-		usedGas:         &usedGas,
-		staticSlotIndex: from,
-		runnable:        int32(to),
+	return &PEVMTxRequest{
+		usedGas:  &usedGas,
+		gasLimit: uint64(from),
+		value:    to,
 	}
 }
 
@@ -75,15 +75,15 @@ func (mt *mockTx) Value() int {
 }
 
 func (mt *mockTx) From() int {
-	return mt.req.staticSlotIndex
+	return int(mt.req.gasLimit)
 }
 
 func (mt *mockTx) To() int {
-	return int(mt.req.runnable)
+	return int(mt.req.value)
 }
 
-func (mt *mockTx) execute(req *ParallelTxRequest) *ParallelTxResult {
-	result := &ParallelTxResult{
+func (mt *mockTx) execute(req *PEVMTxRequest) *PEVMTxResult {
+	result := &PEVMTxResult{
 		txReq: req,
 		err:   nil,
 	}
@@ -112,7 +112,7 @@ func (mt *mockTx) execute(req *ParallelTxRequest) *ParallelTxResult {
 	return result
 }
 
-func (mt *mockTx) confirm(result *ParallelTxResult) error {
+func (mt *mockTx) confirm(result *PEVMTxResult) error {
 	// check conflict
 	fromBalance, _ := mockMainDB.Load(mt.From())
 	toBalance, _ := mockMainDB.Load(mt.To())
@@ -129,11 +129,11 @@ func (mt *mockTx) confirm(result *ParallelTxResult) error {
 
 type caller struct {
 	lock        sync.Mutex
-	txs         map[*ParallelTxRequest]*mockTx
+	txs         map[*PEVMTxRequest]*mockTx
 	conflictNum int32
 }
 
-func (c *caller) execute(req *ParallelTxRequest) *ParallelTxResult {
+func (c *caller) execute(req *PEVMTxRequest) *PEVMTxResult {
 	mocktx := &mockTx{
 		reads:  make(map[int]int),
 		slotDB: make(map[int]int),
@@ -148,7 +148,7 @@ func (c *caller) execute(req *ParallelTxRequest) *ParallelTxResult {
 	return result
 }
 
-func (c *caller) confirm(result *ParallelTxResult) error {
+func (c *caller) confirm(result *PEVMTxResult) error {
 	c.lock.Lock()
 	mtx := c.txs[result.txReq]
 	c.lock.Unlock()
@@ -259,8 +259,8 @@ func TestTxLevelRun(t *testing.T) {
 	// case 1: empty txs
 	case1 := func() {
 		levels([]uint64{}, [][]int{}).Run(
-			func(*ParallelTxRequest) *ParallelTxResult { return nil },
-			func(*ParallelTxResult) error { return nil })
+			func(*PEVMTxRequest) *PEVMTxResult { return nil },
+			func(*PEVMTxResult) error { return nil })
 	}
 	// case 2: 4 txs with no dependencies, no conflicts
 	case2 := func() {
@@ -271,7 +271,7 @@ func TestTxLevelRun(t *testing.T) {
 		//	 mainDB: [1: 0, 2: 0, 3: 0, 4:0, 5:11, 6:21, 7:31, 8:41]
 		//	 conflictNum: 0
 		putMainDB(map[int]int{1: 10, 2: 20, 3: 30, 4: 40, 5: 1, 6: 1, 7: 1, 8: 1})
-		allReqs := []*ParallelTxRequest{
+		allReqs := []*PEVMTxRequest{
 			newTxReq(1, 5, 10),
 			newTxReq(2, 6, 20),
 			newTxReq(3, 7, 30),
@@ -280,7 +280,7 @@ func TestTxLevelRun(t *testing.T) {
 		txdag := int2txdag([][]int{
 			nil, nil, nil, nil,
 		})
-		caller := caller{txs: make(map[*ParallelTxRequest]*mockTx)}
+		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
 		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm)
 		ok := checkMainDB(map[int]int{1: 0, 2: 0, 3: 0, 4: 0, 5: 11, 6: 21, 7: 31, 8: 41})
 		if err != nil {
@@ -306,7 +306,7 @@ func TestTxLevelRun(t *testing.T) {
 		//	 mainDB: [1: 0, 2: 0, 3: 0, 4:0, 5:11, 6:21]
 		//	 conflictNum: 0
 		putMainDB(map[int]int{1: 10, 2: 20, 3: 0, 4: 0, 5: 1, 6: 1})
-		allReqs := []*ParallelTxRequest{
+		allReqs := []*PEVMTxRequest{
 			newTxReq(1, 3, 10),
 			newTxReq(2, 4, 20),
 			newTxReq(3, 5, 10),
@@ -315,7 +315,7 @@ func TestTxLevelRun(t *testing.T) {
 		txdag := int2txdag([][]int{
 			nil, nil, {0}, {1},
 		})
-		caller := caller{txs: make(map[*ParallelTxRequest]*mockTx)}
+		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
 		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm)
 		ok := checkMainDB(map[int]int{1: 0, 2: 0, 3: 0, 4: 0, 5: 11, 6: 21})
 		if err != nil {
@@ -341,7 +341,7 @@ func TestTxLevelRun(t *testing.T) {
 		//	 mainDB: [1: 0, 2: 0, 3: 0, 4:0, 5:11, 6:21]
 		//	 conflictNum: 2
 		putMainDB(map[int]int{1: 10, 2: 20, 3: 0, 4: 0, 5: 1, 6: 1})
-		allReqs := []*ParallelTxRequest{
+		allReqs := []*PEVMTxRequest{
 			newTxReq(1, 3, 10),
 			newTxReq(2, 4, 20),
 			newTxReq(3, 5, 10),
@@ -350,7 +350,7 @@ func TestTxLevelRun(t *testing.T) {
 		txdag := int2txdag([][]int{
 			{0}, nil, {-1}, {-1},
 		})
-		caller := caller{txs: make(map[*ParallelTxRequest]*mockTx)}
+		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
 		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm)
 		ok := checkMainDB(map[int]int{1: 0, 2: 0, 3: 0, 4: 0, 5: 11, 6: 21})
 		if err != nil {
@@ -383,7 +383,7 @@ func TestTxLevelRun(t *testing.T) {
 		storeBalance(1, 1000, 1)
 		storeBalance(1001, 2000, 0)
 		storeBalance(2001, 3000, 0)
-		allReqs := make([]*ParallelTxRequest, 0, 2000)
+		allReqs := make([]*PEVMTxRequest, 0, 2000)
 		// addressSetA -> addressSetB
 		for i := 1; i <= 1000; i++ {
 			allReqs = append(allReqs, newTxReq(i, i+1000, i))
@@ -397,7 +397,7 @@ func TestTxLevelRun(t *testing.T) {
 		for i := 1; i <= 1000; i++ {
 			res[i+2000] = i
 		}
-		caller := caller{txs: make(map[*ParallelTxRequest]*mockTx)}
+		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
 		err, _ := NewTxLevels(allReqs, nil).Run(caller.execute, caller.confirm)
 		ok := checkMainDB(res)
 		if err != nil {
@@ -418,11 +418,11 @@ func TestTxLevelRun(t *testing.T) {
 		// result:
 		//	 mainDB: [1: 5, 2: 20, 3: 10]
 		putMainDB(map[int]int{1: 15, 2: 20, 3: 0})
-		allReqs := []*ParallelTxRequest{
+		allReqs := []*PEVMTxRequest{
 			newTxReq(1, 2, 10),
 			newTxReq(2, 3, 10),
 		}
-		caller := caller{txs: make(map[*ParallelTxRequest]*mockTx)}
+		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
 		err, _ := NewTxLevels(allReqs, nil).Run(caller.execute, caller.confirm)
 		ok := checkMainDB(map[int]int{1: 5, 2: 20, 3: 10})
 		if err != nil {
@@ -443,11 +443,11 @@ func TestTxLevelRun(t *testing.T) {
 		// result:
 		//	 mainDB: [1: 5, 2: 20, 3: 10]
 		putMainDB(map[int]int{1: 15, 2: 20, 3: 0})
-		allReqs := []*ParallelTxRequest{
+		allReqs := []*PEVMTxRequest{
 			newTxReq(1, 2, 10),
 			newTxReq(2, 3, 10),
 		}
-		caller := caller{txs: make(map[*ParallelTxRequest]*mockTx)}
+		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
 		err, _ := NewTxLevels(allReqs, dag).Run(caller.execute, caller.confirm)
 		ok := checkMainDB(map[int]int{1: 5, 2: 20, 3: 10})
 		if err != nil {
@@ -472,8 +472,8 @@ func TestTxLevelRun(t *testing.T) {
 }
 
 func TestPredictTxDAG(t *testing.T) {
-	var buildTxReq = func(from, to common.Address, txIndex int) *ParallelTxRequest {
-		return &ParallelTxRequest{
+	var buildTxReq = func(from, to common.Address, txIndex int) *PEVMTxRequest {
+		return &PEVMTxRequest{
 			txIndex: txIndex,
 			msg: &Message{
 				From: from,
@@ -591,21 +591,17 @@ func TestMultiLevel(t *testing.T) {
 	assertEqual(levels([]uint64{1, 2, 3, 4, 5, 6, 7, 8}, [][]int{nil, nil, nil, {0}, nil, {1}, nil, {2}}), [][]uint64{{1, 2, 3, 5, 7}, {4, 6, 8}}, t)
 }
 
-func levels2(nonces []uint64, txdag [][]int) TxLevels {
+func levels(nonces []uint64, txdag [][]int) TxLevels {
 	return NewTxLevels(nonces2txs(nonces), int2txdag(txdag))
 }
 
-func levels(nonces []uint64, txdag [][]int) TxLevels {
-	return NewTxLevels2(nonces2txs(nonces), int2txdag(txdag))
-}
-
-func nonces2txs(nonces []uint64) []*ParallelTxRequest {
-	rq := make([]*ParallelTxRequest, len(nonces))
+func nonces2txs(nonces []uint64) []*PEVMTxRequest {
+	rq := make([]*PEVMTxRequest, len(nonces))
 	for i, nonce := range nonces {
 		if nonce == 0 {
 			rq[i] = nil
 		} else {
-			rq[i] = &ParallelTxRequest{tx: types.NewTransaction(nonce, common.Address{}, nil, 0, nil, nil), txIndex: i}
+			rq[i] = &PEVMTxRequest{tx: types.NewTransaction(nonce, common.Address{}, nil, 0, nil, nil), txIndex: i}
 		}
 	}
 	return rq

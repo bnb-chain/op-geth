@@ -64,14 +64,14 @@ func checkMainDB(data map[int]int) bool {
 func newTxReq(from, to, value int) *ParallelTxRequest {
 	usedGas := uint64(value)
 	return &ParallelTxRequest{
-		usedGas:         usedGas,
+		usedGas:         &usedGas,
 		staticSlotIndex: from,
 		runnable:        int32(to),
 	}
 }
 
 func (mt *mockTx) Value() int {
-	return int(mt.req.usedGas)
+	return int(*mt.req.usedGas)
 }
 
 func (mt *mockTx) From() int {

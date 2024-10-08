@@ -1922,6 +1922,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 				}
 			}
+
+			if bc.vmConfig.EnableParallelExecV2 {
+				bc.parseTxDAG(block)
+			}
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
 			// parallel mode has a pipeline, similar to this prefetch, to save CPU we disable this prefetch for parallel

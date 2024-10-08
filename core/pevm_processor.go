@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum/metrics"
 
@@ -30,7 +32,7 @@ func newPEVMProcessor(config *params.ChainConfig, bc *BlockChain, engine consens
 	processor := &PEVMProcessor{
 		StateProcessor: *NewStateProcessor(config, bc, engine),
 	}
-	log.Info("Parallel execution mode is enabled", "Parallel Num", runtime.NumCPU(),
+	log.Info("Parallel execution mode is enabled", "Parallel Num", ParallelNum(),
 		"CPUNum", runtime.NumCPU())
 	return processor
 }
@@ -184,6 +186,8 @@ func (p *PEVMProcessor) confirmTxResult(statedb *state.StateDB, gp *GasPool, res
 		root = statedb.IntermediateRoot(isEIP158).Bytes()
 	}
 	result.receipt.PostState = root
+	p.receipts[result.txReq.txIndex] = result.receipt
+	p.commonTxs[result.txReq.txIndex] = result.txReq.tx
 	return nil
 }
 
@@ -223,22 +227,17 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 
 	txNum := len(allTxs)
 	// Iterate over and process the individual transactions
-	p.commonTxs = make([]*types.Transaction, 0, txNum)
-	p.receipts = make([]*types.Receipt, 0, txNum)
+	p.commonTxs = make([]*types.Transaction, txNum)
+	p.receipts = make([]*types.Receipt, txNum)
+	p.debugConflictRedoNum = 0
 
 	for i, tx := range allTxs {
-		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
-		if err != nil {
-			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
-		}
-
 		// parallel start, wrap an exec message, which will be dispatched to a slot
 		txReq := &PEVMTxRequest{
 			txIndex:     i,
 			baseStateDB: statedb,
 			tx:          tx,
 			gasLimit:    block.GasLimit(), // gp.Gas().
-			msg:         msg,
 			block:       block,
 			vmConfig:    cfg,
 			usedGas:     usedGas,
@@ -252,34 +251,60 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	}
 
 	// parallel execution
+	start := time.Now()
 	txLevels := NewTxLevels(p.allTxReqs, txDAG)
-	err, txIndex := txLevels.Run(func(pr *PEVMTxRequest) *PEVMTxResult {
+	buildLevelsDuration := time.Since(start)
+	var executeDurations, confirmDurations int64 = 0, 0
+	err, txIndex := txLevels.Run(func(pr *PEVMTxRequest) (res *PEVMTxResult) {
+		defer func(t0 time.Time) {
+			atomic.AddInt64(&executeDurations, time.Since(t0).Nanoseconds())
+			if res.err != nil {
+				atomic.AddUint64(&p.debugConflictRedoNum, 1)
+			}
+		}(time.Now())
+
+		if err := buildMessage(pr, signer, header); err != nil {
+			return &PEVMTxResult{txReq: pr, err: err}
+		}
 		return p.executeInSlot(statedb, pr)
-	}, func(pr *PEVMTxResult) error {
+	}, func(pr *PEVMTxResult) (err error) {
+		defer func(t0 time.Time) {
+			atomic.AddInt64(&confirmDurations, time.Since(t0).Nanoseconds())
+			if err != nil {
+				atomic.AddUint64(&p.debugConflictRedoNum, 1)
+			}
+		}(time.Now())
 		return p.confirmTxResult(statedb, gp, pr)
 	})
+	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
-		log.Error("ProcessParallel tx failed", "err", err, "txIndex", txIndex)
+		log.Error("ProcessParallel tx failed", "txIndex", txIndex, "err", err)
 		return nil, nil, 0, err
 	}
 
+	fmt.Printf("ProcessParallel tx all done, parallelNum:%d, txNum: %d, conflictNum: %d, executeDuration:%s, confirmDurations:%s, buildLevelsDuration:%s, runDuration:%s\n",
+		ParallelNum(), txNum, p.debugConflictRedoNum, time.Duration(executeDurations), time.Duration(confirmDurations), buildLevelsDuration, parallelRunDuration)
+
 	// len(commonTxs) could be 0, such as: https://bscscan.com/block/14580486
-	// all txs have been merged at this point, no need to acquire the lock of commonTxs
+	var redoRate int = 0
 	if len(p.commonTxs) == 0 {
-		log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", *usedGas,
-			"txNum", txNum,
-			"len(commonTxs)", len(p.commonTxs),
-			"conflictNum", p.debugConflictRedoNum,
-			"redoRate(%)", 100*(int(p.debugConflictRedoNum))/1,
-			"txDAG", txDAG != nil)
+		redoRate = 100 * (int(p.debugConflictRedoNum)) / 1
 	} else {
-		log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", *usedGas,
-			"txNum", txNum,
-			"len(commonTxs)", len(p.commonTxs),
-			"conflictNum", p.debugConflictRedoNum,
-			"redoRate(%)", 100*(int(p.debugConflictRedoNum))/len(p.commonTxs),
-			"txDAG", txDAG != nil)
+		redoRate = 100 * (int(p.debugConflictRedoNum)) / len(p.commonTxs)
 	}
+	pevmBuildLevelsTimer.Update(buildLevelsDuration)
+	pevmRunTimer.Update(parallelRunDuration)
+	log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", *usedGas,
+		"parallelNum", ParallelNum(),
+		"buildLevelsDuration", buildLevelsDuration,
+		"parallelRunDuration", parallelRunDuration,
+		"executeDurations", time.Duration(executeDurations),
+		"confirmDurations", time.Duration(confirmDurations),
+		"txNum", txNum,
+		"len(commonTxs)", len(p.commonTxs),
+		"conflictNum", p.debugConflictRedoNum,
+		"redoRate(%)", redoRate,
+		"txDAG", txDAG != nil)
 	if metrics.EnabledExpensive {
 		parallelTxNumMeter.Mark(int64(len(p.commonTxs)))
 		parallelConflictTxNumMeter.Mark(int64(p.debugConflictRedoNum))
@@ -298,6 +323,18 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 		allLogs = append(allLogs, receipt.Logs...)
 	}
 	return p.receipts, allLogs, *usedGas, nil
+}
+
+func buildMessage(txReq *PEVMTxRequest, signer types.Signer, header *types.Header) error {
+	if txReq.msg != nil {
+		return nil
+	}
+	msg, err := TransactionToMessage(txReq.tx, signer, header.BaseFee)
+	if err != nil {
+		return fmt.Errorf("could not apply tx %d [%v]: %w", txReq.txIndex, txReq.tx.Hash().Hex(), err)
+	}
+	txReq.msg = msg
+	return nil
 }
 
 func pevmApplyTransactionStageExecution(msg *Message, gp *GasPool, statedb *state.UncommittedDB, evm *vm.EVM, delayGasFee bool) (*vm.EVM, *ExecutionResult, error) {

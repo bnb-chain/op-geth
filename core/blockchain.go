@@ -104,6 +104,9 @@ var (
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
 
+	pevmBuildLevelsTimer = metrics.NewRegisteredTimer("chain/pevm/buildlevels", nil)
+	pevmRunTimer         = metrics.NewRegisteredTimer("chain/pevm/run", nil)
+
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
 	blockReorgDropMeter = metrics.NewRegisteredMeter("chain/reorg/drop", nil)

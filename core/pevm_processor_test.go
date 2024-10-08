@@ -142,7 +142,7 @@ func loadGenesis(jsonfile string) *Genesis {
 func buildBlockChain(genesis *Genesis, parallel bool) *BlockChain {
 	archiveDb := rawdb.NewMemoryDatabase()
 	// Import the chain as an archive node for the comparison baseline
-	archive, err := NewBlockChain(archiveDb, DefaultCacheConfigWithScheme(rawdb.PathScheme), genesis, nil, ethash.NewFaker(), vm.Config{EnableParallelExec: parallel}, nil, nil)
+	archive, err := NewBlockChain(archiveDb, DefaultCacheConfigWithScheme(rawdb.PathScheme), genesis, nil, ethash.NewFaker(), vm.Config{EnableParallelExecV2: parallel}, nil, nil)
 	if err != nil {
 		panic(err)
 	}

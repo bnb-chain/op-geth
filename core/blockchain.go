@@ -1971,7 +1971,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
-		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec {
+		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec && !bc.vmConfig.EnableParallelExecV2 {
 			// compare input TxDAG when it enable in consensus
 			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			if err == nil {

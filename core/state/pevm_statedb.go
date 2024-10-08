@@ -472,6 +472,10 @@ func (pst *UncommittedDB) hasRefundConflict(maindb *StateDB) error {
 	return nil
 }
 
+func (pst *UncommittedDB) ConflictsToMaindb() error {
+	return pst.conflictsToMaindb()
+}
+
 func (pst *UncommittedDB) Merge() error {
 	if pst.discarded {
 		// all the writes of this db will be discarded, including:
@@ -521,6 +525,10 @@ func (pst *UncommittedDB) Merge() error {
 		pst.maindb.AddRefund(pst.refund)
 	}
 	return nil
+}
+
+func (pst *UncommittedDB) Finalise(deleteEmptyObjects bool) {
+	pst.maindb.Finalise(deleteEmptyObjects)
 }
 
 // getDeletedObj returns the state object for the given address or nil if not found.

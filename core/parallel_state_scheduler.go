@@ -27,7 +27,7 @@ func ParallelNum() int {
 }
 
 // TxLevel contains all transactions who are independent to each other
-type TxLevel []*ParallelTxRequest
+type TxLevel []*PEVMTxRequest
 
 func (tl TxLevel) SplitBy(chunkSize int) []TxLevel {
 	if len(tl) == 0 {
@@ -82,13 +82,13 @@ type confirmQueue struct {
 }
 
 type confirmation struct {
-	result    *ParallelTxResult
+	result    *PEVMTxResult
 	executed  error // error from execution in parallel
 	confirmed error // error from confirmation in sequence (like conflict)
 }
 
 // put into the right position (txIndex)
-func (cq *confirmQueue) collect(result *ParallelTxResult) error {
+func (cq *confirmQueue) collect(result *PEVMTxResult) error {
 	if result.txReq.txIndex >= len(cq.queue) {
 		// TODO add metrics
 		return fmt.Errorf("txIndex outof range, req.index:%d, len(queue):%d", result.txReq.txIndex, len(cq.queue))
@@ -98,7 +98,7 @@ func (cq *confirmQueue) collect(result *ParallelTxResult) error {
 	return nil
 }
 
-func (cq *confirmQueue) confirmWithTrust(level TxLevel, execute func(*ParallelTxRequest) *ParallelTxResult, confirm func(*ParallelTxResult) error) (error, int) {
+func (cq *confirmQueue) confirmWithTrust(level TxLevel, execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
 	// find all able-to-confirm transactions, and try to confirm them
 	for _, tx := range level {
 		i := tx.txIndex
@@ -133,7 +133,7 @@ func (cq *confirmQueue) confirmWithTrust(level TxLevel, execute func(*ParallelTx
 }
 
 // try to confirm txs as much as possible, they will be confirmed in a sequencial order.
-func (cq *confirmQueue) confirm(execute func(*ParallelTxRequest) *ParallelTxResult, confirm func(*ParallelTxResult) error) (error, int) {
+func (cq *confirmQueue) confirm(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
 	// find all able-to-confirm transactions, and try to confirm them
 	for i := cq.confirmed + 1; i < len(cq.queue); i++ {
 		toConfirm := cq.queue[i]
@@ -167,7 +167,7 @@ func (cq *confirmQueue) confirm(execute func(*ParallelTxRequest) *ParallelTxResu
 }
 
 // rerun executes the transaction of index 'i', and confirms it.
-func (cq *confirmQueue) rerun(i int, execute func(*ParallelTxRequest) *ParallelTxResult, confirm func(*ParallelTxResult) error) error {
+func (cq *confirmQueue) rerun(i int, execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) error {
 	//reset the result
 	cq.queue[i].result.err, cq.queue[i].executed, cq.queue[i].confirmed = nil, nil, nil
 	// failed, rerun and reconfirm, the rerun should alway success.
@@ -186,7 +186,7 @@ func (cq *confirmQueue) rerun(i int, execute func(*ParallelTxRequest) *ParallelT
 
 // run runs the transactions in parallel
 // execute must return a non-nil result, otherwise it panics.
-func (tls TxLevels) Run(execute func(*ParallelTxRequest) *ParallelTxResult, confirm func(*ParallelTxResult) error) (error, int) {
+func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
 	toConfirm := &confirmQueue{
 		queue:     make([]confirmation, tls.txCount()),
 		confirmed: -1,
@@ -269,7 +269,7 @@ func (tl TxLevel) predictTxDAG(dag types.TxDAG) {
 	}
 }
 
-func NewTxLevels2(all []*ParallelTxRequest, dag types.TxDAG) TxLevels {
+func NewTxLevels(all []*PEVMTxRequest, dag types.TxDAG) TxLevels {
 	var levels TxLevels = make(TxLevels, 0, 8)
 	var currLevel int = 0
 
@@ -331,142 +331,4 @@ func NewTxLevels2(all []*ParallelTxRequest, dag types.TxDAG) TxLevels {
 		}
 	}
 	return levels
-}
-
-// NewTxLevels generates the levels of transactions
-// all is the transactions to be executed, who are ordered by the txIndex
-func NewTxLevels(all []*ParallelTxRequest, dag types.TxDAG) TxLevels {
-	defaultLevels := func(all []*ParallelTxRequest) TxLevels {
-		if len(all) == 0 {
-			return nil
-		}
-		return TxLevels{all}
-	}
-	if dag == nil {
-		return defaultLevels(all)
-	}
-
-	collected := make(map[int]bool, len(all))
-	execlutedLevels := make([]TxLevel, 0, 1)
-	appendExecuted := func(tx *ParallelTxRequest) {
-		if collected[tx.txIndex] {
-			return
-		}
-		// it occupies the whole level
-		execlutedLevels = append(execlutedLevels, TxLevel{tx})
-		collected[tx.txIndex] = true
-	}
-
-	levels := make([]TxLevel, 0, 8)
-	appendNormal := func(tx *ParallelTxRequest, level int) {
-		if collected[tx.txIndex] {
-			return
-		}
-		if len(levels) <= level {
-			for i := len(levels); i <= level; i++ {
-				//@TODO risk of OOM, need to be optimized
-				levels = append(levels, make(TxLevel, 0, len(all)/2))
-			}
-		}
-		levels[level] = append(levels[level], tx)
-		collected[tx.txIndex] = true
-	}
-
-	nodependies := make(TxLevel, 0, 8)
-	appendNodependies := func(tx *ParallelTxRequest) {
-		if collected[tx.txIndex] {
-			return
-		}
-		nodependies = append(nodependies, tx)
-		collected[tx.txIndex] = true
-	}
-
-	dep2all := make([]TxLevel, 0, 8)
-	appendDepAll := func(tx *ParallelTxRequest) {
-		if collected[tx.txIndex] {
-			return
-		}
-		dep2all = append(dep2all, TxLevel{tx})
-		collected[tx.txIndex] = true
-	}
-
-	var putCurrentLevel func(tx *ParallelTxRequest, level int) error
-
-	putCurrentLevel = func(tx *ParallelTxRequest, level int) error {
-		if collected[tx.txIndex] {
-			return nil
-		}
-		var dep *types.TxDep
-		if dag.TxCount() > tx.txIndex {
-			dep = dag.TxDep(tx.txIndex)
-		}
-		if dep == nil {
-			// treated as no dependency
-			appendNormal(tx, level)
-			return nil
-		}
-
-		switch true {
-		case dep.CheckFlag(types.ExcludedTxFlag):
-			//occupies the whole level
-			appendExecuted(tx)
-
-		case dep.CheckFlag(types.NonDependentRelFlag):
-			// append to the dep2all levels
-			appendDepAll(tx)
-
-		default:
-			if len(dep.TxIndexes) != 0 {
-				appendNormal(tx, level)
-				// we expect the dependencies ordered by the txIndex, like: [1,2,4]
-				// so we handle the dependencies in a reverse order, in an order like:
-				//		putCurrentLevel(4), putCurrentLevel(2), putCurrentLevel(1)
-				for i := len(dep.TxIndexes) - 1; i >= 0; i-- {
-					txIndex := dep.TxIndexes[i]
-					if int(txIndex) >= len(all) || all[txIndex] == nil {
-						// TODO add logs
-						// broken DAG, just ignored it
-						return fmt.Errorf("broken DAG, txIndex:%d, len(all):%d", txIndex, len(all))
-					}
-					putCurrentLevel(all[txIndex], level+1)
-				}
-			} else {
-				// no dependencies
-				appendNodependies(tx)
-			}
-		}
-		return nil
-	}
-
-	for i := len(all) - 1; i >= 0; i-- {
-		tx := all[i]
-		if tx == nil {
-			continue
-		}
-		if err := putCurrentLevel(tx, 0); err != nil {
-			// TODO add logs
-			// something very wrong, just return the default levels
-			return defaultLevels(all)
-		}
-	}
-
-	// merge the normal levels and executed levels
-	// 1. run the executed levels first
-	// 2. then the "nodepnencies" levels
-	// 3. then the normal levels(who have dependencies)
-	// 4. then the dep2all levels(who depend on all)
-	final := make(TxLevels, 0, len(levels)+len(execlutedLevels)+len(dep2all))
-	for i := len(execlutedLevels) - 1; i >= 0; i-- {
-		final = append(final, execlutedLevels[i])
-	}
-	if len(nodependies) > 0 {
-		final = append(final, nodependies)
-	}
-	for i := len(levels) - 1; i >= 0; i-- {
-		final = append(final, levels[i])
-	}
-	for i := len(dep2all) - 1; i >= 0; i-- {
-		final = append(final, dep2all[i])
-	}
-	return final
 }

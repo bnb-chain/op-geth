@@ -766,7 +766,7 @@ func (s state) merge(maindb *StateDB) {
 		obj.SetBalance(s.balance)
 	}
 	if s.modified&ModifyNonce != 0 {
-		obj.setNonce(s.nonce)
+		obj.SetNonce(s.nonce)
 	}
 	if s.modified&ModifyCode != 0 {
 		obj.SetCode(common.BytesToHash(s.codeHash), s.code)

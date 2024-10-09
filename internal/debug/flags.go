@@ -25,7 +25,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"time"
 
 	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/log"
@@ -37,26 +36,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/exp/slog"
 	"gopkg.in/natefinch/lumberjack.v2"
-)
-
-var (
-	// Metrics for the gc
-	gcNum          = metrics.NewRegisteredGauge("gc/num", nil)
-	gcNumForce     = metrics.NewRegisteredGauge("gc/num/force", nil)
-	gcNextGC       = metrics.NewRegisteredGauge("gc/next/gc", nil)
-	gcPauseTotalNs = metrics.NewRegisteredGauge("gc/pause/total/ns", nil)
-	gcCPUUsage     = metrics.NewRegisteredGauge("gc/cpu/usage", nil)
-	gcSys          = metrics.NewRegisteredGauge("gc/sys", nil)
-	gcLookup       = metrics.NewRegisteredGauge("gc/lookup", nil)
-	gcMalloc       = metrics.NewRegisteredGauge("gc/malloc", nil)
-	gcFree         = metrics.NewRegisteredGauge("gc/free", nil)
-
-	gcTotalAlloc  = metrics.NewRegisteredGauge("gc/heap/total/alloc", nil)
-	gcHeapAlloc   = metrics.NewRegisteredGauge("gc/heap/alloc", nil)
-	gcHeapInuse   = metrics.NewRegisteredGauge("gc/heap/inuse", nil)
-	gcHeapIdle    = metrics.NewRegisteredGauge("gc/heap/idle", nil)
-	gcHeapRelease = metrics.NewRegisteredGauge("gc/heap/release", nil)
-	gcHeapObjects = metrics.NewRegisteredGauge("gc/heap/objects", nil)
 )
 
 var Memsize memsizeui.Handler
@@ -313,10 +292,6 @@ func Setup(ctx *cli.Context) error {
 
 	// pprof server
 	if ctx.Bool(pprofFlag.Name) {
-		// start a loop to collect gc stats per second
-		// it need metris.Enabled to be shown
-		go CollectGCStats()
-
 		listenHost := ctx.String(pprofAddrFlag.Name)
 
 		port := ctx.Int(pprofPortFlag.Name)
@@ -330,31 +305,6 @@ func Setup(ctx *cli.Context) error {
 		log.Info("Logging configured", context...)
 	}
 	return nil
-}
-
-func CollectGCStats() {
-	var memstat = runtime.MemStats{}
-	for {
-		runtime.ReadMemStats(&memstat)
-		gcNum.Update(int64(memstat.NumGC))
-		gcNumForce.Update(int64(memstat.NumForcedGC))
-		gcNextGC.Update(int64(memstat.NextGC))
-		gcPauseTotalNs.Update(int64(memstat.PauseTotalNs))
-		gcCPUUsage.Update(int64(memstat.GCCPUFraction * 100))
-		gcSys.Update(int64(memstat.Sys))
-		gcLookup.Update(int64(memstat.Lookups))
-		gcMalloc.Update(int64(memstat.Mallocs))
-		gcFree.Update(int64(memstat.Frees))
-
-		gcTotalAlloc.Update(int64(memstat.TotalAlloc))
-		gcHeapAlloc.Update(int64(memstat.HeapAlloc))
-		gcHeapInuse.Update(int64(memstat.HeapInuse))
-		gcHeapIdle.Update(int64(memstat.HeapIdle))
-		gcHeapObjects.Update(int64(memstat.HeapObjects))
-		gcHeapRelease.Update(int64(memstat.HeapReleased))
-
-		time.Sleep(1 * time.Second)
-	}
 }
 
 func StartPProf(address string, withMetrics bool) {

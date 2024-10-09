@@ -1274,7 +1274,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		work.tcount++
 	}
 	commitDepositTxsTimer.UpdateSince(start)
-	log.Info("commitDepositTxsTimer (execution)(slave)", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
+	log.Debug("commitDepositTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	// forced transactions done, fill rest of block with transactions
 	if !genParams.noTxs {
@@ -1319,7 +1319,6 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 				isBuildBlockInterruptCounter.Inc(1)
 			}
 		}
-		log.Info("commitDepositTxsTimer (execution)(master)", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 	}
 
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
@@ -1336,7 +1335,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	}
 
 	assembleBlockTimer.UpdateSince(start)
-	log.Info("assembleBlockTimer (validation)", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
+	log.Debug("assembleBlockTimer", "duration", common.PrettyDuration(time.Since(start)), "parentHash", genParams.parentHash)
 
 	accountReadTimer.Update(work.state.AccountReads)                 // Account reads are complete(in commit txs)
 	storageReadTimer.Update(work.state.StorageReads)                 // Storage reads are complete(in commit txs)

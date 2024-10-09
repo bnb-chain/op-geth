@@ -718,6 +718,7 @@ func (api *ConsensusAPI) opSealPayload(payloadID engine.PayloadID, update engine
 	}
 
 	// TODO check update input
+	update.HeadBlockHash = payloadEnvelope.ExecutionPayload.BlockHash
 	updateResponse, err := api.forkchoiceUpdated(update, nil, engine.PayloadV3, false)
 	if err != nil || updateResponse.PayloadStatus.Status != engine.VALID {
 		log.Error("Seal payload error when forkchoiceUpdated", "error", err, "payloadStatus", updateResponse.PayloadStatus)

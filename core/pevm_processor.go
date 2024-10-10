@@ -320,7 +320,17 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	p.engine.Finalize(p.bc, header, statedb, p.commonTxs, block.Uncles(), withdrawals)
 
 	var allLogs []*types.Log
+	var lindex = 0
+	var cumulativeGasUsed uint64
 	for _, receipt := range p.receipts {
+		// reset the log index
+		for _, log := range receipt.Logs {
+			log.Index = uint(lindex)
+			lindex++
+		}
+		// re-calculate the cumulativeGasUsed
+		cumulativeGasUsed += receipt.GasUsed
+		receipt.CumulativeGasUsed = cumulativeGasUsed
 		allLogs = append(allLogs, receipt.Logs...)
 	}
 	return p.receipts, allLogs, *usedGas, nil

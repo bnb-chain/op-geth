@@ -214,6 +214,7 @@ func TestForkResendTx(t *testing.T) {
 		t.Fatalf("could not create transaction: %v", err)
 	}
 	client.SendTransaction(ctx, tx)
+	time.Sleep(1 * time.Second)
 	sim.Commit()
 
 	// 3.

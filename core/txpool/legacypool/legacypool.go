@@ -839,6 +839,16 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 	}
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(pool.all.Slots()+numSlots(tx)) > pool.config.GlobalSlots+pool.config.GlobalQueue {
+		currHead := pool.currentHead.Load()
+		if currHead != nil && currHead.BaseFee != nil && pool.priced.NeedReheap(currHead) {
+			if pool.chainconfig.IsLondon(new(big.Int).Add(currHead.Number, big.NewInt(1))) {
+				baseFee := eip1559.CalcBaseFee(pool.chainconfig, currHead, currHead.Time+1)
+				pool.priced.SetBaseFee(baseFee)
+			}
+			pool.priced.Reheap()
+			pool.priced.currHead = currHead
+		}
+
 		// If the new transaction is underpriced, don't accept it
 		if !isLocal && pool.priced.Underpriced(tx) {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "gasTipCap", tx.GasTipCap(), "gasFeeCap", tx.GasFeeCap())
@@ -1109,7 +1119,9 @@ func (pool *LegacyPool) addRemoteSync(tx *types.Transaction) error {
 // to the add is finished. Only use this during tests for determinism!
 func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error {
 	defer func(t0 time.Time) {
-		addTimer.UpdateSince(t0)
+		if len(txs) > 0 {
+			addTimer.Update(time.Since(t0) / time.Duration(len(txs)))
+		}
 	}(time.Now())
 	// Do not treat as local if local transactions have been disabled
 	local = local && !pool.config.NoLocals
@@ -1146,7 +1158,9 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error 
 	pool.mu.Lock()
 	t0 := time.Now()
 	newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
-	addWithLockTimer.UpdateSince(t0)
+	if len(news) > 0 {
+		addWithLockTimer.Update(time.Since(t0) / time.Duration(len(news)))
+	}
 	pool.mu.Unlock()
 
 	var nilSlot = 0
@@ -1402,6 +1416,9 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 		reorgDurationTimer.Update(time.Since(t0))
 		if reset != nil {
 			reorgresetTimer.UpdateSince(t0)
+			if reset.newHead != nil {
+				log.Info("Transaction pool reorged", "from", reset.oldHead.Number.Uint64(), "to", reset.newHead.Number.Uint64())
+			}
 		}
 	}(time.Now())
 	defer close(done)
@@ -1450,8 +1467,6 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
 				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
 				pool.priced.SetBaseFee(pendingBaseFee)
-			} else {
-				pool.priced.Reheap()
 			}
 		}
 		gasTip, baseFee := pool.gasTip.Load(), pendingBaseFee

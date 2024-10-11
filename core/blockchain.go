@@ -105,6 +105,9 @@ var (
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
 
+	pevmBuildLevelsTimer = metrics.NewRegisteredTimer("chain/pevm/buildlevels", nil)
+	pevmRunTimer         = metrics.NewRegisteredTimer("chain/pevm/run", nil)
+
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
 	blockReorgDropMeter = metrics.NewRegisteredMeter("chain/reorg/drop", nil)
@@ -560,6 +563,8 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if bc.vmConfig.EnableParallelExec {
 		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
 		bc.CreateSerialProcessor(chainConfig, bc, engine)
+	} else if bc.vmConfig.EnableParallelExecV2 {
+		bc.processor = newPEVMProcessor(chainConfig, bc, engine)
 	} else {
 		bc.processor = NewStateProcessor(chainConfig, bc, engine)
 	}
@@ -1980,6 +1985,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 				}
 			}
+
+			if bc.vmConfig.EnableParallelExecV2 {
+				bc.parseTxDAG(block)
+			}
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
 			// parallel mode has a pipeline, similar to this prefetch, to save CPU we disable this prefetch for parallel
@@ -2025,7 +2034,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
-		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec {
+		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec && !bc.vmConfig.EnableParallelExecV2 {
 			// compare input TxDAG when it enable in consensus
 			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			if err == nil {

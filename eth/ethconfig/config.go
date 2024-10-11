@@ -19,8 +19,9 @@ package ethconfig
 
 import (
 	"errors"
-	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"time"
+
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -219,6 +220,7 @@ type Config struct {
 	RollupHaltOnIncompatibleProtocolVersion string
 
 	ParallelTxMode         bool // Whether to execute transaction in parallel mode when do full sync
+	ParallelTxMode2        bool // Whether to execute transaction in parallel mode when do full sync
 	ParallelTxNum          int  // Number of slot for transaction execution
 	EnableOpcodeOptimizing bool
 	EnableParallelTxDAG    bool

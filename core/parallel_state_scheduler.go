@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 var runner chan func()
@@ -197,6 +198,8 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 
 	// execute all transactions in parallel
 	for _, txLevel := range tls {
+		log.Debug("txLevel tx count:%d", len(txLevel))
+		parallelTxLevelTxSizeMeter.Mark(int64(len(txLevel)))
 		wait := sync.WaitGroup{}
 		trunks := txLevel.Split(runtime.NumCPU())
 		wait.Add(len(trunks))

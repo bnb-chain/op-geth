@@ -176,7 +176,6 @@ func ValidatePlainTxDAG(d TxDAG, txCnt int) error {
 				return fmt.Errorf("PlainTxDAG contains unordered dependency, tx: %v", i)
 			}
 		}
-
 	}
 	return nil
 }

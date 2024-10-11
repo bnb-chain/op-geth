@@ -253,6 +253,8 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	// parallel execution
 	start := time.Now()
 	txLevels := NewTxLevels(p.allTxReqs, txDAG)
+	log.Debug("txLevels size:%d", len(txLevels))
+	parallelTxLevelsSizeMeter.Mark(int64(len(txLevels)))
 	buildLevelsDuration := time.Since(start)
 	var executeDurations, confirmDurations int64 = 0, 0
 	err, txIndex := txLevels.Run(func(pr *PEVMTxRequest) (res *PEVMTxResult) {

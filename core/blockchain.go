@@ -100,6 +100,8 @@ var (
 
 	parallelTxNumMeter         = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
 	parallelConflictTxNumMeter = metrics.NewRegisteredMeter("chain/parallel/conflicttxs", nil)
+	parallelTxLevelsSizeMeter  = metrics.NewRegisteredMeter("chain/parallel/txlevel/size", nil)
+	parallelTxLevelTxSizeMeter = metrics.NewRegisteredMeter("chain/parallel/txlevel/txsize", nil)
 
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)

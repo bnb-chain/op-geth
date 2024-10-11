@@ -198,7 +198,7 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 
 	// execute all transactions in parallel
 	for _, txLevel := range tls {
-		log.Debug("txLevel tx count:%d", len(txLevel))
+		log.Debug("txLevel tx count", "tx count", len(txLevel))
 		parallelTxLevelTxSizeMeter.Mark(int64(len(txLevel)))
 		wait := sync.WaitGroup{}
 		trunks := txLevel.Split(runtime.NumCPU())

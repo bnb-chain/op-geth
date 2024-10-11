@@ -160,21 +160,23 @@ func ValidatePlainTxDAG(d TxDAG, txCnt int) error {
 		return fmt.Errorf("PlainTxDAG contains wrong txs count, expect: %v, actual: %v", txCnt, d.TxCount())
 	}
 	for i := 0; i < txCnt; i++ {
-		dep := d.TxDep(i)
-		if dep == nil {
+		dp := d.TxDep(i)
+		if dp == nil {
 			return fmt.Errorf("PlainTxDAG contains nil txdep, tx: %v", i)
 		}
-		for j, tx := range dep.TxIndexes {
+		if dp.Flags != nil && *dp.Flags & ^TxDepFlagMask > 0 {
+			return fmt.Errorf("PlainTxDAG contains unknown flags, flags: %v", *dp.Flags)
+		}
+		dep := TxDependency(d, i)
+		for j, tx := range dep {
 			if tx >= uint64(i) || tx >= uint64(txCnt) {
 				return fmt.Errorf("PlainTxDAG contains the exceed range dependency, tx: %v", i)
 			}
-			if j > 0 && dep.TxIndexes[j] <= dep.TxIndexes[j-1] {
+			if j > 0 && dep[j] <= dep[j-1] {
 				return fmt.Errorf("PlainTxDAG contains unordered dependency, tx: %v", i)
 			}
 		}
-		if dep.Flags != nil && *dep.Flags & ^TxDepFlagMask > 0 {
-			return fmt.Errorf("PlainTxDAG contains unknown flags, flags: %v", *dep.Flags)
-		}
+
 	}
 	return nil
 }

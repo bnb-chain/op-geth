@@ -120,10 +120,10 @@ func (p *PEVMProcessor) executeInSlot(maindb *state.StateDB, txReq *PEVMTxReques
 // if it is in Stage 2 it is a likely result, not 100% sure
 func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult) error {
 	txReq := txResult.txReq
-	if err := p.hasConflict(txResult); err != nil {
-		log.Info(fmt.Sprintf("HasConflict!! block: %d, txIndex: %d\n", txResult.txReq.block.NumberU64(), txResult.txReq.txIndex))
-		return err
-	}
+	//if err := p.hasConflict(txResult); err != nil {
+	//	log.Info(fmt.Sprintf("HasConflict!! block: %d, txIndex: %d\n", txResult.txReq.block.NumberU64(), txResult.txReq.txIndex))
+	//	return err
+	//}
 
 	// goroutine unsafe operation will be handled from here for safety
 	gasConsumed := txReq.gasLimit - txResult.gpSlot.Gas()

@@ -1036,8 +1036,8 @@ func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...TxDep) (TxDAG, error) 
 		// if tx deps larger than half of txs, then convert with NonDependentRelFlag
 		txDAG.TxDeps[i].SetFlag(NonDependentRelFlag)
 		nd := make([]uint64, 0, totalCnt-1-len(txDAG.TxDeps[i].TxIndexes))
-		for j := uint64(0); j < uint64(totalCnt); j++ {
-			if !slices.Contains(txDAG.TxDeps[i].TxIndexes, j) && j != uint64(i) {
+		for j := uint64(0); j < uint64(i); j++ {
+			if !slices.Contains(txDAG.TxDeps[i].TxIndexes, j) {
 				nd = append(nd, j)
 			}
 		}

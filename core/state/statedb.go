@@ -183,6 +183,7 @@ type StateDB struct {
 	trie       Trie
 	noTrie     bool
 	hasher     crypto.KeccakState
+	hasherLock sync.Mutex
 	snaps      *snapshot.Tree    // Nil if snapshot is not available
 	snap       snapshot.Snapshot // Nil if snapshot is not available
 
@@ -877,7 +878,11 @@ func (s *StateDB) getStateObjectFromSnapshotOrTrie(addr common.Address) (data *t
 	// If no live objects are available, attempt to use snapshots
 	if s.snap != nil {
 		start := time.Now()
-		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
+		// the s.hasher is not thread-safe, let's use a mutex to protect it
+		s.hasherLock.Lock()
+		hash := crypto.HashData(s.hasher, addr.Bytes())
+		s.hasherLock.Unlock()
+		acc, err := s.snap.Account(hash)
 		if metrics.EnabledExpensive {
 			s.SnapshotAccountReads += time.Since(start)
 		}

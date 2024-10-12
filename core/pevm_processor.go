@@ -276,6 +276,7 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 				atomic.AddUint64(&p.debugConflictRedoNum, 1)
 			}
 		}(time.Now())
+		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr)
 	})
 	parallelRunDuration := time.Since(start) - buildLevelsDuration

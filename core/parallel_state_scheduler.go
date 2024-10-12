@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -195,9 +196,12 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 	}
 
 	trustDAG := true
+	totalExecutionTime := int64(0)
+	totalConfirmTime := int64(0)
 
 	// execute all transactions in parallel
 	for _, txLevel := range tls {
+		start := time.Now()
 		log.Debug("txLevel tx count", "tx count", len(txLevel))
 		parallelTxLevelTxSizeMeter.Update(int64(len(txLevel)))
 		wait := sync.WaitGroup{}
@@ -218,6 +222,8 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 			runner <- run
 		}
 		wait.Wait()
+		totalExecutionTime += time.Since(start).Nanoseconds()
+		start = time.Now()
 		// all transactions of current level are executed, now try to confirm.
 		if trustDAG {
 			if err, txIndex := toConfirm.confirmWithTrust(txLevel, execute, confirm); err != nil {
@@ -230,7 +236,10 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 				return err, txIndex
 			}
 		}
+		totalConfirmTime += time.Since(start).Nanoseconds()
 	}
+	parallelExecutionTimer.Update(time.Duration(totalExecutionTime))
+	parallelConfirmTimer.Update(time.Duration(totalConfirmTime))
 	return nil, 0
 }
 

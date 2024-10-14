@@ -19,7 +19,7 @@ import (
 
 type Hbss2Pbss struct {
 	trie            *Trie // traverse trie
-	db              *Database
+	db              Database
 	blockNum        uint64
 	root            node // root of triedb
 	stateRootHash   common.Hash
@@ -33,7 +33,7 @@ const (
 )
 
 // NewHbss2Pbss return a hash2Path obj
-func NewHbss2Pbss(tr *Trie, db *Database, stateRootHash common.Hash, blockNum uint64, jobNum uint64) (*Hbss2Pbss, error) {
+func NewHbss2Pbss(tr *Trie, db Database, stateRootHash common.Hash, blockNum uint64, jobNum uint64) (*Hbss2Pbss, error) {
 	if tr == nil {
 		return nil, errors.New("trie is nil")
 	}
@@ -68,11 +68,11 @@ func (t *Trie) resolveWithoutTrack(n node, prefix []byte) (node, error) {
 
 func (h2p *Hbss2Pbss) writeNode(pathKey []byte, n *trienode.Node, owner common.Hash) {
 	if owner == (common.Hash{}) {
-		rawdb.WriteAccountTrieNode(h2p.db.diskdb, pathKey, n.Blob)
+		rawdb.WriteAccountTrieNode(h2p.db.DiskDB(), pathKey, n.Blob)
 		log.Debug("Write account trie node", "path", common.Bytes2Hex(pathKey), "hash", n.Hash,
 			"blob hash", crypto.Keccak256Hash(n.Blob))
 	} else {
-		rawdb.WriteStorageTrieNode(h2p.db.diskdb, owner, pathKey, n.Blob)
+		rawdb.WriteStorageTrieNode(h2p.db.DiskDB(), owner, pathKey, n.Blob)
 		log.Debug("Write storage trie node", "path", common.Bytes2Hex(pathKey), "owner", owner.String(),
 			"hash", n.Hash, "blob hash", crypto.Keccak256Hash(n.Blob))
 	}
@@ -88,8 +88,8 @@ func (h2p *Hbss2Pbss) Run() {
 	log.Info("Hbss to pbss statistics", "total complete", h2p.totalNum, "go routines num", runtime.NumGoroutine(),
 		"h2p concurrent queue", len(h2p.concurrentQueue))
 
-	rawdb.WritePersistentStateID(h2p.db.diskdb, h2p.blockNum)
-	rawdb.WriteStateID(h2p.db.diskdb, h2p.stateRootHash, h2p.blockNum)
+	rawdb.WritePersistentStateID(h2p.db.DiskDB(), h2p.blockNum)
+	rawdb.WriteStateID(h2p.db.DiskDB(), h2p.stateRootHash, h2p.blockNum)
 }
 
 func (h2p *Hbss2Pbss) SubConcurrentTraversal(theTrie *Trie, theNode node, path []byte) {

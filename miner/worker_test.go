@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 )
 
 const (
@@ -117,7 +118,7 @@ type testWorkerBackend struct {
 func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, n int) *testWorkerBackend {
 	var gspec = &core.Genesis{
 		Config: chainConfig,
-		Alloc:  core.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
+		Alloc:  types.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
 	}
 	switch e := engine.(type) {
 	case *clique.Clique:
@@ -135,7 +136,7 @@ func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine 
 		t.Fatalf("core.NewBlockChain failed: %v", err)
 	}
 	pool := legacypool.New(testTxPoolConfig, chain)
-	txpool, _ := txpool.New(new(big.Int).SetUint64(testTxPoolConfig.PriceLimit), chain, []txpool.SubPool{pool})
+	txpool, _ := txpool.New(testTxPoolConfig.PriceLimit, chain, []txpool.SubPool{pool})
 
 	return &testWorkerBackend{
 		db:      db,
@@ -232,7 +233,7 @@ func testEmptyWork(t *testing.T, chainConfig *params.ChainConfig, engine consens
 	taskCh := make(chan struct{}, 2)
 	checkEqual := func(t *testing.T, task *task) {
 		// The work should contain 1 tx
-		receiptLen, balance := 1, big.NewInt(1000)
+		receiptLen, balance := 1, uint256.NewInt(1000)
 		if len(task.receipts) != receiptLen {
 			t.Fatalf("receipt number mismatch: have %d, want %d", len(task.receipts), receiptLen)
 		}

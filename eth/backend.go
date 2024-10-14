@@ -60,7 +60,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 )
 
 const (
@@ -259,6 +259,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.OverrideOptimismEcotone != nil {
 		overrides.OverrideOptimismEcotone = config.OverrideOptimismEcotone
 	}
+	if config.OverrideOptimismFjord != nil {
+		overrides.OverrideOptimismFjord = config.OverrideOptimismFjord
+	}
 	if config.OverrideOptimismInterop != nil {
 		overrides.OverrideOptimismInterop = config.OverrideOptimismInterop
 	}
@@ -298,7 +301,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		bundlePool = bundlepool.New(config.BundlePool, config.Miner.Mev, eth.blockchain)
 		txPools = append(txPools, bundlePool)
 	}
-	eth.txPool, err = txpool.New(new(big.Int).SetUint64(config.TxPool.PriceLimit), eth.blockchain, txPools)
+	eth.txPool, err = txpool.New(config.TxPool.PriceLimit, eth.blockchain, txPools)
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +418,7 @@ func (s *Ethereum) APIs() []rpc.API {
 			Service:   NewMinerAPI(s),
 		}, {
 			Namespace: "eth",
-			Service:   downloader.NewDownloaderAPI(s.handler.downloader, s.eventMux),
+			Service:   downloader.NewDownloaderAPI(s.handler.downloader, s.blockchain, s.eventMux),
 		}, {
 			Namespace: "admin",
 			Service:   NewAdminAPI(s),

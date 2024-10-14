@@ -152,6 +152,25 @@ var PrecompiledContractsHaber = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{103}): &cometBFTLightBlockValidate{},
 }
 
+// PrecompiledContractsFjord contains the default set of pre-compiled Ethereum
+// contracts used in the Fjord release.
+var PrecompiledContractsFjord = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{1}):          &ecrecover{},
+	common.BytesToAddress([]byte{2}):          &sha256hash{},
+	common.BytesToAddress([]byte{3}):          &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):          &dataCopy{},
+	common.BytesToAddress([]byte{5}):          &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):          &blake2F{},
+	common.BytesToAddress([]byte{0x0a}):       &kzgPointEvaluation{},
+	common.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+
+	common.BytesToAddress([]byte{102}): &blsSignatureVerify{},
+	common.BytesToAddress([]byte{103}): &cometBFTLightBlockValidate{},
+}
+
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
 // contracts specified in EIP-2537. These are exported for testing purposes.
 var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
@@ -167,6 +186,7 @@ var PrecompiledContractsBLS = map[common.Address]PrecompiledContract{
 }
 
 var (
+	PrecompiledAddressesFjord     []common.Address
 	PrecompiledAddressesHaber     []common.Address
 	PrecompiledAddressesCancun    []common.Address
 	PrecompiledAddressesFermat    []common.Address
@@ -198,11 +218,16 @@ func init() {
 	for k := range PrecompiledContractsHaber {
 		PrecompiledAddressesHaber = append(PrecompiledAddressesHaber, k)
 	}
+	for k := range PrecompiledContractsFjord {
+		PrecompiledAddressesFjord = append(PrecompiledAddressesFjord, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules params.Rules) []common.Address {
 	switch {
+	case rules.IsOptimismFjord:
+		return PrecompiledAddressesFjord
 	case rules.IsHaber:
 		return PrecompiledAddressesHaber
 	case rules.IsCancun:

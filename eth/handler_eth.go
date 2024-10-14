@@ -25,9 +25,30 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/eth/fetcher"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 )
+
+// TxQueueSize is the size of the transaction queue used to enqueue transactions
+const (
+	TxQueueSize = 16
+)
+
+// enqueueTx is a channel to enqueue transactions in parallel.
+// It is used to improve the performance of transaction enqueued.
+var enqueueTx = make(chan func(), TxQueueSize)
+
+func init() {
+	// run the transaction enqueuing loop
+	for i := 0; i < TxQueueSize; i++ {
+		go func() {
+			for enqueue := range enqueueTx {
+				enqueue()
+			}
+		}()
+	}
+}
 
 // ethHandler implements the eth.Backend interface to handle the various network
 // packets that are sent as replies or broadcasts.
@@ -92,14 +113,26 @@ func (h *ethHandler) Handle(peer *eth.Peer, packet eth.Packet) error {
 				return errors.New("disallowed broadcast blob transaction")
 			}
 		}
-		return h.txFetcher.Enqueue(peer.ID(), *packet, false)
+		return asyncEnqueueTx(peer, *packet, h.txFetcher, false)
 
 	case *eth.PooledTransactionsResponse:
-		return h.txFetcher.Enqueue(peer.ID(), *packet, true)
+		return asyncEnqueueTx(peer, *packet, h.txFetcher, true)
 
 	default:
 		return fmt.Errorf("unexpected eth packet type: %T", packet)
 	}
+}
+
+func asyncEnqueueTx(peer *eth.Peer, txs []*types.Transaction, fetcher *fetcher.TxFetcher, directed bool) error {
+	if working, err := fetcher.IsWorking(); !working {
+		return err
+	}
+	enqueueTx <- func() {
+		if err := fetcher.Enqueue(peer.ID(), txs, directed); err != nil {
+			peer.Log().Warn("Failed to enqueue transaction", "err", err)
+		}
+	}
+	return nil
 }
 
 // handleBlockAnnounces is invoked from a peer's message handler when it transmits a

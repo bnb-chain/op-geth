@@ -349,6 +349,9 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserve txpool.A
 	// Set the basic pool parameters
 	pool.gasTip.Store(uint256.NewInt(gasTip))
 
+	// set dumper
+	pool.pendingCache.sync2cache(pool, pool.createFilter(pool.gasTip.Load().ToBig(), head.BaseFee))
+
 	// Initialize the state with head block, or fallback to empty one in
 	// case the head state is not available (might occur when node is not
 	// fully synced).
@@ -383,7 +386,25 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserve txpool.A
 	}
 	pool.wg.Add(1)
 	go pool.loop()
+	go pool.loopOfSync()
 	return nil
+}
+
+func (pool *LegacyPool) loopOfSync() {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	for {
+		select {
+		case <-pool.reorgShutdownCh:
+			return
+		case <-ticker.C:
+			gasTip := pool.gasTip.Load()
+			currHead := pool.currentHead.Load()
+			if gasTip == nil || currHead == nil {
+				continue
+			}
+			pool.pendingCache.sync2cache(pool, pool.createFilter(gasTip.ToBig(), currHead.BaseFee))
+		}
+	}
 }
 
 // loop is the transaction pool's main event loop, waiting for and reacting to
@@ -624,57 +645,35 @@ func (pool *LegacyPool) ContentFrom(addr common.Address) ([]*types.Transaction, 
 // The transactions can also be pre-filtered by the dynamic fee components to
 // reduce allocations and load on downstream subsystems.
 func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address][]*txpool.LazyTransaction {
-	// TODO need to confirm
-	defer func(t0 time.Time) {
-		getPendingDurationTimer.Update(time.Since(t0))
-	}(time.Now())
+	empty := txpool.PendingFilter{}
+	if filter == empty {
+		// return all pending transactions, no filtering
+		return pool.pendingCache.dump(false)
+	}
 	// If only blob transactions are requested, this pool is unsuitable as it
 	// contains none, don't even bother.
 	if filter.OnlyBlobTxs {
 		return nil
 	}
+	defer func(t0 time.Time) {
+		getPendingDurationTimer.Update(time.Since(t0))
+	}(time.Now())
+	// It is a bit tricky here, we don't do the filtering here.
+	return pool.pendingCache.dump(true)
+}
 
-	// Convert the new uint256.Int types to the old big.Int ones used by the legacy pool
-	var (
-		minTipBig  *big.Int
-		baseFeeBig *big.Int
-	)
-	if filter.MinTip != nil {
-		minTipBig = filter.MinTip.ToBig()
-	}
-	if filter.BaseFee != nil {
-		baseFeeBig = filter.BaseFee.ToBig()
-	}
-	pending := make(map[common.Address][]*txpool.LazyTransaction, len(pool.pending))
-	for addr, txs := range pool.pendingCache.dump() {
-
-		// If the miner requests tip enforcement, cap the lists now
-		if minTipBig != nil && !pool.locals.contains(addr) {
+func (pool *LegacyPool) createFilter(gasPrice, baseFee *big.Int) func(txs types.Transactions, addr common.Address) types.Transactions {
+	return func(txs types.Transactions, addr common.Address) types.Transactions {
+		if !pool.pendingCache.IsLocal(addr) {
 			for i, tx := range txs {
-				if tx.EffectiveGasTipIntCmp(minTipBig, baseFeeBig) < 0 {
+				if tx.EffectiveGasTipIntCmp(gasPrice, baseFee) < 0 {
 					txs = txs[:i]
 					break
 				}
 			}
 		}
-		if len(txs) > 0 {
-			lazies := make([]*txpool.LazyTransaction, len(txs))
-			for i := 0; i < len(txs); i++ {
-				lazies[i] = &txpool.LazyTransaction{
-					Pool:      pool,
-					Hash:      txs[i].Hash(),
-					Tx:        txs[i],
-					Time:      txs[i].Time(),
-					GasFeeCap: uint256.MustFromBig(txs[i].GasFeeCap()),
-					GasTipCap: uint256.MustFromBig(txs[i].GasTipCap()),
-					Gas:       txs[i].Gas(),
-					BlobGas:   txs[i].BlobGas(),
-				}
-			}
-			pending[addr] = lazies
-		}
+		return txs
 	}
-	return pending
 }
 
 // Locals retrieves the accounts currently considered local by the pool.
@@ -840,6 +839,16 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 	}
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(pool.all.Slots()+numSlots(tx)) > pool.config.GlobalSlots+pool.config.GlobalQueue {
+		currHead := pool.currentHead.Load()
+		if currHead != nil && currHead.BaseFee != nil && pool.priced.NeedReheap(currHead) {
+			if pool.chainconfig.IsLondon(new(big.Int).Add(currHead.Number, big.NewInt(1))) {
+				baseFee := eip1559.CalcBaseFee(pool.chainconfig, currHead, currHead.Time+1)
+				pool.priced.SetBaseFee(baseFee)
+			}
+			pool.priced.Reheap()
+			pool.priced.currHead = currHead
+		}
+
 		// If the new transaction is underpriced, don't accept it
 		if !isLocal && pool.priced.Underpriced(tx) {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "gasTipCap", tx.GasTipCap(), "gasFeeCap", tx.GasFeeCap())
@@ -1110,7 +1119,9 @@ func (pool *LegacyPool) addRemoteSync(tx *types.Transaction) error {
 // to the add is finished. Only use this during tests for determinism!
 func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error {
 	defer func(t0 time.Time) {
-		addTimer.UpdateSince(t0)
+		if len(txs) > 0 {
+			addTimer.Update(time.Since(t0) / time.Duration(len(txs)))
+		}
 	}(time.Now())
 	// Do not treat as local if local transactions have been disabled
 	local = local && !pool.config.NoLocals
@@ -1147,7 +1158,9 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error 
 	pool.mu.Lock()
 	t0 := time.Now()
 	newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
-	addWithLockTimer.UpdateSince(t0)
+	if len(news) > 0 {
+		addWithLockTimer.Update(time.Since(t0) / time.Duration(len(news)))
+	}
 	pool.mu.Unlock()
 
 	var nilSlot = 0
@@ -1403,6 +1416,9 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 		reorgDurationTimer.Update(time.Since(t0))
 		if reset != nil {
 			reorgresetTimer.UpdateSince(t0)
+			if reset.newHead != nil {
+				log.Info("Transaction pool reorged", "from", reset.oldHead.Number.Uint64(), "to", reset.newHead.Number.Uint64())
+			}
 		}
 	}(time.Now())
 	defer close(done)
@@ -1451,10 +1467,12 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
 				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
 				pool.priced.SetBaseFee(pendingBaseFee)
-			} else {
-				pool.priced.Reheap()
 			}
 		}
+		gasTip, baseFee := pool.gasTip.Load(), pendingBaseFee
+		go func() {
+			pool.pendingCache.sync2cache(pool, pool.createFilter(gasTip.ToBig(), baseFee))
+		}()
 		// Update all accounts to the latest known pending nonce
 		nonces := make(map[common.Address]uint64, len(pool.pending))
 		for addr, list := range pool.pending {

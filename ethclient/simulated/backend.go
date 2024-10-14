@@ -178,6 +178,8 @@ func (n *Backend) Close() error {
 
 // Commit seals a block and moves the chain forward to a new empty block.
 func (n *Backend) Commit() common.Hash {
+	// wait for the transactions to be sync into cache
+	time.Sleep(350 * time.Millisecond)
 	return n.beacon.Commit()
 }
 

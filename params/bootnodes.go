@@ -32,6 +32,7 @@ var OpBNBMainnetBootnodes = []string{
 var OpBNBTestnetBootnodes = []string{
 	"enr:-KO4QKFOBDW--pF4pFwv3Al_jiLOITj_Y5mr1Ajyy2yxHpFtNcBfkZEkvWUxAKXQjWALZEFxYHooU88JClyzA00e8YeGAYtBOOZig2V0aMfGhE0ZYGqAgmlkgnY0gmlwhDREiqaJc2VjcDI1NmsxoQM8pC_6wwTr5N2Q-yXQ1KGKsgz9i9EPLk8Ata65pUyYG4RzbmFwwIN0Y3CCdl-DdWRwgnZf",
 	"enr:-KO4QFJc0KR09ye818GT2kyN9y6BAGjhz77sYimxn85jJf2hOrNqg4X0b0EsS-_ssdkzVpavqh6oMX7W5Y81xMRuEayGAYtBSiK9g2V0aMfGhE0ZYGqAgmlkgnY0gmlwhANzx96Jc2VjcDI1NmsxoQPwA1XHfWGd4umIt7j3Fc7hKq_35izIWT_9yiN_tX8lR4RzbmFwwIN0Y3CCdl-DdWRwgnZf",
+	"enode://c57adc1e28cc11ee9c64b5e70b8f505e890bb0eb5685423781cdf1be7655052fe318ab7562270ae2266cf28cfe982ff9ac9a89546ddc895778acabf306e99b12@3.229.26.240:0?discport=30304",
 }
 
 // MainnetBootnodes are the enode URLs of the P2P bootstrap nodes running on

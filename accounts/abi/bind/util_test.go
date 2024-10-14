@@ -83,6 +83,7 @@ func TestWaitDeployed(t *testing.T) {
 
 		// Send and mine the transaction.
 		backend.Client().SendTransaction(ctx, tx)
+		time.Sleep(500 * time.Millisecond) //wait for the tx to be mined
 		backend.Commit()
 
 		select {
@@ -117,6 +118,7 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	backend.Client().SendTransaction(ctx, tx)
+	time.Sleep(500 * time.Millisecond) //wait for the tx to be mined
 	backend.Commit()
 	notContractCreation := errors.New("tx is not contract creation")
 	if _, err := bind.WaitDeployed(ctx, backend.Client(), tx); err.Error() != notContractCreation.Error() {
@@ -135,5 +137,6 @@ func TestWaitDeployedCornerCases(t *testing.T) {
 	}()
 
 	backend.Client().SendTransaction(ctx, tx)
+	time.Sleep(500 * time.Millisecond) //wait for the tx to be mined
 	cancel()
 }

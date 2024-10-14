@@ -2073,6 +2073,7 @@ func TestDualHeapEviction(t *testing.T) {
 	add(false)
 	for baseFee = 0; baseFee <= 1000; baseFee += 100 {
 		pool.priced.SetBaseFee(big.NewInt(int64(baseFee)))
+		pool.priced.Reheap()
 		add(true)
 		check(highCap, "fee cap")
 		add(false)

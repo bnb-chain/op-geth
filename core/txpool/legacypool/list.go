@@ -549,6 +549,7 @@ func (h *priceHeap) Pop() interface{} {
 // better candidates for inclusion while in other cases (at the top of the baseFee peak)
 // the floating heap is better. When baseFee is decreasing they behave similarly.
 type pricedList struct {
+	currHead *types.Header // Current block header for effective tip calculation
 	// Number of stale price points to (re-heap trigger).
 	stales atomic.Int64
 
@@ -667,6 +668,10 @@ func (l *pricedList) Discard(slots int, force bool) (types.Transactions, bool) {
 	return drop, true
 }
 
+func (l *pricedList) NeedReheap(currHead *types.Header) bool {
+	return l.currHead == nil || currHead == nil || currHead.Hash().Cmp(l.currHead.Hash()) != 0
+}
+
 // Reheap forcibly rebuilds the heap based on the current remote transaction set.
 func (l *pricedList) Reheap() {
 	l.reheapMu.Lock()
@@ -698,5 +703,4 @@ func (l *pricedList) Reheap() {
 // necessary to call right before SetBaseFee when processing a new block.
 func (l *pricedList) SetBaseFee(baseFee *big.Int) {
 	l.urgent.baseFee = baseFee
-	l.Reheap()
 }

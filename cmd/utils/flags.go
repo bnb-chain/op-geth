@@ -23,17 +23,19 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"math"
 	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	godebug "runtime/debug"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
@@ -1093,9 +1095,47 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.MetricsCategory,
 	}
 
+	ParallelTxFlag = &cli.BoolFlag{
+		Name:     "parallel",
+		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTx2Flag = &cli.BoolFlag{
+		Name:     "parallel2",
+		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxNumFlag = &cli.IntFlag{
+		Name:     "parallel.num",
+		Usage:    "Number of slot for transaction execution, only valid in parallel mode (runtime calculated, no fixed default value)",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxDAGFlag = &cli.BoolFlag{
+		Name:     "parallel.txdag",
+		Usage:    "Enable the experimental parallel TxDAG generation, only valid in full sync mode (default = false)",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxDAGFileFlag = &cli.StringFlag{
+		Name:     "parallel.txdagfile",
+		Usage:    "It indicates the TxDAG file path",
+		Value:    "./parallel-txdag-output.csv",
+		Category: flags.VMCategory,
+	}
+
 	VMOpcodeOptimizeFlag = &cli.BoolFlag{
 		Name:     "vm.opcode.optimize",
 		Usage:    "enable opcode optimization",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxDAGSenderPrivFlag = &cli.StringFlag{
+		Name:     "parallel.txdagsenderpriv",
+		Usage:    "private key of the sender who sends the TxDAG transactions",
+		Value:    "",
 		Category: flags.VMCategory,
 	}
 )
@@ -1981,6 +2021,47 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.IsSet(VMEnableDebugFlag.Name) {
 		// TODO(fjl): force-enable this in --dev mode
 		cfg.EnablePreimageRecording = ctx.Bool(VMEnableDebugFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxFlag.Name) {
+		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
+		// The best parallel num will be tuned later, we do a simple parallel num set here
+		numCpu := runtime.NumCPU()
+		var parallelNum int
+		if ctx.IsSet(ParallelTxNumFlag.Name) {
+			// Use value set by "--parallel.num", and "--parallel.num 0" is not allowed and be set to 1
+			parallelNum = ctx.Int(ParallelTxNumFlag.Name)
+			if parallelNum < 1 {
+				parallelNum = 1
+			}
+		} else if numCpu == 1 {
+			parallelNum = 1 // single CPU core
+		} else {
+			// 1-2 core for merge (with parallel KV check)
+			// 1-2 core for others (bc optimizer, main)
+			// 1-2 core for possible other concurrent routine
+			parallelNum = max(1, numCpu-6)
+		}
+		cfg.ParallelTxNum = parallelNum
+	}
+
+	if ctx.IsSet(ParallelTx2Flag.Name) {
+		cfg.ParallelTxMode2 = ctx.Bool(ParallelTx2Flag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDAGFlag.Name) {
+		cfg.EnableParallelTxDAG = ctx.Bool(ParallelTxDAGFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDAGFileFlag.Name) {
+		cfg.ParallelTxDAGFile = ctx.String(ParallelTxDAGFileFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDAGSenderPrivFlag.Name) {
+		priHex := ctx.String(ParallelTxDAGSenderPrivFlag.Name)
+		if cfg.Miner.ParallelTxDAGSenderPriv, err = crypto.HexToECDSA(priHex); err != nil {
+			Fatalf("Failed to parse txdag private key of %s, err: %v", ParallelTxDAGSenderPrivFlag.Name, err)
+		}
 	}
 
 	if ctx.IsSet(VMOpcodeOptimizeFlag.Name) {

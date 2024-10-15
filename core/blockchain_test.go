@@ -22,9 +22,12 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -1631,7 +1634,6 @@ func testEIP155Transition(t *testing.T, scheme string) {
 			block.AddTx(tx)
 		}
 	})
-
 	blockchain, _ := NewBlockChain(rawdb.NewMemoryDatabase(), DefaultCacheConfigWithScheme(scheme), gspec, nil, ethash.NewFaker(), vm.Config{}, nil, nil)
 	defer blockchain.Stop()
 
@@ -4326,4 +4328,97 @@ func TestEIP3651(t *testing.T) {
 	if actual.Cmp(expected) != 0 {
 		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
 	}
+}
+
+func TestTxDAGFile_ReadWrite(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "test.csv")
+	defer func() {
+		os.Remove(path)
+	}()
+	except := map[uint64]types.TxDAG{
+		0: types.NewEmptyTxDAG(),
+		1: makeEmptyPlainTxDAG(1),
+		2: makeEmptyPlainTxDAG(2, types.NonDependentRelFlag),
+	}
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	require.NoError(t, err)
+	for num, dag := range except {
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
+	}
+	writeFile.Close()
+
+	except2 := map[uint64]types.TxDAG{
+		3: types.NewEmptyTxDAG(),
+		4: makeEmptyPlainTxDAG(4, types.NonDependentRelFlag, types.ExcludedTxFlag),
+		5: makeEmptyPlainTxDAG(5, types.NonDependentRelFlag, types.ExcludedTxFlag),
+	}
+	writeFile, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	require.NoError(t, err)
+	for num, dag := range except2 {
+		if num == 5 {
+			writeFile.WriteString("num,txdag\n")
+			continue
+		}
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
+	}
+	writeFile.Close()
+
+	reader, err := NewTxDAGFileReader(path)
+	require.NoError(t, err)
+	for i := 0; i < 5; i++ {
+		num := uint64(i)
+		if except[num] != nil {
+			require.Equal(t, except[num], reader.TxDAG(num))
+			continue
+		}
+		require.Equal(t, except2[num], reader.TxDAG(num))
+	}
+}
+
+func TestTxDAGFile_LargeRead(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "test.csv")
+	defer func() {
+		os.Remove(path)
+	}()
+	TxDAGCacheSize = 10
+	totalSize := uint64(100)
+	except := map[uint64]types.TxDAG{}
+	for i := uint64(0); i < totalSize-1; i++ {
+		except[i] = makeEmptyPlainTxDAG(1)
+	}
+	except[totalSize-1] = makeEmptyPlainTxDAG(510 * 1024)
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	require.NoError(t, err)
+	for num := uint64(0); num < totalSize; num++ {
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: except[num]}))
+	}
+	writeFile.Close()
+
+	reader, err := NewTxDAGFileReader(path)
+	require.NoError(t, err)
+	for i := uint64(0); i < totalSize; i++ {
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
+
+	// test reset to genesis
+	err = reader.Reset(0)
+	require.NoError(t, err)
+	for i := uint64(0); i < totalSize; i++ {
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
+
+	// test reset skip
+	err = reader.Reset(totalSize - TxDAGCacheSize)
+	require.NoError(t, err)
+	for i := totalSize - TxDAGCacheSize; i < totalSize; i++ {
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
+}
+
+func makeEmptyPlainTxDAG(cnt int, flags ...uint8) *types.PlainTxDAG {
+	dag := types.NewPlainTxDAG(cnt)
+	for i := range dag.TxDeps {
+		dag.TxDeps[i] = types.NewTxDep(make([]uint64, 0), flags...)
+	}
+	return dag
 }

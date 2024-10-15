@@ -18,11 +18,16 @@
 package core
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -91,8 +96,16 @@ var (
 	triedbCommitExternalTimer = metrics.NewRegisteredTimer("chain/triedb/commit/external", nil)
 	innerExecutionTimer       = metrics.NewRegisteredTimer("chain/inner/execution", nil)
 
+	txDAGGenerateTimer = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+
+	parallelTxNumMeter         = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
+	parallelConflictTxNumMeter = metrics.NewRegisteredMeter("chain/parallel/conflicttxs", nil)
+
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
+
+	pevmBuildLevelsTimer = metrics.NewRegisteredTimer("chain/pevm/buildlevels", nil)
+	pevmRunTimer         = metrics.NewRegisteredTimer("chain/pevm/run", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
@@ -294,6 +307,13 @@ type BlockChain struct {
 	processor  Processor // Block transaction processor interface
 	forker     *ForkChoice
 	vmConfig   vm.Config
+
+	parallelExecution bool
+	enableTxDAG       bool
+	txDAGWriteCh      chan TxDAGOutputItem
+	txDAGReader       *TxDAGFileReader
+	serialProcessor   Processor
+	parallelProcessor Processor
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -358,7 +378,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
-	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	err := proofKeeper.Start(bc, db)
 	if err != nil {
@@ -512,6 +531,14 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
 	}
 
+	if bc.vmConfig.EnableParallelExec {
+		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
+		bc.CreateSerialProcessor(chainConfig, bc, engine)
+	} else if bc.vmConfig.EnableParallelExecV2 {
+		bc.processor = newPEVMProcessor(chainConfig, bc, engine)
+	} else {
+		bc.processor = NewStateProcessor(chainConfig, bc, engine)
+	}
 	// Start future block processor.
 	bc.wg.Add(1)
 	go bc.updateFutureBlocks()
@@ -861,6 +888,10 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.miningStateCache.Purge()
 	bc.futureBlocks.Purge()
 
+	if bc.txDAGReader != nil {
+		bc.txDAGReader.Reset(head)
+	}
+
 	// Clear safe block, finalized block if needed
 	if safe := bc.CurrentSafeBlock(); safe != nil && head < safe.Number.Uint64() {
 		log.Warn("SetHead invalidated safe block")
@@ -1045,6 +1076,9 @@ func (bc *BlockChain) stopWithoutSaving() {
 // Stop stops the blockchain service. If any imports are currently in progress
 // it will abort them using the procInterrupt.
 func (bc *BlockChain) Stop() {
+	if bc.txDAGReader != nil {
+		bc.txDAGReader.Close()
+	}
 	bc.stopWithoutSaving()
 
 	// Ensure that the entirety of the state snapshot is journaled to disk.
@@ -1738,7 +1772,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 			lastCanon = block
-
 			block, err = it.next()
 		}
 		// Falls through to the block import
@@ -1876,9 +1909,27 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
 
+			if bc.vmConfig.EnableParallelExec {
+				bc.parseTxDAG(block)
+				txsCount := block.Transactions().Len()
+				threshold := min(bc.vmConfig.ParallelTxNum/2+2, 4)
+				if bc.vmConfig.ParallelTxNum < 2 || txsCount < threshold || bc.isEmptyTxDAG() {
+					bc.UseSerialProcessor()
+					log.Debug("Disable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+				} else {
+					bc.UseParallelProcessor()
+					log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
+
+				}
+			}
+
+			if bc.vmConfig.EnableParallelExecV2 {
+				bc.parseTxDAG(block)
+			}
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
-			if !bc.cacheConfig.TrieCleanNoPrefetch {
+			// parallel mode has a pipeline, similar to this prefetch, to save CPU we disable this prefetch for parallel
+			if !bc.cacheConfig.TrieCleanNoPrefetch && !bc.parallelExecution {
 				if followup, err := it.peek(); followup != nil && err == nil {
 					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
 
@@ -1898,6 +1949,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// Process block using the parent state as reference point
 			pstart = time.Now()
 			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
+			if err == FallbackToSerialProcessorErr {
+				bc.UseSerialProcessor()
+				receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
+			}
 			if err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
@@ -1912,8 +1967,30 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			followupInterrupt.Store(true)
 			return it.index, err
 		}
+
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
+
+		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec && !bc.vmConfig.EnableParallelExecV2 {
+			// compare input TxDAG when it enable in consensus
+			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+			if err == nil {
+				// TODO(galaio): check TxDAG correctness?
+				log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
+				if metrics.EnabledExpensive {
+					go types.EvaluateTxDAGPerformance(dag, statedb.ResolveStats())
+				}
+				// try to write txDAG into file
+				if bc.txDAGWriteCh != nil && dag != nil {
+					bc.txDAGWriteCh <- TxDAGOutputItem{
+						blockNumber: block.NumberU64(),
+						txDAG:       dag,
+					}
+				}
+			} else {
+				log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
+			}
+		}
 
 		// Update the metrics touched during block processing and validation
 		accountReadTimer.Update(statedb.AccountReads)                 // Account reads are complete(in processing)
@@ -1924,8 +2001,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		storageUpdateTimer.Update(statedb.StorageUpdates)             // Storage updates are complete(in validation)
 		accountHashTimer.Update(statedb.AccountHashes)                // Account hashes are complete(in validation)
 		storageHashTimer.Update(statedb.StorageHashes)                // Storage hashes are complete(in validation)
-		blockExecutionTimer.Update(ptime)                             // The time spent on block execution
-		blockValidationTimer.Update(vtime)                            // The time spent on block validation
+		txDAGGenerateTimer.Update(statedb.TxDAGGenerate)
+		blockExecutionTimer.Update(ptime)  // The time spent on block execution
+		blockValidationTimer.Update(vtime) // The time spent on block validation
 
 		innerExecutionTimer.Update(DebugInnerExecutionDuration)
 
@@ -2023,6 +2101,39 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	stats.ignored += it.remaining()
 
 	return it.index, err
+}
+
+func (bc *BlockChain) parseTxDAG(block *types.Block) {
+	if !bc.enableTxDAG {
+		return
+	}
+	var (
+		txDAG types.TxDAG
+		err   error
+	)
+	if bc.txDAGReader != nil {
+		// load cache txDAG from file first
+		txDAG = bc.txDAGReader.TxDAG(block.NumberU64())
+	} else {
+		// load TxDAG from block
+		txDAG, err = types.GetTxDAG(block)
+		if err != nil {
+			log.Warn("pevm decode txdag failed", "block", block.NumberU64(), "err", err)
+		}
+	}
+	if err := types.ValidateTxDAG(txDAG, len(block.Transactions())); err != nil {
+		log.Warn("pevm cannot apply wrong txdag",
+			"block", block.NumberU64(), "txs", len(block.Transactions()), "err", err)
+		txDAG = nil
+	}
+	bc.vmConfig.TxDAG = txDAG
+}
+
+func (bc *BlockChain) isEmptyTxDAG() bool {
+	if bc.vmConfig.TxDAG != nil && bc.vmConfig.TxDAG.Type() == types.EmptyTxDAGType {
+		return true
+	}
+	return false
 }
 
 // insertSideChain is called when an import batch hits upon a pruned ancestor
@@ -2598,6 +2709,14 @@ func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 	return time.Duration(bc.flushInterval.Load())
 }
 
+func (bc *BlockChain) CreateParallelProcessor(parallelNum int) *BlockChain {
+	if bc.parallelProcessor == nil {
+		bc.parallelProcessor = newParallelStateProcessor(bc.Config(), bc, bc.engine, parallelNum)
+		bc.parallelExecution = true
+	}
+	return bc
+}
+
 func (bc *BlockChain) NoTries() bool {
 	return bc.stateCache.NoTries()
 }
@@ -2627,4 +2746,223 @@ func createDelFn(bc *BlockChain) func(db ethdb.KeyValueWriter, hash common.Hash,
 
 func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 	bc.hc.SetHead(headNumber, nil, createDelFn(bc))
+}
+
+func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
+	return bc.enableTxDAG && bc.txDAGWriteCh == nil && bc.txDAGReader == nil
+}
+
+func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
+	log.Info("node enable TxDAG feature", "output", output)
+	bc.enableTxDAG = true
+	if len(output) == 0 {
+		return
+	}
+	// read TxDAG file, and cache in mem
+	if readFile {
+		var err error
+		bc.txDAGReader, err = NewTxDAGFileReader(output)
+		if err != nil {
+			log.Error("read TxDAG err", "err", err)
+		}
+		// startup with latest block
+		curHeader := bc.CurrentHeader()
+		if curHeader != nil && bc.txDAGReader != nil {
+			bc.txDAGReader.TxDAG(curHeader.Number.Uint64())
+			log.Info("load TxDAG from file", "output", output, "block", curHeader.Number, "latest", bc.txDAGReader.Latest())
+		}
+		return
+	}
+
+	// write handler
+	go func() {
+		writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+		if err != nil {
+			log.Error("OpenFile when open the txDAG output file", "file", output, "err", err)
+			return
+		}
+		bc.txDAGWriteCh = make(chan TxDAGOutputItem, 10000)
+		defer writeHandle.Close()
+		for {
+			select {
+			case <-bc.quit:
+				return
+			case item := <-bc.txDAGWriteCh:
+				if err := writeTxDAGToFile(writeHandle, item); err != nil {
+					log.Error("encode TxDAG err in OutputHandler", "err", err)
+					continue
+				}
+			}
+		}
+	}()
+}
+
+func (bc *BlockChain) UseParallelProcessor() {
+	if bc.parallelProcessor != nil {
+		bc.parallelExecution = true
+		bc.processor = bc.parallelProcessor
+	} else {
+		log.Error("bc.ParallelProcessor is nil! fallback to serial processor!")
+		bc.UseSerialProcessor()
+	}
+}
+
+func (bc *BlockChain) UseSerialProcessor() {
+	if bc.serialProcessor != nil {
+		bc.parallelExecution = false
+		bc.processor = bc.serialProcessor
+	} else {
+		bc.CreateSerialProcessor(bc.chainConfig, bc, bc.engine)
+	}
+}
+
+type TxDAGOutputItem struct {
+	blockNumber uint64
+	txDAG       types.TxDAG
+}
+
+func writeTxDAGToFile(writeHandle *os.File, item TxDAGOutputItem) error {
+	var buf bytes.Buffer
+	buf.WriteString(strconv.FormatUint(item.blockNumber, 10))
+	buf.WriteByte(',')
+	enc, err := types.EncodeTxDAG(item.txDAG)
+	if err != nil {
+		return err
+	}
+	buf.WriteString(hex.EncodeToString(enc))
+	buf.WriteByte('\n')
+	_, err = writeHandle.Write(buf.Bytes())
+	return err
+}
+
+var TxDAGCacheSize = uint64(10000)
+
+type TxDAGFileReader struct {
+	output  string
+	file    *os.File
+	scanner *bufio.Scanner
+	cache   map[uint64]types.TxDAG
+	latest  uint64
+	lock    sync.RWMutex
+}
+
+func NewTxDAGFileReader(output string) (*TxDAGFileReader, error) {
+	reader := &TxDAGFileReader{output: output}
+	err := reader.openFile(output)
+	if err != nil {
+		return nil, err
+	}
+	return reader, nil
+}
+
+func (t *TxDAGFileReader) Close() {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	t.closeFile()
+}
+
+func (t *TxDAGFileReader) openFile(output string) error {
+	file, err := os.Open(output)
+	if err != nil {
+		return err
+	}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 5*1024*1024), 5*1024*1024)
+	t.file = file
+	t.scanner = scanner
+	return nil
+}
+
+func (t *TxDAGFileReader) closeFile() {
+	if t.scanner != nil {
+		t.scanner = nil
+	}
+	if t.file != nil {
+		t.file.Close()
+		t.file = nil
+	}
+}
+
+func (t *TxDAGFileReader) Latest() uint64 {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+	return t.latest
+}
+
+func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+
+	if t.cache != nil && t.latest >= expect {
+		return t.cache[expect]
+	}
+	if t.scanner == nil {
+		return nil
+	}
+
+	logTime := time.Now()
+	t.cache = make(map[uint64]types.TxDAG, TxDAGCacheSize)
+	for t.scanner.Scan() {
+		num, dag, err := readTxDAGItemFromLine(t.scanner.Text())
+		if err != nil {
+			log.Error("query TxDAG error", "latest", t.latest, "err", err)
+			continue
+		}
+		if time.Since(logTime) > 10*time.Second {
+			logTime = time.Now()
+			log.Info("try load TxDAG from file", "num", num, "expect", expect, "cached", len(t.cache))
+		}
+		// skip lower blocks
+		if expect > num {
+			continue
+		}
+		t.cache[num] = dag
+		t.latest = num
+		if uint64(len(t.cache)) >= TxDAGCacheSize {
+			break
+		}
+	}
+	if t.scanner.Err() != nil {
+		log.Error("scan TxDAG file got err", "expect", expect, "err", t.scanner.Err())
+	}
+
+	if time.Since(logTime) > 10*time.Second {
+		log.Info("try load TxDAG from file", "expect", expect, "cached", len(t.cache))
+	}
+	return t.cache[expect]
+}
+
+func (t *TxDAGFileReader) Reset(number uint64) error {
+	t.lock.Lock()
+	defer t.lock.Unlock()
+	if t.latest-TxDAGCacheSize <= number {
+		return nil
+	}
+	t.closeFile()
+	if err := t.openFile(t.output); err != nil {
+		return err
+	}
+	t.latest = 0
+	t.cache = nil
+	return nil
+}
+
+func readTxDAGItemFromLine(line string) (uint64, types.TxDAG, error) {
+	tokens := strings.Split(line, ",")
+	if len(tokens) != 2 {
+		return 0, nil, errors.New("txDAG output contain wrong size")
+	}
+	num, err := strconv.Atoi(tokens[0])
+	if err != nil {
+		return 0, nil, err
+	}
+	enc, err := hex.DecodeString(tokens[1])
+	if err != nil {
+		return 0, nil, err
+	}
+	txDAG, err := types.DecodeTxDAG(enc)
+	if err != nil {
+		return 0, nil, err
+	}
+	return uint64(num), txDAG, nil
 }

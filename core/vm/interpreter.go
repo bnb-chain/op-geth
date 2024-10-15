@@ -19,6 +19,7 @@ package vm
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
@@ -33,8 +34,12 @@ type Config struct {
 	NoBaseFee                   bool                // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
 	EnablePreimageRecording     bool                // Enables recording of SHA3/keccak preimages
 	ExtraEips                   []int               // Additional EIPS that are to be enabled
+	EnableParallelExec          bool                // Whether to execute transaction in parallel mode when do full sync
+	EnableParallelExecV2        bool                // Whether to execute transaction in parallel mode when do full sync
+	ParallelTxNum               int                 // Number of slot for transaction execution
 	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
 	EnableOpcodeOptimizations   bool                // Enable opcode optimization
+	TxDAG                       types.TxDAG
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,

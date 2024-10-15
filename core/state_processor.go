@@ -54,6 +54,14 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 	}
 }
 
+// CreateSerialProcessor create a new StateProcessor
+func (bc *BlockChain) CreateSerialProcessor(config *params.ChainConfig, bc2 *BlockChain, engine consensus.Engine) {
+	if bc.serialProcessor == nil {
+		bc.serialProcessor = NewStateProcessor(config, bc2, engine)
+		bc.parallelExecution = false
+	}
+}
+
 // Process processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb and applying any rewards to both
 // the processor (coinbase) and any included uncles.
@@ -90,8 +98,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
 	}
 	statedb.MarkFullProcessed()
+	if p.bc.enableTxDAG && !p.bc.vmConfig.EnableParallelExec && !p.bc.vmConfig.EnableParallelExecV2 {
+		statedb.ResetMVStates(len(block.Transactions()))
+	}
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
+		statedb.BeginTxStat(i)
 		start := time.Now()
 		msg, err := TransactionToMessage(tx, signer, header.BaseFee)
 		if err != nil {
@@ -103,11 +115,16 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
+		// if systemTx or depositTx, tag it
+		if tx.IsSystemTx() || tx.IsDepositTx() {
+			statedb.RecordSystemTxRWSet(i)
+		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 		if metrics.EnabledExpensive {
 			processTxTimer.UpdateSince(start)
 		}
+		statedb.StopTxStat(receipt.GasUsed)
 	}
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.
 	withdrawals := block.Withdrawals()
@@ -116,7 +133,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), withdrawals)
-
 	return receipts, allLogs, *usedGas, nil
 }
 

@@ -109,7 +109,7 @@ type btHeaderMarshaling struct {
 	ExcessBlobGas *math.HexOrDecimal64
 }
 
-func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, postCheck func(error, *core.BlockChain)) (result error) {
+func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, enableTxDAG bool, postCheck func(error, *core.BlockChain)) (result error) {
 	config, ok := Forks[t.json.Network]
 	if !ok {
 		return UnsupportedForkError{t.json.Network}
@@ -157,6 +157,9 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 		return err
 	}
 	defer chain.Stop()
+	if enableTxDAG {
+		chain.SetupTxDAGGeneration()
+	}
 
 	validBlocks, err := t.insertBlocks(chain)
 	if err != nil {

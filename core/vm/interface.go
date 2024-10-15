@@ -79,6 +79,11 @@ type StateDB interface {
 
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
+
+	TxIndex() int
+
+	// parallel DAG related
+	CheckFeeReceiversRWSet()
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

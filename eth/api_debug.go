@@ -89,7 +89,7 @@ func (api *DebugAPI) DumpBlock(blockNr rpc.BlockNumber) (state.Dump, error) {
 
 // Preimage is a debug API function that returns the preimage for a sha3 hash, if known.
 func (api *DebugAPI) Preimage(ctx context.Context, hash common.Hash) (hexutil.Bytes, error) {
-	if preimage := rawdb.ReadPreimage(api.eth.ChainDb(), hash); preimage != nil {
+	if preimage := rawdb.ReadPreimage(api.eth.ChainDb().StateStore(), hash); preimage != nil {
 		return preimage, nil
 	}
 	return nil, errors.New("unknown preimage")

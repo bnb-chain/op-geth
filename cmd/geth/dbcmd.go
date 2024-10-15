@@ -377,7 +377,6 @@ func inspectTrie(ctx *cli.Context) error {
 
 	db := utils.MakeChainDatabase(ctx, stack, true)
 	defer db.Close()
-
 	var headerBlockHash common.Hash
 	if ctx.NArg() >= 1 {
 		if ctx.Args().Get(0) == "latest" {
@@ -495,7 +494,7 @@ func checkStateContent(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true)
 	defer db.Close()
 	var (
-		it        = rawdb.NewKeyLengthIterator(db.NewIterator(prefix, start), 32)
+		it        ethdb.Iterator
 		hasher    = crypto.NewKeccakState()
 		got       = make([]byte, 32)
 		errs      int
@@ -503,6 +502,11 @@ func checkStateContent(ctx *cli.Context) error {
 		startTime = time.Now()
 		lastLog   = time.Now()
 	)
+	if stack.CheckIfMultiDataBase() {
+		it = rawdb.NewKeyLengthIterator(db.StateStore().NewIterator(prefix, start), 32)
+	} else {
+		it = rawdb.NewKeyLengthIterator(db.NewIterator(prefix, start), 32)
+	}
 	for it.Next() {
 		count++
 		k := it.Key()
@@ -549,6 +553,13 @@ func dbStats(ctx *cli.Context) error {
 	defer db.Close()
 
 	showLeveldbStats(db)
+	if stack.CheckIfMultiDataBase() {
+		fmt.Println("show stats of state store")
+		showLeveldbStats(db.StateStore())
+		fmt.Println("show stats of block store")
+		showLeveldbStats(db.BlockStore())
+	}
+
 	return nil
 }
 
@@ -562,13 +573,38 @@ func dbCompact(ctx *cli.Context) error {
 	log.Info("Stats before compaction")
 	showLeveldbStats(db)
 
+	if stack.CheckIfMultiDataBase() {
+		fmt.Println("show stats of state store")
+		showLeveldbStats(db.StateStore())
+		fmt.Println("show stats of block store")
+		showLeveldbStats(db.BlockStore())
+	}
+
 	log.Info("Triggering compaction")
 	if err := db.Compact(nil, nil); err != nil {
-		log.Info("Compact err", "error", err)
+		log.Error("Compact err", "error", err)
 		return err
 	}
+
+	if stack.CheckIfMultiDataBase() {
+		if err := db.StateStore().Compact(nil, nil); err != nil {
+			log.Error("Compact err", "error", err)
+			return err
+		}
+		if err := db.BlockStore().Compact(nil, nil); err != nil {
+			log.Error("Compact err", "error", err)
+			return err
+		}
+	}
+
 	log.Info("Stats after compaction")
 	showLeveldbStats(db)
+	if stack.CheckIfMultiDataBase() {
+		fmt.Println("show stats of state store after compaction")
+		showLeveldbStats(db.StateStore())
+		fmt.Println("show stats of block store after compaction")
+		showLeveldbStats(db.BlockStore())
+	}
 	return nil
 }
 
@@ -588,8 +624,17 @@ func dbGet(ctx *cli.Context) error {
 		log.Info("Could not decode the key", "error", err)
 		return err
 	}
+	opDb := db
+	if stack.CheckIfMultiDataBase() {
+		keyType := rawdb.DataTypeByKey(key)
+		if keyType == rawdb.StateDataType {
+			opDb = db.StateStore()
+		} else if keyType == rawdb.BlockDataType {
+			opDb = db.BlockStore()
+		}
+	}
 
-	data, err := db.Get(key)
+	data, err := opDb.Get(key)
 	if err != nil {
 		log.Info("Get operation failed", "key", fmt.Sprintf("%#x", key), "error", err)
 		return err
@@ -606,8 +651,14 @@ func dbTrieGet(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, false)
-	defer db.Close()
+	var db ethdb.Database
+	chaindb := utils.MakeChainDatabase(ctx, stack, true)
+	if chaindb.StateStore() != nil {
+		db = chaindb.StateStore()
+	} else {
+		db = chaindb
+	}
+	defer chaindb.Close()
 
 	scheme := ctx.String(utils.StateSchemeFlag.Name)
 	if scheme == "" {
@@ -673,8 +724,14 @@ func dbTrieDelete(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack, false)
-	defer db.Close()
+	var db ethdb.Database
+	chaindb := utils.MakeChainDatabase(ctx, stack, true)
+	if chaindb.StateStore() != nil {
+		db = chaindb.StateStore()
+	} else {
+		db = chaindb
+	}
+	defer chaindb.Close()
 
 	scheme := ctx.String(utils.StateSchemeFlag.Name)
 	if scheme == "" {
@@ -742,7 +799,17 @@ func dbDelete(ctx *cli.Context) error {
 		log.Error("Could not decode the key", "error", err)
 		return err
 	}
-	data, err := db.Get(key)
+	opDb := db
+	if stack.CheckIfMultiDataBase() {
+		keyType := rawdb.DataTypeByKey(key)
+		if keyType == rawdb.StateDataType {
+			opDb = db.StateStore()
+		} else if keyType == rawdb.BlockDataType {
+			opDb = db.BlockStore()
+		}
+	}
+
+	data, err := opDb.Get(key)
 	if err == nil {
 		fmt.Printf("Previous value: %#x\n", data)
 	}
@@ -780,11 +847,22 @@ func dbPut(ctx *cli.Context) error {
 		log.Error("Could not decode the value", "error", err)
 		return err
 	}
-	data, err = db.Get(key)
+
+	opDb := db
+	if stack.CheckIfMultiDataBase() {
+		keyType := rawdb.DataTypeByKey(key)
+		if keyType == rawdb.StateDataType {
+			opDb = db.StateStore()
+		} else if keyType == rawdb.BlockDataType {
+			opDb = db.BlockStore()
+		}
+	}
+
+	data, err = opDb.Get(key)
 	if err == nil {
 		fmt.Printf("Previous value: %#x\n", data)
 	}
-	return db.Put(key, value)
+	return opDb.Put(key, value)
 }
 
 // dbDumpTrie shows the key-value slots of a given storage trie
@@ -875,7 +953,7 @@ func freezerInspect(ctx *cli.Context) error {
 	stack, _ := makeConfigNode(ctx)
 	ancient := stack.ResolveAncient("chaindata", ctx.String(utils.AncientFlag.Name))
 	stack.Close()
-	return rawdb.InspectFreezerTable(ancient, freezer, table, start, end)
+	return rawdb.InspectFreezerTable(ancient, freezer, table, start, end, stack.CheckIfMultiDataBase())
 }
 
 func importLDBdata(ctx *cli.Context) error {
@@ -1016,7 +1094,7 @@ func showMetaData(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, true)
 	defer db.Close()
 
-	ancients, err := db.Ancients()
+	ancients, err := db.BlockStore().Ancients()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error accessing ancients: %v", err)
 	}
@@ -1061,7 +1139,7 @@ func hbss2pbss(ctx *cli.Context) error {
 	defer stack.Close()
 
 	db := utils.MakeChainDatabase(ctx, stack, false)
-	db.Sync()
+	db.BlockStore().Sync()
 	defer db.Close()
 
 	config := triedb.HashDefaults

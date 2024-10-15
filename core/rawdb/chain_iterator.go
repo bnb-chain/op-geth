@@ -34,12 +34,12 @@ import (
 // injects into the database the block hash->number mappings.
 func InitDatabaseFromFreezer(db ethdb.Database) {
 	// If we can't access the freezer or it's empty, abort
-	frozen, err := db.Ancients()
+	frozen, err := db.BlockStore().Ancients()
 	if err != nil || frozen == 0 {
 		return
 	}
 	var (
-		batch  = db.NewBatch()
+		batch  = db.BlockStore().NewBatch()
 		start  = time.Now()
 		logged = start.Add(-7 * time.Second) // Unindex during import is fast, don't double log
 		hash   common.Hash
@@ -50,7 +50,7 @@ func InitDatabaseFromFreezer(db ethdb.Database) {
 		if i+count > frozen {
 			count = frozen - i
 		}
-		data, err := db.AncientRange(ChainFreezerHashTable, i, count, 32*count)
+		data, err := db.BlockStore().AncientRange(ChainFreezerHashTable, i, count, 32*count)
 		if err != nil {
 			log.Crit("Failed to init database from freezer", "err", err)
 		}
@@ -78,8 +78,8 @@ func InitDatabaseFromFreezer(db ethdb.Database) {
 	}
 	batch.Reset()
 
-	WriteHeadHeaderHash(db, hash)
-	WriteHeadFastBlockHash(db, hash)
+	WriteHeadHeaderHash(db.BlockStore(), hash)
+	WriteHeadFastBlockHash(db.BlockStore(), hash)
 	log.Info("Initialized database from freezer", "blocks", frozen, "elapsed", common.PrettyDuration(time.Since(start)))
 }
 

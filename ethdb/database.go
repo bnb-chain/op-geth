@@ -149,11 +149,33 @@ type AncientStater interface {
 	AncientDatadir() (string, error)
 }
 
+type StateStoreReader interface {
+	StateStoreReader() Reader
+}
+
+type BlockStoreReader interface {
+	BlockStoreReader() Reader
+}
+
+type BlockStoreWriter interface {
+	BlockStoreWriter() Writer
+}
+
+// MultiDatabaseReader contains the methods required to read data from both key-value as well as
+// blockStore or stateStore.
+type MultiDatabaseReader interface {
+	KeyValueReader
+	StateStoreReader
+	BlockStoreReader
+}
+
 // Reader contains the methods required to read data from both key-value as well as
 // immutable ancient data.
 type Reader interface {
 	KeyValueReader
 	AncientReader
+	StateStoreReader
+	BlockStoreReader
 }
 
 // Writer contains the methods required to write data to both key-value as well as
@@ -161,6 +183,7 @@ type Reader interface {
 type Writer interface {
 	KeyValueWriter
 	AncientWriter
+	BlockStoreWriter
 }
 
 // Stater contains the methods required to retrieve states from both key-value as well as
@@ -178,11 +201,25 @@ type AncientStore interface {
 	io.Closer
 }
 
+type StateStore interface {
+	StateStore() Database
+	SetStateStore(state Database)
+	GetStateStore() Database
+}
+
+type BlockStore interface {
+	BlockStore() Database
+	SetBlockStore(block Database)
+	HasSeparateBlockStore() bool
+}
+
 // Database contains all the methods required by the high level database to not
 // only access the key-value data store but also the chain freezer.
 type Database interface {
 	Reader
 	Writer
+	StateStore
+	BlockStore
 	Batcher
 	Iteratee
 	Stater

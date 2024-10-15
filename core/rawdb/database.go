@@ -40,6 +40,29 @@ type freezerdb struct {
 	ancientRoot string
 	ethdb.KeyValueStore
 	ethdb.AncientStore
+	stateStore ethdb.Database
+	blockStore ethdb.Database
+}
+
+func (frdb *freezerdb) StateStoreReader() ethdb.Reader {
+	if frdb.stateStore == nil {
+		return frdb
+	}
+	return frdb.stateStore
+}
+
+func (frdb *freezerdb) BlockStoreReader() ethdb.Reader {
+	if frdb.blockStore == nil {
+		return frdb
+	}
+	return frdb.blockStore
+}
+
+func (frdb *freezerdb) BlockStoreWriter() ethdb.Writer {
+	if frdb.blockStore == nil {
+		return frdb
+	}
+	return frdb.blockStore
 }
 
 // AncientDatadir returns the path of root ancient directory.
@@ -57,10 +80,57 @@ func (frdb *freezerdb) Close() error {
 	if err := frdb.KeyValueStore.Close(); err != nil {
 		errs = append(errs, err)
 	}
+	if frdb.stateStore != nil {
+		if err := frdb.stateStore.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if frdb.blockStore != nil {
+		if err := frdb.blockStore.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if len(errs) != 0 {
 		return fmt.Errorf("%v", errs)
 	}
 	return nil
+}
+
+func (frdb *freezerdb) StateStore() ethdb.Database {
+	return frdb.stateStore
+}
+
+func (frdb *freezerdb) GetStateStore() ethdb.Database {
+	if frdb.stateStore != nil {
+		return frdb.stateStore
+	}
+	return frdb
+}
+
+func (frdb *freezerdb) SetStateStore(state ethdb.Database) {
+	if frdb.stateStore != nil {
+		frdb.stateStore.Close()
+	}
+	frdb.stateStore = state
+}
+
+func (frdb *freezerdb) BlockStore() ethdb.Database {
+	if frdb.blockStore != nil {
+		return frdb.blockStore
+	} else {
+		return frdb
+	}
+}
+
+func (frdb *freezerdb) SetBlockStore(block ethdb.Database) {
+	if frdb.blockStore != nil {
+		frdb.blockStore.Close()
+	}
+	frdb.blockStore = block
+}
+
+func (frdb *freezerdb) HasSeparateBlockStore() bool {
+	return frdb.blockStore != nil
 }
 
 // Freeze is a helper method used for external testing to trigger and block until
@@ -86,6 +156,8 @@ func (frdb *freezerdb) Freeze(threshold uint64) error {
 // nofreezedb is a database wrapper that disables freezer data retrievals.
 type nofreezedb struct {
 	ethdb.KeyValueStore
+	stateStore ethdb.Database
+	blockStore ethdb.Database
 }
 
 // HasAncient returns an error as we don't have a backing chain freezer.
@@ -136,6 +208,57 @@ func (db *nofreezedb) TruncateTail(items uint64) (uint64, error) {
 // Sync returns an error as we don't have a backing chain freezer.
 func (db *nofreezedb) Sync() error {
 	return errNotSupported
+}
+
+func (db *nofreezedb) StateStore() ethdb.Database {
+	return db.stateStore
+}
+
+func (db *nofreezedb) SetStateStore(state ethdb.Database) {
+	db.stateStore = state
+}
+
+func (db *nofreezedb) GetStateStore() ethdb.Database {
+	if db.stateStore != nil {
+		return db.stateStore
+	}
+	return db
+}
+
+func (db *nofreezedb) StateStoreReader() ethdb.Reader {
+	if db.stateStore != nil {
+		return db.stateStore
+	}
+	return db
+}
+
+func (db *nofreezedb) BlockStore() ethdb.Database {
+	if db.blockStore != nil {
+		return db.blockStore
+	}
+	return db
+}
+
+func (db *nofreezedb) SetBlockStore(block ethdb.Database) {
+	db.blockStore = block
+}
+
+func (db *nofreezedb) HasSeparateBlockStore() bool {
+	return db.blockStore != nil
+}
+
+func (db *nofreezedb) BlockStoreReader() ethdb.Reader {
+	if db.blockStore != nil {
+		return db.blockStore
+	}
+	return db
+}
+
+func (db *nofreezedb) BlockStoreWriter() ethdb.Writer {
+	if db.blockStore != nil {
+		return db.blockStore
+	}
+	return db
 }
 
 func (db *nofreezedb) ReadAncients(fn func(reader ethdb.AncientReaderOp) error) (err error) {
@@ -198,11 +321,18 @@ func resolveChainFreezerDir(ancient string) string {
 // value data store with a freezer moving immutable chain segments into cold
 // storage. The passed ancient indicates the path of root ancient directory
 // where the chain freezer can be opened.
-func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace string, readonly bool) (ethdb.Database, error) {
+func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace string, readonly bool, multiDatabase bool) (ethdb.Database, error) {
 	// Create the idle freezer instance
-	frdb, err := newChainFreezer(resolveChainFreezerDir(ancient), namespace, readonly)
+	frdb, err := newChainFreezer(resolveChainFreezerDir(ancient), namespace, readonly, multiDatabase)
+	// We are creating the freezerdb here because the validation logic for db and freezer below requires certain interfaces
+	// that need a database type. Therefore, we are pre-creating it for subsequent use.
+	freezerDb := &freezerdb{
+		ancientRoot:   ancient,
+		KeyValueStore: db,
+		AncientStore:  frdb,
+	}
 	if err != nil {
-		printChainMetadata(db)
+		printChainMetadata(freezerDb)
 		return nil, err
 	}
 	// Since the freezer can be stored separately from the user's key-value database,
@@ -234,10 +364,10 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			// the freezer and the key-value store.
 			frgenesis, err := frdb.Ancient(ChainFreezerHashTable, 0)
 			if err != nil {
-				printChainMetadata(db)
+				printChainMetadata(freezerDb)
 				return nil, fmt.Errorf("failed to retrieve genesis from ancient %v", err)
 			} else if !bytes.Equal(kvgenesis, frgenesis) {
-				printChainMetadata(db)
+				printChainMetadata(freezerDb)
 				return nil, fmt.Errorf("genesis mismatch: %#x (leveldb) != %#x (ancients)", kvgenesis, frgenesis)
 			}
 			// Key-value store and freezer belong to the same network. Ensure that they
@@ -245,7 +375,7 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			if kvhash, _ := db.Get(headerHashKey(frozen)); len(kvhash) == 0 {
 				// Subsequent header after the freezer limit is missing from the database.
 				// Reject startup if the database has a more recent head.
-				if head := *ReadHeaderNumber(db, ReadHeadHeaderHash(db)); head > frozen-1 {
+				if head := *ReadHeaderNumber(freezerDb, ReadHeadHeaderHash(freezerDb)); head > frozen-1 {
 					// Find the smallest block stored in the key-value store
 					// in range of [frozen, head]
 					var number uint64
@@ -255,7 +385,7 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 						}
 					}
 					// We are about to exit on error. Print database metadata before exiting
-					printChainMetadata(db)
+					printChainMetadata(freezerDb)
 					return nil, fmt.Errorf("gap in the chain between ancients [0 - #%d] and leveldb [#%d - #%d] ",
 						frozen-1, number, head)
 				}
@@ -270,11 +400,11 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			// store, otherwise we'll end up missing data. We check block #1 to decide
 			// if we froze anything previously or not, but do take care of databases with
 			// only the genesis block.
-			if ReadHeadHeaderHash(db) != common.BytesToHash(kvgenesis) {
+			if ReadHeadHeaderHash(freezerDb) != common.BytesToHash(kvgenesis) {
 				// Key-value store contains more data than the genesis block, make sure we
 				// didn't freeze anything yet.
 				if kvblob, _ := db.Get(headerHashKey(1)); len(kvblob) == 0 {
-					printChainMetadata(db)
+					printChainMetadata(freezerDb)
 					return nil, errors.New("ancient chain segments already extracted, please set --datadir.ancient to the correct path")
 				}
 				// Block #1 is still in the database, we're allowed to init a new freezer
@@ -291,11 +421,7 @@ func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace st
 			frdb.wg.Done()
 		}()
 	}
-	return &freezerdb{
-		ancientRoot:   ancient,
-		KeyValueStore: db,
-		AncientStore:  frdb,
-	}, nil
+	return freezerDb, nil
 }
 
 // NewMemoryDatabase creates an ephemeral in-memory key-value database without a
@@ -363,9 +489,14 @@ type OpenOptions struct {
 	Cache             int    // the capacity(in megabytes) of the data caching
 	Handles           int    // number of files to be open simultaneously
 	ReadOnly          bool
+
+	DisableFreeze    bool
+	IsLastOffset     bool
+	PruneAncientData bool
 	// Ephemeral means that filesystem sync operations should be avoided: data integrity in the face of
 	// a crash is not important. This option should typically be used in tests.
-	Ephemeral bool
+	Ephemeral     bool
+	MultiDataBase bool
 }
 
 // openKeyValueDatabase opens a disk-based key-value database, e.g. leveldb or pebble.
@@ -411,7 +542,7 @@ func Open(o OpenOptions) (ethdb.Database, error) {
 	if len(o.AncientsDirectory) == 0 {
 		return kvdb, nil
 	}
-	frdb, err := NewDatabaseWithFreezer(kvdb, o.AncientsDirectory, o.Namespace, o.ReadOnly)
+	frdb, err := NewDatabaseWithFreezer(kvdb, o.AncientsDirectory, o.Namespace, o.ReadOnly, o.MultiDataBase)
 	if err != nil {
 		kvdb.Close()
 		return nil, err
@@ -471,12 +602,65 @@ func PruneHashTrieNodeInDatabase(db ethdb.Database) error {
 	return nil
 }
 
+type DataType int
+
+const (
+	StateDataType DataType = iota
+	BlockDataType
+	ChainDataType
+	Unknown
+)
+
+func DataTypeByKey(key []byte) DataType {
+	switch {
+	// state
+	case IsLegacyTrieNode(key, key),
+		bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength,
+		IsAccountTrieNode(key),
+		IsStorageTrieNode(key):
+		return StateDataType
+
+	// block
+	case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength),
+		bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength),
+		bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength),
+		bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix),
+		bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix),
+		bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
+		return BlockDataType
+	default:
+		for _, meta := range [][]byte{
+			fastTrieProgressKey, persistentStateIDKey, trieJournalKey, snapSyncStatusFlagKey} {
+			if bytes.Equal(key, meta) {
+				return StateDataType
+			}
+		}
+		for _, meta := range [][]byte{headHeaderKey, headFinalizedBlockKey, headBlockKey, headFastBlockKey} {
+			if bytes.Equal(key, meta) {
+				return BlockDataType
+			}
+		}
+		return ChainDataType
+	}
+}
+
 // InspectDatabase traverses the entire database and checks the size
 // of all different categories of data.
 func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 	it := db.NewIterator(keyPrefix, keyStart)
 	defer it.Release()
 
+	var trieIter ethdb.Iterator
+	var blockIter ethdb.Iterator
+	if db.StateStore() != nil {
+		trieIter = db.StateStore().NewIterator(keyPrefix, nil)
+		defer trieIter.Release()
+	}
+
+	if db.HasSeparateBlockStore() {
+		blockIter = db.BlockStore().NewIterator(keyPrefix, nil)
+		defer blockIter.Release()
+	}
 	var (
 		count  int64
 		start  = time.Now()
@@ -527,14 +711,14 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			bodies.Add(size)
 		case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
 			receipts.Add(size)
+		case IsLegacyTrieNode(key, it.Value()):
+			legacyTries.Add(size)
 		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
 			tds.Add(size)
 		case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
 			numHashPairings.Add(size)
 		case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
 			hashNumPairings.Add(size)
-		case IsLegacyTrieNode(key, it.Value()):
-			legacyTries.Add(size)
 		case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
 			stateLookups.Add(size)
 		case IsAccountTrieNode(key):
@@ -596,6 +780,98 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 			logged = time.Now()
 		}
 	}
+	// inspect separate trie db
+	if trieIter != nil {
+		count = 0
+		logged = time.Now()
+		for trieIter.Next() {
+			var (
+				key   = trieIter.Key()
+				value = trieIter.Value()
+				size  = common.StorageSize(len(key) + len(value))
+			)
+			total += size
+
+			switch {
+			case IsLegacyTrieNode(key, value):
+				legacyTries.Add(size)
+			case bytes.HasPrefix(key, stateIDPrefix) && len(key) == len(stateIDPrefix)+common.HashLength:
+				stateLookups.Add(size)
+			case IsAccountTrieNode(key):
+				accountTries.Add(size)
+			case IsStorageTrieNode(key):
+				storageTries.Add(size)
+			case bytes.HasPrefix(key, PreimagePrefix) && len(key) == (len(PreimagePrefix)+common.HashLength):
+				preimages.Add(size)
+			default:
+				var accounted bool
+				for _, meta := range [][]byte{
+					fastTrieProgressKey, persistentStateIDKey, trieJournalKey, snapSyncStatusFlagKey} {
+					if bytes.Equal(key, meta) {
+						metadata.Add(size)
+						accounted = true
+						break
+					}
+				}
+				if !accounted {
+					unaccounted.Add(size)
+				}
+			}
+			count++
+			if count%1000 == 0 && time.Since(logged) > 8*time.Second {
+				log.Info("Inspecting separate state database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+		log.Info("Inspecting separate state database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+	}
+	// inspect separate block db
+	if blockIter != nil {
+		count = 0
+		logged = time.Now()
+
+		for blockIter.Next() {
+			var (
+				key   = blockIter.Key()
+				value = blockIter.Value()
+				size  = common.StorageSize(len(key) + len(value))
+			)
+			total += size
+
+			switch {
+			case bytes.HasPrefix(key, headerPrefix) && len(key) == (len(headerPrefix)+8+common.HashLength):
+				headers.Add(size)
+			case bytes.HasPrefix(key, blockBodyPrefix) && len(key) == (len(blockBodyPrefix)+8+common.HashLength):
+				bodies.Add(size)
+			case bytes.HasPrefix(key, blockReceiptsPrefix) && len(key) == (len(blockReceiptsPrefix)+8+common.HashLength):
+				receipts.Add(size)
+			case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerTDSuffix):
+				tds.Add(size)
+			case bytes.HasPrefix(key, headerPrefix) && bytes.HasSuffix(key, headerHashSuffix):
+				numHashPairings.Add(size)
+			case bytes.HasPrefix(key, headerNumberPrefix) && len(key) == (len(headerNumberPrefix)+common.HashLength):
+				hashNumPairings.Add(size)
+			default:
+				var accounted bool
+				for _, meta := range [][]byte{headHeaderKey, headFinalizedBlockKey, headBlockKey, headFastBlockKey} {
+					if bytes.Equal(key, meta) {
+						metadata.Add(size)
+						accounted = true
+						break
+					}
+				}
+				if !accounted {
+					unaccounted.Add(size)
+				}
+			}
+			count++
+			if count%1000 == 0 && time.Since(logged) > 8*time.Second {
+				log.Info("Inspecting separate block database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+				logged = time.Now()
+			}
+		}
+		log.Info("Inspecting separate block database", "count", count, "elapsed", common.PrettyDuration(time.Since(start)))
+	}
 	// Display the database statistic of key-value store.
 	stats := [][]string{
 		{"Key-Value store", "Headers", headers.Size(), headers.Count()},
@@ -636,6 +912,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		}
 		total += ancient.size()
 	}
+
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Database", "Category", "Size", "Items"})
 	table.SetFooter([]string{"", "Total", total.String(), " "})
@@ -649,7 +926,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 }
 
 // printChainMetadata prints out chain metadata to stderr.
-func printChainMetadata(db ethdb.KeyValueStore) {
+func printChainMetadata(db ethdb.Reader) {
 	fmt.Fprintf(os.Stderr, "Chain metadata\n")
 	for _, v := range ReadChainMetadata(db) {
 		fmt.Fprintf(os.Stderr, "  %s\n", strings.Join(v, ": "))
@@ -660,7 +937,7 @@ func printChainMetadata(db ethdb.KeyValueStore) {
 // ReadChainMetadata returns a set of key/value pairs that contains information
 // about the database chain status. This can be used for diagnostic purposes
 // when investigating the state of the node.
-func ReadChainMetadata(db ethdb.KeyValueStore) [][]string {
+func ReadChainMetadata(db ethdb.Reader) [][]string {
 	pp := func(val *uint64) string {
 		if val == nil {
 			return "<nil>"

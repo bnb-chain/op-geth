@@ -22,6 +22,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type tableSize struct {
@@ -82,7 +83,7 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 	for _, freezer := range freezers {
 		switch freezer {
 		case ChainFreezerName:
-			info, err := inspect(ChainFreezerName, chainFreezerNoSnappy, db)
+			info, err := inspect(ChainFreezerName, chainFreezerNoSnappy, db.BlockStore())
 			if err != nil {
 				return nil, err
 			}
@@ -92,7 +93,7 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 			if ReadStateScheme(db) != PathScheme {
 				continue
 			}
-			datadir, err := db.AncientDatadir()
+			datadir, err := db.StateStore().AncientDatadir()
 			if err != nil {
 				return nil, err
 			}
@@ -118,7 +119,8 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 			}
 			f, err := NewProofFreezer(datadir, true)
 			if err != nil {
-				return nil, err
+				log.Warn("If proof keeper is not enabled, there will be no ProofFreezer.")
+				return nil, nil
 			}
 			defer f.Close()
 
@@ -139,16 +141,25 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 // ancient indicates the path of root ancient directory where the chain freezer can
 // be opened. Start and end specify the range for dumping out indexes.
 // Note this function can only be used for debugging purposes.
-func InspectFreezerTable(ancient string, freezerName string, tableName string, start, end int64) error {
+func InspectFreezerTable(ancient string, freezerName string, tableName string, start, end int64, multiDatabase bool) error {
 	var (
 		path   string
 		tables map[string]bool
 	)
 	switch freezerName {
 	case ChainFreezerName:
-		path, tables = resolveChainFreezerDir(ancient), chainFreezerNoSnappy
+		if multiDatabase {
+			path, tables = resolveChainFreezerDir(filepath.Dir(ancient)+"/block/ancient"), chainFreezerNoSnappy
+		} else {
+			path, tables = resolveChainFreezerDir(ancient), chainFreezerNoSnappy
+		}
+
 	case StateFreezerName:
-		path, tables = filepath.Join(ancient, freezerName), stateFreezerNoSnappy
+		if multiDatabase {
+			path, tables = filepath.Join(filepath.Dir(ancient)+"/state/ancient", freezerName), stateFreezerNoSnappy
+		} else {
+			path, tables = filepath.Join(ancient, freezerName), stateFreezerNoSnappy
+		}
 	default:
 		return fmt.Errorf("unknown freezer, supported ones: %v", freezers)
 	}

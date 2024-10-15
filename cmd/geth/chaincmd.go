@@ -54,6 +54,7 @@ var (
 			utils.CachePreimagesFlag,
 			utils.OverrideCancun,
 			utils.OverrideVerkle,
+			utils.MultiDataBaseFlag,
 		}, utils.DatabaseFlags),
 		Description: `
 The init command initializes a new genesis block and definition for the network.
@@ -221,11 +222,26 @@ func initGenesis(ctx *cli.Context) error {
 		overrides.OverrideVerkle = &v
 	}
 	for _, name := range []string{"chaindata", "lightchaindata"} {
-		chaindb, err := stack.OpenDatabaseWithFreezer(name, 0, 0, ctx.String(utils.AncientFlag.Name), "", false)
+		chaindb, err := stack.OpenDatabaseWithFreezer(name, 0, 0, ctx.String(utils.AncientFlag.Name), "", false, false)
 		if err != nil {
 			utils.Fatalf("Failed to open database: %v", err)
 		}
 		defer chaindb.Close()
+
+		// if the trie data dir has been set, new trie db with a new state database
+		if ctx.IsSet(utils.MultiDataBaseFlag.Name) {
+			statediskdb, dbErr := stack.OpenDatabaseWithFreezer(name+"/state", 0, 0, "", "", false, true)
+			if dbErr != nil {
+				utils.Fatalf("Failed to open separate trie database: %v", dbErr)
+			}
+			chaindb.SetStateStore(statediskdb)
+			blockdb, err := stack.OpenDatabaseWithFreezer(name+"/block", 0, 0, "", "", false, true)
+			if err != nil {
+				utils.Fatalf("Failed to open separate block database: %v", err)
+			}
+			chaindb.SetBlockStore(blockdb)
+			log.Warn("Multi-database is an experimental feature")
+		}
 
 		triedb := utils.MakeTrieDatabase(ctx, stack, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false, genesis.IsVerkle())
 		defer triedb.Close()
@@ -264,6 +280,13 @@ func dumpGenesis(ctx *cli.Context) error {
 				return err
 			}
 			continue
+		}
+		// set the separate state & block database
+		if stack.CheckIfMultiDataBase() && err == nil {
+			stateDiskDb := utils.MakeStateDataBase(ctx, stack, true)
+			db.SetStateStore(stateDiskDb)
+			blockDb := utils.MakeBlockDatabase(ctx, stack, true)
+			db.SetBlockStore(blockDb)
 		}
 		genesis, err := core.ReadGenesis(db)
 		if err != nil {
@@ -515,13 +538,20 @@ func importPreimages(ctx *cli.Context) error {
 }
 
 func parseDumpConfig(ctx *cli.Context, stack *node.Node) (*state.DumpConfig, ethdb.Database, common.Hash, error) {
-	db := utils.MakeChainDatabase(ctx, stack, true)
-	defer db.Close()
-
-	var header *types.Header
 	if ctx.NArg() > 1 {
 		return nil, nil, common.Hash{}, fmt.Errorf("expected 1 argument (number or hash), got %d", ctx.NArg())
 	}
+
+	db := utils.MakeChainDatabase(ctx, stack, true)
+	scheme, err := rawdb.ParseStateScheme(ctx.String(utils.StateSchemeFlag.Name), db)
+	if err != nil {
+		return nil, nil, common.Hash{}, err
+	}
+	if scheme == rawdb.PathScheme {
+		fmt.Println("You are using geth dump in path mode, please use `geth dump-roothash` command to get all available blocks.")
+	}
+
+	header := &types.Header{}
 	if ctx.NArg() == 1 {
 		arg := ctx.Args().First()
 		if hashish(arg) {

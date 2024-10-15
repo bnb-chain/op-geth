@@ -71,7 +71,15 @@ const (
 	initializingState = iota
 	runningState
 	closedState
+	blockDbCacheSize           = 256
+	blockDbHandlesMinSize      = 1000
+	blockDbHandlesMaxSize      = 2000
+	chainDbMemoryPercentage    = 50
+	chainDbHandlesPercentage   = 50
+	diffStoreHandlesPercentage = 20
 )
+
+const StateDBNamespace = "eth/db/statedata/"
 
 // New creates a new P2P node, ready for protocol registration.
 func New(conf *Config) (*Node, error) {
@@ -726,12 +734,13 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 		db = rawdb.NewMemoryDatabase()
 	} else {
 		db, err = rawdb.Open(rawdb.OpenOptions{
-			Type:      n.config.DBEngine,
-			Directory: n.ResolvePath(name),
-			Namespace: namespace,
-			Cache:     cache,
-			Handles:   handles,
-			ReadOnly:  readonly,
+			Type:          n.config.DBEngine,
+			Directory:     n.ResolvePath(name),
+			Namespace:     namespace,
+			Cache:         cache,
+			Handles:       handles,
+			ReadOnly:      readonly,
+			MultiDataBase: n.CheckIfMultiDataBase(),
 		})
 	}
 
@@ -741,12 +750,70 @@ func (n *Node) OpenDatabase(name string, cache, handles int, namespace string, r
 	return db, err
 }
 
+func (n *Node) OpenAndMergeDatabase(name string, namespace string, readonly bool, databaseCache, databaseHandles int, databaseFreezer string) (ethdb.Database, error) {
+	var (
+		err                          error
+		stateDiskDb                  ethdb.Database
+		blockDb                      ethdb.Database
+		disableChainDbFreeze         = false
+		blockDbHandlesSize           int
+		chainDataHandles             = databaseHandles
+		chainDbCache                 = databaseCache
+		stateDbCache, stateDbHandles int
+	)
+
+	isMultiDatabase := n.CheckIfMultiDataBase()
+	// Open the separated state database if the state directory exists
+	if isMultiDatabase {
+		// Resource allocation rules:
+		// 1) Allocate a fixed percentage of memory for chainDb based on chainDbMemoryPercentage & chainDbHandlesPercentage.
+		// 2) Allocate a fixed size for blockDb based on blockDbCacheSize & blockDbHandlesSize.
+		// 3) Allocate the remaining resources to stateDb.
+		chainDbCache = int(float64(databaseCache) * chainDbMemoryPercentage / 100)
+		chainDataHandles = int(float64(databaseHandles) * chainDbHandlesPercentage / 100)
+		if databaseHandles/10 > blockDbHandlesMaxSize {
+			blockDbHandlesSize = blockDbHandlesMaxSize
+		} else {
+			blockDbHandlesSize = blockDbHandlesMinSize
+		}
+		stateDbCache = databaseCache - chainDbCache - blockDbCacheSize
+		stateDbHandles = databaseHandles - chainDataHandles - blockDbHandlesSize
+		disableChainDbFreeze = true
+	}
+
+	chainDB, err := n.OpenDatabaseWithFreezer(name, chainDbCache, chainDataHandles, databaseFreezer, namespace, readonly, disableChainDbFreeze)
+	if err != nil {
+		return nil, err
+	}
+
+	if isMultiDatabase {
+		// Allocate half of the  handles and chainDbCache to this separate state data database
+		stateDiskDb, err = n.OpenDatabaseWithFreezer(name+"/state", stateDbCache, stateDbHandles, "", "eth/db/statedata/", readonly, true)
+		if err != nil {
+			return nil, err
+		}
+
+		blockDb, err = n.OpenDatabaseWithFreezer(name+"/block", blockDbCacheSize, blockDbHandlesSize, "", "eth/db/blockdata/", readonly, false)
+		if err != nil {
+			return nil, err
+		}
+		log.Warn("Multi-database is an experimental feature")
+	}
+
+	if isMultiDatabase {
+		chainDB.SetStateStore(stateDiskDb)
+		chainDB.SetBlockStore(blockDb)
+	}
+
+	return chainDB, nil
+}
+
 // OpenDatabaseWithFreezer opens an existing database with the given name (or
 // creates one if no previous can be found) from within the node's data directory,
 // also attaching a chain freezer to it that moves ancient chain data from the
 // database to immutable append-only files. If the node is an ephemeral one, a
 // memory database is returned.
-func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient string, namespace string, readonly bool) (ethdb.Database, error) {
+func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient string, namespace string, readonly, isMultiDatabase bool) (ethdb.Database, error) {
 	n.lock.Lock()
 	defer n.lock.Unlock()
 	if n.state == closedState {
@@ -765,6 +832,7 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient 
 			Cache:             cache,
 			Handles:           handles,
 			ReadOnly:          readonly,
+			MultiDataBase:     isMultiDatabase,
 		})
 	}
 
@@ -772,6 +840,33 @@ func (n *Node) OpenDatabaseWithFreezer(name string, cache, handles int, ancient 
 		db = n.wrapDatabase(db)
 	}
 	return db, err
+}
+
+// CheckIfMultiDataBase check the state and block subdirectory of db, if subdirectory exists, return true
+func (n *Node) CheckIfMultiDataBase() bool {
+	var (
+		stateExist = true
+		blockExist = true
+	)
+
+	separateStateDir := filepath.Join(n.ResolvePath("chaindata"), "state")
+	fileInfo, stateErr := os.Stat(separateStateDir)
+	if os.IsNotExist(stateErr) || !fileInfo.IsDir() {
+		stateExist = false
+	}
+	separateBlockDir := filepath.Join(n.ResolvePath("chaindata"), "block")
+	blockFileInfo, blockErr := os.Stat(separateBlockDir)
+	if os.IsNotExist(blockErr) || !blockFileInfo.IsDir() {
+		blockExist = false
+	}
+
+	if stateExist && blockExist {
+		return true
+	} else if !stateExist && !blockExist {
+		return false
+	} else {
+		panic("data corruption! missing block or state dir.")
+	}
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.

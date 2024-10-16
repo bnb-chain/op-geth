@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"math"
 	"math/big"
 	"net"
@@ -35,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
 	"github.com/urfave/cli/v2"
@@ -325,7 +325,7 @@ var (
 	PathDBNodeBufferTypeFlag = &cli.StringFlag{
 		Name:     "pathdb.nodebuffer",
 		Usage:    "Type of trienodebuffer to cache trie nodes in disklayer('list', 'sync', or 'async')",
-		Value:    "async",
+		Value:    "list",
 		Category: flags.StateCategory,
 	}
 	ProposeBlockIntervalFlag = &cli.Uint64Flag{
@@ -2508,7 +2508,8 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 }
 
 // MakeTrieDatabase constructs a trie database based on the configured scheme.
-func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, preimage bool, readOnly bool, isVerkle bool) *triedb.Database {
+func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, preimage bool, readOnly bool, isVerkle bool,
+	useBase bool) *triedb.Database {
 	config := &triedb.Config{
 		Preimages: preimage,
 		IsVerkle:  isVerkle,
@@ -2529,6 +2530,7 @@ func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, p
 	} else {
 		config.PathDB = pathdb.Defaults
 	}
+	config.PathDB.UseBase = useBase
 	config.PathDB.JournalFilePath = fmt.Sprintf("%s/%s", stack.ResolvePath("chaindata"), eth.JournalFileName)
 	return triedb.NewDatabase(disk, config)
 }

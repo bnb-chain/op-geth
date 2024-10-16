@@ -18,10 +18,13 @@ package rawdb
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type tableSize struct {
@@ -96,7 +99,7 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 			if err != nil {
 				return nil, err
 			}
-			f, err := NewStateFreezer(datadir, true)
+			f, err := NewStateFreezer(datadir, true, DetectTrieNodesFile(datadir))
 			if err != nil {
 				return nil, err
 			}
@@ -165,5 +168,45 @@ func InspectFreezerTable(ancient string, freezerName string, tableName string, s
 		return err
 	}
 	table.dumpIndexStdout(start, end)
+	return nil
+}
+
+// DetectTrieNodesFile detects whether trie nodes data exists
+func DetectTrieNodesFile(ancientDir string) bool {
+	trieNodesFilePath := filepath.Join(ancientDir, StateFreezerName, fmt.Sprintf("%s.%s",
+		stateHistoryTrieNodesData, "cidx"))
+	return common.FileExist(trieNodesFilePath)
+}
+
+// DeleteTrieNodesFile deletes all trie nodes data in state directory
+func DeleteTrieNodesFile(ancientDir string) error {
+	statePath := filepath.Join(ancientDir, StateFreezerName)
+	dir, err := os.Open(statePath)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+
+	names, err := dir.Readdirnames(0)
+	if err != nil {
+		return err
+	}
+
+	for _, name := range names {
+		filePath := filepath.Join(statePath, name)
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+			return err
+		}
+
+		if !fileInfo.IsDir() && strings.Contains(filepath.Base(filePath), stateHistoryTrieNodesData) {
+			err = os.Remove(filePath)
+			if err != nil {
+				return err
+			}
+			log.Info(fmt.Sprintf("Delete %s file", filePath))
+		}
+	}
+
 	return nil
 }

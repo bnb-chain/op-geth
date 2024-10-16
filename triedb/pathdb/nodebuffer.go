@@ -43,7 +43,7 @@ type nodebuffer struct {
 }
 
 // newNodeBuffer initializes the node buffer with the provided nodes.
-func newNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *nodebuffer {
+func newNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) (*nodebuffer, error) {
 	if nodes == nil {
 		nodes = make(map[common.Hash]map[string]*trienode.Node)
 	}
@@ -60,7 +60,7 @@ func newNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, l
 		nodes:  nodes,
 		size:   size,
 		limit:  uint64(limit),
-	}
+	}, nil
 }
 
 // node retrieves the trie node with given node info.
@@ -305,5 +305,9 @@ func (b *nodebuffer) setClean(clean *fastcache.Cache) {
 
 // proposedBlockReader return the world state Reader of block that is proposed to L1.
 func (b *nodebuffer) proposedBlockReader(blockRoot common.Hash) (layer, error) {
-	return nil, errors.New("anode buffer not support to get proposed block reader")
+	return nil, errors.New("node buffer not support to get proposed block reader")
+}
+
+func (b *nodebuffer) getLatestStatus() (common.Hash, uint64, error) {
+	return common.Hash{}, 0, errors.New("unsupported method for node buffer")
 }

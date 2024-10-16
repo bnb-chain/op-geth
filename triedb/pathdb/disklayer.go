@@ -82,14 +82,17 @@ type trienodebuffer interface {
 
 	// proposedBlockReader return the world state Reader of block that is proposed to L1.
 	proposedBlockReader(blockRoot common.Hash) (layer, error)
+
+	// getLatestStatus returns latest status for disk layer
+	getLatestStatus() (common.Hash, uint64, error)
 }
 
 type NodeBufferType int32
 
 const (
-	AsyncNodeBuffer NodeBufferType = 0
+	NodeBufferList  NodeBufferType = 0
 	SyncNodeBuffer  NodeBufferType = 1
-	NodeBufferList  NodeBufferType = 2
+	AsyncNodeBuffer NodeBufferType = 2
 )
 
 var (
@@ -121,17 +124,19 @@ func NewTrieNodeBuffer(
 	nodes map[common.Hash]map[string]*trienode.Node,
 	layers, proposeBlockInterval uint64,
 	keepFunc NotifyKeepFunc,
-) trienodebuffer {
+	freezer *rawdb.ResettableFreezer,
+	fastRecovery, useBase bool,
+) (trienodebuffer, error) {
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {
 	case NodeBufferList:
-		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, fastRecovery, useBase)
 	case AsyncNodeBuffer:
 		return newAsyncNodeBuffer(limit, nodes, layers)
 	case SyncNodeBuffer:
 		return newNodeBuffer(limit, nodes, layers)
 	default:
-		return newAsyncNodeBuffer(limit, nodes, layers)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, fastRecovery, useBase)
 	}
 }
 
@@ -285,7 +290,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 		limit    = dl.db.config.StateHistory
 	)
 	if dl.db.freezer != nil {
-		err := writeHistory(dl.db.freezer, bottom)
+		err := writeHistory(dl.db.freezer, bottom, dl.db.fastRecovery)
 		if err != nil {
 			return nil, err
 		}
@@ -346,7 +351,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 				return ndl, nil
 			}
 			oldest = targetOldest
-			log.Info("Forcing prune ancient under nodebufferlist", "disk_persistent_state_id",
+			log.Debug("Forcing prune ancient under nodebufferlist", "disk_persistent_state_id",
 				persistentID, "truncate_tail", oldest)
 		}
 
@@ -406,6 +411,11 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 		rawdb.WritePersistentStateID(batch, dl.id-1)
 		if err := batch.Write(); err != nil {
 			log.Crit("Failed to write states", "err", err)
+		}
+		if nl, ok := dl.buffer.(*nodebufferlist); ok {
+			if nl.persistID != 0 {
+				nl.persistID--
+			}
 		}
 	}
 	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer), nil

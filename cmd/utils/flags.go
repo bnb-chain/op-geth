@@ -1096,7 +1096,7 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 	}
 
 	ParallelTxLegacyFlag = &cli.BoolFlag{
-		Name:     "parallel_legacy",
+		Name:     "parallel-legacy",
 		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
 		Category: flags.VMCategory,
 	}

@@ -662,13 +662,14 @@ func (pst *UncommittedDB) getDeletedObjectWithState(addr common.Address, maindb 
 		return o
 	}
 	// first, load code from maindb and record the previous state
-	// we can't use getStateObject() here , because it will be used for conflict check.
+	// we can't use getStateObject() here , because the state of deletedObj will be used for conflict check.
 	deletedObj := pst.maindb.getDeletedStateObject(addr)
 	if deletedObj != nil {
+		// record the previous state for conflict check.
 		pst.reads.recordKVOnce(addr, hash, deletedObj.GetState(hash))
 	}
 
-	// now return the true state into cache
+	// now write the true state into cache
 	var value = common.Hash{}
 	if deletedObj != nil && !deletedObj.deleted {
 		value = deletedObj.GetState(hash)

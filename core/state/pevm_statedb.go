@@ -476,7 +476,7 @@ func (pst *UncommittedDB) ConflictsToMaindb() error {
 	return pst.conflictsToMaindb()
 }
 
-func (pst *UncommittedDB) Merge() error {
+func (pst *UncommittedDB) Merge(deleteEmptyObjects bool) error {
 	if pst.discarded {
 		// all the writes of this db will be discarded, including:
 		// 1. accessList
@@ -523,6 +523,15 @@ func (pst *UncommittedDB) Merge() error {
 	// 5. merge refund
 	if pst.refund != 0 {
 		pst.maindb.AddRefund(pst.refund)
+	}
+	// clean empty objects if needed
+	for _, obj := range pst.cache {
+		if obj.selfDestruct || (deleteEmptyObjects && obj.empty()) {
+			obj.deleted = true
+		}
+		// we don't need to do obj.finalize() here, it will be done in the maindb.Finalize()
+		// just mark the object as deleted
+		obj.created = false
 	}
 	return nil
 }
@@ -652,16 +661,19 @@ func (pst *UncommittedDB) getDeletedObjectWithState(addr common.Address, maindb 
 	if _, ok := o.state[hash]; ok {
 		return o
 	}
-	// load code from maindb
+	// first, load code from maindb and record the previous state
+	// we can't use getStateObject() here , because the state of deletedObj will be used for conflict check.
 	deletedObj := pst.maindb.getDeletedStateObject(addr)
-	var value = common.Hash{}
-	if deletedObj == nil {
-		pst.reads.recordKVOnce(addr, hash, common.Hash{})
-	} else {
-		value = deletedObj.GetState(hash)
-		pst.reads.recordKVOnce(addr, hash, value)
+	if deletedObj != nil {
+		// record the previous state for conflict check.
+		pst.reads.recordKVOnce(addr, hash, deletedObj.GetState(hash))
 	}
-	// set code into the cache
+
+	// now write the true state into cache
+	var value = common.Hash{}
+	if deletedObj != nil && !deletedObj.deleted {
+		value = deletedObj.GetState(hash)
+	}
 	o.state[hash] = value
 	return o
 }

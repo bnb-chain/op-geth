@@ -534,7 +534,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if bc.vmConfig.EnableParallelExecLegacy {
 		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
 		bc.CreateSerialProcessor(chainConfig, bc, engine)
-	} else if bc.vmConfig.EnableParallelExecV2 {
+	} else if bc.vmConfig.EnableParallelExec {
 		bc.processor = newPEVMProcessor(chainConfig, bc, engine)
 	} else {
 		bc.processor = NewStateProcessor(chainConfig, bc, engine)
@@ -1923,7 +1923,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				}
 			}
 
-			if bc.vmConfig.EnableParallelExecV2 {
+			if bc.vmConfig.EnableParallelExec {
 				bc.parseTxDAG(block)
 			}
 			// If we have a followup block, run that against the current state to pre-cache
@@ -1971,7 +1971,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
-		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExecLegacy && !bc.vmConfig.EnableParallelExecV2 {
+		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExecLegacy && !bc.vmConfig.EnableParallelExec {
 			// compare input TxDAG when it enable in consensus
 			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			if err == nil {

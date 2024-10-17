@@ -170,7 +170,7 @@ var (
 		utils.RollupHaltOnIncompatibleProtocolVersionFlag,
 		utils.RollupSuperchainUpgradesFlag,
 		utils.ParallelTxLegacyFlag,
-		utils.ParallelTx2Flag,
+		utils.ParallelTxFlag,
 		utils.ParallelTxNumFlag,
 		utils.ParallelTxDAGFlag,
 		utils.ParallelTxDAGFileFlag,

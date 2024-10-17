@@ -225,7 +225,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		vmConfig = vm.Config{
 			EnablePreimageRecording:   config.EnablePreimageRecording,
 			EnableParallelExecLegacy:  config.ParallelTxLegacyMode,
-			EnableParallelExecV2:      config.ParallelTxMode2,
+			EnableParallelExec:        config.ParallelTxMode,
 			ParallelTxNum:             config.ParallelTxNum,
 			EnableOpcodeOptimizations: config.EnableOpcodeOptimizing,
 		}
@@ -275,8 +275,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 	if config.EnableParallelTxDAG {
-		if config.ParallelTxMode2 {
-			eth.blockchain.SetupTxDAGGeneration(config.ParallelTxDAGFile, config.ParallelTxMode2)
+		if config.ParallelTxMode {
+			eth.blockchain.SetupTxDAGGeneration(config.ParallelTxDAGFile, config.ParallelTxMode)
 		} else {
 			eth.blockchain.SetupTxDAGGeneration(config.ParallelTxDAGFile, config.ParallelTxLegacyMode)
 		}

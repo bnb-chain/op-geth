@@ -1101,7 +1101,7 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.VMCategory,
 	}
 
-	ParallelTx2Flag = &cli.BoolFlag{
+	ParallelTxFlag = &cli.BoolFlag{
 		Name:     "parallel",
 		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
 		Category: flags.VMCategory,
@@ -2045,8 +2045,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.ParallelTxNum = parallelNum
 	}
 
-	if ctx.IsSet(ParallelTx2Flag.Name) {
-		cfg.ParallelTxMode2 = ctx.Bool(ParallelTx2Flag.Name)
+	if ctx.IsSet(ParallelTxFlag.Name) {
+		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
 	}
 
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {

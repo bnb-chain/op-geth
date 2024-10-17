@@ -12,8 +12,9 @@ import (
 var runner chan func()
 
 func init() {
-	runner = make(chan func(), runtime.NumCPU())
-	for i := 0; i < runtime.NumCPU(); i++ {
+	cpuNum := runtime.NumCPU()
+	runner = make(chan func(), cpuNum)
+	for i := 0; i < cpuNum; i++ {
 		go func() {
 			for f := range runner {
 				f()

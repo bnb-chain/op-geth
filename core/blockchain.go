@@ -531,7 +531,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
 	}
 
-	if bc.vmConfig.EnableParallelExec {
+	if bc.vmConfig.EnableParallelExecLegacy {
 		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
 		bc.CreateSerialProcessor(chainConfig, bc, engine)
 	} else if bc.vmConfig.EnableParallelExecV2 {
@@ -1909,7 +1909,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
 
-			if bc.vmConfig.EnableParallelExec {
+			if bc.vmConfig.EnableParallelExecLegacy {
 				bc.parseTxDAG(block)
 				txsCount := block.Transactions().Len()
 				threshold := min(bc.vmConfig.ParallelTxNum/2+2, 4)
@@ -1971,7 +1971,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
-		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec && !bc.vmConfig.EnableParallelExecV2 {
+		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExecLegacy && !bc.vmConfig.EnableParallelExecV2 {
 			// compare input TxDAG when it enable in consensus
 			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			if err == nil {

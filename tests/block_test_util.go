@@ -151,9 +151,9 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 		cache.SnapshotWait = true
 	}
 	chain, err := core.NewBlockChain(db, cache, gspec, nil, engine, vm.Config{
-		EnableParallelExec: enableParallel,
-		ParallelTxNum:      4,
-		Tracer:             tracer,
+		EnableParallelExecV2: enableParallel,
+		ParallelTxNum:        4,
+		Tracer:               tracer,
 	}, nil, nil)
 	if err != nil {
 		return err

@@ -534,8 +534,10 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if bc.vmConfig.EnableParallelExecLegacy {
 		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
 		bc.CreateSerialProcessor(chainConfig, bc, engine)
+		log.Info("Parallel V1 enabled", "parallelNum", bc.vmConfig.ParallelTxNum)
 	} else if bc.vmConfig.EnableParallelExec {
 		bc.processor = newPEVMProcessor(chainConfig, bc, engine)
+		log.Info("Parallel V2 enabled", "parallelNum", ParallelNum())
 	} else {
 		bc.processor = NewStateProcessor(chainConfig, bc, engine)
 	}

@@ -136,7 +136,7 @@ func (q *payloadQueue) getBlockByHash(hash common.Hash) *types.Block {
 			return nil
 		}
 		block := item.payload.GetBlock()
-		if block.Hash() == hash {
+		if block != nil && block.Hash() == hash {
 			return block
 		}
 	}

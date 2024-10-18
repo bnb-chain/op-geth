@@ -99,6 +99,8 @@ var caps = []string{
 	"engine_getPayloadBodiesByHashV1",
 	"engine_getPayloadBodiesByRangeV1",
 	"engine_getClientVersionV1",
+	"engine_opSealPayloadV2",
+	"engine_opSealPayloadV3",
 }
 
 type ConsensusAPI struct {
@@ -602,11 +604,17 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	defer api.newPayloadLock.Unlock()
 
 	log.Trace("Engine API request received", "method", "NewPayload", "number", params.Number, "hash", params.BlockHash)
-	block, err := engine.ExecutableDataToBlock(params, versionedHashes, beaconRoot)
-	if err != nil {
-		log.Warn("Invalid NewPayload params", "params", params, "error", err)
-		return api.invalid(err, nil), nil
+
+	block := api.localBlocks.getBlockByHash(params.BlockHash)
+	if block == nil {
+		var err error
+		block, err = engine.ExecutableDataToBlock(params, versionedHashes, beaconRoot)
+		if err != nil {
+			log.Warn("Invalid NewPayload params", "params", params, "error", err)
+			return api.invalid(err, nil), nil
+		}
 	}
+
 	// Stash away the last update to warn the user if the beacon client goes offline
 	api.lastNewPayloadLock.Lock()
 	api.lastNewPayloadUpdate = time.Now()
@@ -689,6 +697,60 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	}
 	hash := block.Hash()
 	return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
+}
+
+// OpSealPayloadV2 is combination API of payload sealing: getPayload, newPayload, forkchoiceUpdated.
+func (api *ConsensusAPI) OpSealPayloadV2(payloadID engine.PayloadID, update engine.ForkchoiceStateV1, needPayload bool) (engine.OpSealPayloadResponse, error) {
+	return api.opSealPayload(payloadID, update, needPayload, "V2")
+}
+
+// OpSealPayloadV3 is combination API of payload sealing: getPayload, newPayload, forkchoiceUpdated.
+func (api *ConsensusAPI) OpSealPayloadV3(payloadID engine.PayloadID, update engine.ForkchoiceStateV1, needPayload bool) (engine.OpSealPayloadResponse, error) {
+	return api.opSealPayload(payloadID, update, needPayload, "V3")
+}
+
+func (api *ConsensusAPI) opSealPayload(payloadID engine.PayloadID, update engine.ForkchoiceStateV1, needPayload bool, version string) (engine.OpSealPayloadResponse, error) {
+	start := time.Now()
+	var payloadEnvelope *engine.ExecutionPayloadEnvelope
+	var err error
+	if version == "V2" {
+		payloadEnvelope, err = api.GetPayloadV2(payloadID)
+	} else if version == "V3" {
+		payloadEnvelope, err = api.GetPayloadV3(payloadID)
+	} else {
+		return engine.OpSealPayloadResponse{ErrStage: engine.GetPayloadStage}, engine.UnsupportedFork.With(errors.New("invalid engine api version"))
+	}
+	if err != nil {
+		log.Error("Seal payload error when get payload", "error", err, "payloadID", payloadID)
+		return engine.OpSealPayloadResponse{ErrStage: engine.GetPayloadStage}, err
+	}
+
+	var payloadStatus engine.PayloadStatusV1
+	if version == "V2" {
+		payloadStatus, err = api.NewPayloadV2(*payloadEnvelope.ExecutionPayload)
+	} else if version == "V3" {
+		payloadStatus, err = api.NewPayloadV3(*payloadEnvelope.ExecutionPayload, []common.Hash{}, payloadEnvelope.ParentBeaconBlockRoot)
+	} else {
+		return engine.OpSealPayloadResponse{ErrStage: engine.NewPayloadStage}, engine.UnsupportedFork.With(errors.New("invalid engine api version"))
+	}
+	if err != nil || payloadStatus.Status != engine.VALID {
+		log.Error("Seal payload error when new payload", "error", err, "payloadStatus", payloadStatus)
+		return engine.OpSealPayloadResponse{ErrStage: engine.NewPayloadStage, PayloadStatus: payloadStatus}, err
+	}
+
+	update.HeadBlockHash = payloadEnvelope.ExecutionPayload.BlockHash
+	updateResponse, err := api.ForkchoiceUpdatedV3(update, nil)
+	if err != nil || updateResponse.PayloadStatus.Status != engine.VALID {
+		log.Error("Seal payload error when forkchoiceUpdated", "error", err, "payloadStatus", updateResponse.PayloadStatus)
+		return engine.OpSealPayloadResponse{ErrStage: engine.ForkchoiceUpdatedStage, PayloadStatus: updateResponse.PayloadStatus}, err
+	}
+
+	log.Info("perf-trace opSealPayload succeed", "duration", common.PrettyDuration(time.Since(start)), "hash", payloadEnvelope.ExecutionPayload.BlockHash, "number", payloadEnvelope.ExecutionPayload.Number, "id", payloadID, "payloadStatus", updateResponse.PayloadStatus)
+	if needPayload {
+		return engine.OpSealPayloadResponse{PayloadStatus: updateResponse.PayloadStatus, Payload: payloadEnvelope}, nil
+	} else {
+		return engine.OpSealPayloadResponse{PayloadStatus: updateResponse.PayloadStatus}, nil
+	}
 }
 
 // delayPayloadImport stashes the given block away for import at a later time,

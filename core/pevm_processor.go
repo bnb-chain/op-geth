@@ -160,7 +160,7 @@ func (p *PEVMProcessor) confirmTxResult(statedb *state.StateDB, gp *GasPool, res
 	isByzantium := p.config.IsByzantium(header.Number)
 	isEIP158 := p.config.IsEIP158(header.Number)
 	//result.slotDB.FinaliseForParallel(isByzantium || isEIP158, statedb)
-	if err := result.slotDB.Merge(); err != nil {
+	if err := result.slotDB.Merge(isByzantium || isEIP158); err != nil {
 		// something very wrong, should not happen
 		log.Error("merge slotDB failed", "err", err)
 		return err

@@ -219,8 +219,8 @@ type Config struct {
 	RollupDisableTxPoolAdmission            bool
 	RollupHaltOnIncompatibleProtocolVersion string
 
+	ParallelTxLegacyMode   bool // Whether to execute transaction in parallel mode when do full sync
 	ParallelTxMode         bool // Whether to execute transaction in parallel mode when do full sync
-	ParallelTxMode2        bool // Whether to execute transaction in parallel mode when do full sync
 	ParallelTxNum          int  // Number of slot for transaction execution
 	EnableOpcodeOptimizing bool
 	EnableParallelTxDAG    bool

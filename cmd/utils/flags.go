@@ -1100,14 +1100,14 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.MetricsCategory,
 	}
 
-	ParallelTxFlag = &cli.BoolFlag{
-		Name:     "parallel",
+	ParallelTxLegacyFlag = &cli.BoolFlag{
+		Name:     "parallel-legacy",
 		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
 		Category: flags.VMCategory,
 	}
 
-	ParallelTx2Flag = &cli.BoolFlag{
-		Name:     "parallel2",
+	ParallelTxFlag = &cli.BoolFlag{
+		Name:     "parallel",
 		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
 		Category: flags.VMCategory,
 	}
@@ -2028,9 +2028,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.EnablePreimageRecording = ctx.Bool(VMEnableDebugFlag.Name)
 	}
 
-	if ctx.IsSet(ParallelTxFlag.Name) {
-		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
-		// The best prallel num will be tuned later, we do a simple parallel num set here
+	if ctx.IsSet(ParallelTxLegacyFlag.Name) {
+		cfg.ParallelTxLegacyMode = ctx.Bool(ParallelTxLegacyFlag.Name)
+		// The best parallel num will be tuned later, we do a simple parallel num set here
 		numCpu := runtime.NumCPU()
 		var parallelNum int
 		if ctx.IsSet(ParallelTxNumFlag.Name) {
@@ -2050,8 +2050,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.ParallelTxNum = parallelNum
 	}
 
-	if ctx.IsSet(ParallelTx2Flag.Name) {
-		cfg.ParallelTxMode2 = ctx.Bool(ParallelTx2Flag.Name)
+	if ctx.IsSet(ParallelTxFlag.Name) {
+		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
 	}
 
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {

@@ -1707,14 +1707,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 	// Peek the error for the first block to decide the directing import logic
 	it := newInsertIterator(chain, results, bc.validator)
-
-	var block *types.Block
-	var err error
-	if minerMode {
-		block = chain[0]
-	} else {
-		block, err = it.next()
-	}
+	block, err := it.next()
 
 	// Left-trim all the known blocks that don't need to build snapshot
 	if bc.skipBlock(err, it) {
@@ -1870,15 +1863,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			continue
 		}
 
-		// Async verify header if minerMode
-		asyncItNextCh := make(chan error, 1)
-		if minerMode {
-			go func() {
-				_, err := it.next()
-				asyncItNextCh <- err
-			}()
-		}
-
 		var (
 			receipts, receiptExist = bc.miningReceiptsCache.Get(block.Hash())
 			logs, logExist         = bc.miningTxLogsCache.Get(block.Hash())
@@ -1998,9 +1982,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			return it.index, err
 		}
 		if minerMode {
-			if err := <-asyncItNextCh; err != nil {
-				panic(fmt.Errorf("self mined block(hash: %x number %v) async verify header err: %w", block.Hash(), block.NumberU64(), err))
-			}
 			if err := <-asyncValidateStateCh; err != nil {
 				panic(fmt.Errorf("self mined block(hash: %x number %v) async verify state err: %w", block.Hash(), block.NumberU64(), err))
 			}

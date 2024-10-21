@@ -127,30 +127,6 @@ func (pc *cacheForMiner) dump(filtered bool) map[common.Address][]*txpool.LazyTr
 	}
 	pc.cacheLock.Unlock()
 	return pending
-
-	//pendingLazy := make(map[common.Address][]*txpool.LazyTransaction)
-	//var txnum = 0
-	//for addr, txs := range pending {
-	//	// If the miner requests tip enforcement, cap the lists now
-	//	if enforceTip && !pc.IsLocal(addr) {
-	//		for i, tx := range txs {
-	//			if tx.Tx.EffectiveGasTipIntCmp(gasPrice, baseFee) < 0 {
-	//				txs = txs[:i]
-	//				break
-	//			}
-	//		}
-	//	}
-	//	if len(txs) > 0 {
-	//		lazies := make([]*txpool.LazyTransaction, len(txs))
-	//		for i, tx := range txs {
-	//			lazies[i] = tx
-	//			txnum++
-	//		}
-	//		pendingLazy[addr] = lazies
-	//	}
-	//}
-	//log.Info("cacheForMiner dump", "duration", time.Since(start), "accounts", len(pending), "txs", txnum)
-	//return pendingLazy
 }
 
 func (pc *cacheForMiner) markLocal(addr common.Address) {

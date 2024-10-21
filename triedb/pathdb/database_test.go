@@ -103,6 +103,7 @@ func newTester(t *testing.T, historyLimit uint64) *tester {
 			StateHistory:   historyLimit,
 			CleanCacheSize: 256 * 1024,
 			DirtyCacheSize: 256 * 1024,
+			UseBase:        true,
 		})
 		obj = &tester{
 			db:           db,
@@ -342,7 +343,7 @@ func (t *tester) verifyHistory() error {
 	for i, root := range t.roots {
 		// The state history related to the state above disk layer should not exist.
 		if i > bottom {
-			_, err := readHistory(t.db.freezer, uint64(i+1))
+			_, err := readHistory(t.db.freezer, uint64(i+1), false)
 			if err == nil {
 				return errors.New("unexpected state history")
 			}
@@ -350,7 +351,7 @@ func (t *tester) verifyHistory() error {
 		}
 		// The state history related to the state below or equal to the disk layer
 		// should exist.
-		obj, err := readHistory(t.db.freezer, uint64(i+1))
+		obj, err := readHistory(t.db.freezer, uint64(i+1), false)
 		if err != nil {
 			return err
 		}
@@ -514,7 +515,9 @@ func TestJournal(t *testing.T) {
 		t.Errorf("Failed to journal, err: %v", err)
 	}
 	tester.db.Close()
-	tester.db = New(tester.db.diskdb, nil)
+	pathConfig := Defaults
+	pathConfig.UseBase = true
+	tester.db = New(tester.db.diskdb, pathConfig)
 
 	// Verify states including disk layer and all diff on top.
 	for i := 0; i < len(tester.roots); i++ {
@@ -546,7 +549,9 @@ func TestCorruptedJournal(t *testing.T) {
 	rawdb.WriteTrieJournal(tester.db.diskdb, blob)
 
 	// Verify states, all not-yet-written states should be discarded
-	tester.db = New(tester.db.diskdb, nil)
+	pathConfig := Defaults
+	pathConfig.UseBase = true
+	tester.db = New(tester.db.diskdb, pathConfig)
 	for i := 0; i < len(tester.roots); i++ {
 		if tester.roots[i] == root {
 			if err := tester.verifyState(root); err != nil {
@@ -577,7 +582,7 @@ func TestTailTruncateHistory(t *testing.T) {
 	defer tester.release()
 
 	tester.db.Close()
-	tester.db = New(tester.db.diskdb, &Config{StateHistory: 10})
+	tester.db = New(tester.db.diskdb, &Config{StateHistory: 10, UseBase: true})
 
 	head, err := tester.db.freezer.Ancients()
 	if err != nil {

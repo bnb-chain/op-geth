@@ -123,6 +123,8 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 	)
 	if scheme == rawdb.PathScheme {
 		tconf.PathDB = pathdb.Defaults
+		tconf.PathDB.TrieNodeBufferType = pathdb.AsyncNodeBuffer
+		// tconf.PathDB.UseBase = true
 	} else {
 		tconf.HashDB = hashdb.Defaults
 	}

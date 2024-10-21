@@ -198,12 +198,15 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 	trustDAG := true
 	totalExecutionTime := int64(0)
 	totalConfirmTime := int64(0)
+	maxLevelTxCount := 0
 
 	// execute all transactions in parallel
 	for _, txLevel := range tls {
 		start := time.Now()
 		log.Debug("txLevel tx count", "tx count", len(txLevel))
-		parallelTxLevelTxSizeMeter.Update(int64(len(txLevel)))
+		if len(txLevel) > maxLevelTxCount {
+			maxLevelTxCount = len(txLevel)
+		}
 		wait := sync.WaitGroup{}
 		trunks := txLevel.Split(runtime.NumCPU())
 		wait.Add(len(trunks))
@@ -238,6 +241,7 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 		}
 		totalConfirmTime += time.Since(start).Nanoseconds()
 	}
+	parallelTxLevelTxSizeMeter.Update(int64(maxLevelTxCount))
 	parallelExecutionTimer.Update(time.Duration(totalExecutionTime))
 	parallelConfirmTimer.Update(time.Duration(totalConfirmTime))
 	return nil, 0

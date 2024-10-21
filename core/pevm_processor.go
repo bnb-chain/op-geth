@@ -285,7 +285,7 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 		}(time.Now())
 		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr)
-	}, p.unorderedMerge)
+	}, p.unorderedMerge && txDAG != nil)
 	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
 		tx := allTxs[txIndex]

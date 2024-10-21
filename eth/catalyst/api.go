@@ -45,6 +45,7 @@ var (
 	forkchoiceUpdateHeadsTimer      = metrics.NewRegisteredTimer("api/engine/forkchoiceUpdate/heads", nil)
 	getPayloadTimer                 = metrics.NewRegisteredTimer("api/engine/get/payload", nil)
 	newPayloadTimer                 = metrics.NewRegisteredTimer("api/engine/new/payload", nil)
+	sealPayloadTimer                = metrics.NewRegisteredTimer("api/engine/seal/payload", nil)
 )
 
 // Register adds the engine API to the full node.
@@ -711,6 +712,10 @@ func (api *ConsensusAPI) OpSealPayloadV3(payloadID engine.PayloadID, update engi
 
 func (api *ConsensusAPI) opSealPayload(payloadID engine.PayloadID, update engine.ForkchoiceStateV1, needPayload bool, version string) (engine.OpSealPayloadResponse, error) {
 	start := time.Now()
+	defer func() {
+		sealPayloadTimer.UpdateSince(start)
+		log.Debug("sealPayloadTimer", "duration", common.PrettyDuration(time.Since(start)), "payloadID", payloadID)
+	}()
 	var payloadEnvelope *engine.ExecutionPayloadEnvelope
 	var err error
 	if version == "V2" {
@@ -745,7 +750,7 @@ func (api *ConsensusAPI) opSealPayload(payloadID engine.PayloadID, update engine
 		return engine.OpSealPayloadResponse{ErrStage: engine.ForkchoiceUpdatedStage, PayloadStatus: updateResponse.PayloadStatus}, err
 	}
 
-	log.Info("perf-trace opSealPayload succeed", "duration", common.PrettyDuration(time.Since(start)), "hash", payloadEnvelope.ExecutionPayload.BlockHash, "number", payloadEnvelope.ExecutionPayload.Number, "id", payloadID, "payloadStatus", updateResponse.PayloadStatus)
+	log.Info("opSealPayload succeed", "hash", payloadEnvelope.ExecutionPayload.BlockHash, "number", payloadEnvelope.ExecutionPayload.Number, "id", payloadID, "payloadStatus", updateResponse.PayloadStatus)
 	if needPayload {
 		return engine.OpSealPayloadResponse{PayloadStatus: updateResponse.PayloadStatus, Payload: payloadEnvelope}, nil
 	} else {

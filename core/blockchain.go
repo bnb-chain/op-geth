@@ -1871,7 +1871,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 
 		// Async verify header if minerMode
-		asyncItNextCh := make(chan error)
+		asyncItNextCh := make(chan error, 1)
 		if minerMode {
 			go func() {
 				_, err := it.next()
@@ -1940,12 +1940,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		vstart := time.Now()
 		// Async validate if minerMode
-		asyncValidateStateCh := make(chan error)
+		asyncValidateStateCh := make(chan error, 1)
 		if minerMode {
 			header := block.Header()
 			// Can not validate root concurrently
 			if root := statedb.IntermediateRoot(bc.chainConfig.IsEIP158(header.Number)); header.Root != root {
-				panic(fmt.Errorf("self mined block(hash: %x number %v) verify root err(mined: %x expected: %x) dberr: %w", block.Hash(), block.NumberU64(), header.Root, root, statedb.Error()))
+				bc.reportBlock(block, receipts, fmt.Errorf("self mined block(hash: %x number %v) verify root err(mined: %x expected: %x) dberr: %w", block.Hash(), block.NumberU64(), header.Root, root, statedb.Error()))
+				followupInterrupt.Store(true)
+				return 0, err
 			}
 			go func() {
 				asyncValidateStateCh <- bc.validator.ValidateState(block, statedb, receipts, usedGas, true)
@@ -1990,6 +1992,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 		followupInterrupt.Store(true)
 		if err != nil {
+			if minerMode {
+				return 0, err
+			}
 			return it.index, err
 		}
 		if minerMode {

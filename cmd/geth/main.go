@@ -169,7 +169,6 @@ var (
 		utils.RollupComputePendingBlock,
 		utils.RollupHaltOnIncompatibleProtocolVersionFlag,
 		utils.RollupSuperchainUpgradesFlag,
-		utils.ParallelTxLegacyFlag,
 		utils.ParallelTxFlag,
 		utils.ParallelTxUnorderedMergeFlag,
 		utils.ParallelTxNumFlag,

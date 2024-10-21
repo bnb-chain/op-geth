@@ -26,11 +26,13 @@ type PEVMProcessor struct {
 	commonTxs            []*types.Transaction
 	receipts             types.Receipts
 	debugConflictRedoNum uint64
+	unorderedMerge       bool
 }
 
 func newPEVMProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine) *PEVMProcessor {
 	processor := &PEVMProcessor{
 		StateProcessor: *NewStateProcessor(config, bc, engine),
+		unorderedMerge: bc.vmConfig.EnableParallelUnorderedMerge,
 	}
 	log.Info("Parallel execution mode is enabled", "Parallel Num", ParallelNum(),
 		"CPUNum", runtime.NumCPU())
@@ -120,10 +122,15 @@ func (p *PEVMProcessor) executeInSlot(maindb *state.StateDB, txReq *PEVMTxReques
 // if it is in Stage 2 it is a likely result, not 100% sure
 func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult) error {
 	txReq := txResult.txReq
-	//if err := p.hasConflict(txResult); err != nil {
-	//	log.Info(fmt.Sprintf("HasConflict!! block: %d, txIndex: %d\n", txResult.txReq.block.NumberU64(), txResult.txReq.txIndex))
-	//	return err
-	//}
+	if !p.unorderedMerge || !txReq.useDAG {
+		// If we do not use a DAG, then we need to check for conflicts to ensure correct execution.
+		// When we perform an unordered merge, we cannot conduct conflict checks
+		// and can only choose to trust that the DAG is correct and that conflicts do not exist.
+		if err := p.hasConflict(txResult); err != nil {
+			log.Info(fmt.Sprintf("HasConflict!! block: %d, txIndex: %d\n", txResult.txReq.block.NumberU64(), txResult.txReq.txIndex))
+			return err
+		}
+	}
 
 	// goroutine unsafe operation will be handled from here for safety
 	gasConsumed := txReq.gasLimit - txResult.gpSlot.Gas()
@@ -278,7 +285,7 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 		}(time.Now())
 		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr)
-	})
+	}, p.unorderedMerge)
 	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
 		tx := allTxs[txIndex]

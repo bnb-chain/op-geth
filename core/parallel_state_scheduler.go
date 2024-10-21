@@ -101,7 +101,7 @@ func (cq *confirmQueue) collect(result *PEVMTxResult) error {
 	return nil
 }
 
-func (cq *confirmQueue) confirmWithTrust(level TxLevel, execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
+func (cq *confirmQueue) confirmWithUnordered(level TxLevel, execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
 	// find all able-to-confirm transactions, and try to confirm them
 	for _, tx := range level {
 		i := tx.txIndex
@@ -189,13 +189,12 @@ func (cq *confirmQueue) rerun(i int, execute func(*PEVMTxRequest) *PEVMTxResult,
 
 // run runs the transactions in parallel
 // execute must return a non-nil result, otherwise it panics.
-func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
+func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error, unorderedMerge bool) (error, int) {
 	toConfirm := &confirmQueue{
 		queue:     make([]confirmation, tls.txCount()),
 		confirmed: -1,
 	}
 
-	trustDAG := true
 	totalExecutionTime := int64(0)
 	totalConfirmTime := int64(0)
 	maxLevelTxCount := 0
@@ -228,8 +227,8 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 		totalExecutionTime += time.Since(start).Nanoseconds()
 		start = time.Now()
 		// all transactions of current level are executed, now try to confirm.
-		if trustDAG {
-			if err, txIndex := toConfirm.confirmWithTrust(txLevel, execute, confirm); err != nil {
+		if unorderedMerge {
+			if err, txIndex := toConfirm.confirmWithUnordered(txLevel, execute, confirm); err != nil {
 				// something very wrong, stop the process
 				return err, txIndex
 			}

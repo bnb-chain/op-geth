@@ -2755,7 +2755,7 @@ func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 }
 
 func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
-	return bc.enableTxDAG && bc.txDAGWriteCh == nil && bc.txDAGReader == nil && !bc.vmConfig.EnableParallelExec && !bc.vmConfig.EnableParallelExecV2
+	return bc.enableTxDAG && bc.txDAGWriteCh == nil && bc.txDAGReader == nil && !bc.vmConfig.EnableParallelExec && !bc.vmConfig.EnableParallelExecLegacy
 }
 
 func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {

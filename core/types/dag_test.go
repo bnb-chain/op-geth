@@ -2,7 +2,6 @@ package types
 
 import (
 	"encoding/hex"
-	"log"
 	"testing"
 	"time"
 
@@ -23,11 +22,13 @@ var (
 
 func TestEncodeTxDAGCalldata(t *testing.T) {
 	tg := mockSimpleDAG()
+	originTg := tg
 	data, err := EncodeTxDAGCalldata(tg)
 	assert.Equal(t, nil, err)
 	tg, err = DecodeTxDAGCalldata(data)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, true, tg.TxCount() > 0)
+	assert.Equal(t, originTg, tg)
 
 	_, err = DecodeTxDAGCalldata(nil)
 	assert.NotEqual(t, nil, err)
@@ -44,10 +45,12 @@ func TestDecodeCalldata(t *testing.T) {
 		t.Errorf("Error decoding calldata: %s", err)
 		return
 	}
-	for i := 0; i < dagCalldata.TxCount(); i++ {
-		dep := dagCalldata.TxDep(i)
-		log.Printf("idx:%d,dep:%v", i, dep.TxIndexes)
-	}
+	//for i := 0; i < dagCalldata.TxCount(); i++ {
+	//	dep := dagCalldata.TxDep(i)
+	//	log.Printf("idx:%d,dep:%v", i, dep.TxIndexes)
+	//}
+	assert.Equal(t, true, dagCalldata.TxDep(186).Exist(82))
+	assert.Equal(t, 0, dagCalldata.TxDep(187).Count())
 }
 
 func TestTxDAG_SetTxDep(t *testing.T) {

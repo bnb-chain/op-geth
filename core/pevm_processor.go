@@ -35,7 +35,7 @@ func newPEVMProcessor(config *params.ChainConfig, bc *BlockChain, engine consens
 		unorderedMerge: bc.vmConfig.EnableParallelUnorderedMerge,
 	}
 	log.Info("Parallel execution mode is enabled", "Parallel Num", ParallelNum(),
-		"CPUNum", runtime.NumCPU())
+		"CPUNum", runtime.NumCPU(), "unorderedMerge", processor.unorderedMerge)
 	return processor
 }
 

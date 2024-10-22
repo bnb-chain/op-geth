@@ -54,14 +54,6 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 	}
 }
 
-// CreateSerialProcessor create a new StateProcessor
-func (bc *BlockChain) CreateSerialProcessor(config *params.ChainConfig, bc2 *BlockChain, engine consensus.Engine) {
-	if bc.serialProcessor == nil {
-		bc.serialProcessor = NewStateProcessor(config, bc2, engine)
-		bc.parallelExecution = false
-	}
-}
-
 // Process processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb and applying any rewards to both
 // the processor (coinbase) and any included uncles.

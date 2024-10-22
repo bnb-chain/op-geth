@@ -486,9 +486,9 @@ func (pst *UncommittedDB) Merge(deleteEmptyObjects bool) error {
 		// so we don't need to merge anything.
 		return nil
 	}
-	if err := pst.conflictsToMaindb(); err != nil {
-		return err
-	}
+	//if err := pst.conflictsToMaindb(); err != nil {
+	//	return err
+	//}
 
 	// 0. set the TxContext
 	pst.maindb.SetTxContext(pst.txHash, pst.txIndex)

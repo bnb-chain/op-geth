@@ -26,14 +26,16 @@ type PEVMProcessor struct {
 	commonTxs            []*types.Transaction
 	receipts             types.Receipts
 	debugConflictRedoNum uint64
+	unorderedMerge       bool
 }
 
 func newPEVMProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine) *PEVMProcessor {
 	processor := &PEVMProcessor{
 		StateProcessor: *NewStateProcessor(config, bc, engine),
+		unorderedMerge: bc.vmConfig.EnableParallelUnorderedMerge,
 	}
 	log.Info("Parallel execution mode is enabled", "Parallel Num", ParallelNum(),
-		"CPUNum", runtime.NumCPU())
+		"CPUNum", runtime.NumCPU(), "unorderedMerge", processor.unorderedMerge)
 	return processor
 }
 
@@ -120,9 +122,14 @@ func (p *PEVMProcessor) executeInSlot(maindb *state.StateDB, txReq *PEVMTxReques
 // if it is in Stage 2 it is a likely result, not 100% sure
 func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult) error {
 	txReq := txResult.txReq
-	if err := p.hasConflict(txResult); err != nil {
-		log.Info(fmt.Sprintf("HasConflict!! block: %d, txIndex: %d\n", txResult.txReq.block.NumberU64(), txResult.txReq.txIndex))
-		return err
+	if !p.unorderedMerge || !txReq.useDAG {
+		// If we do not use a DAG, then we need to check for conflicts to ensure correct execution.
+		// When we perform an unordered merge, we cannot conduct conflict checks
+		// and can only choose to trust that the DAG is correct and that conflicts do not exist.
+		if err := p.hasConflict(txResult); err != nil {
+			log.Info(fmt.Sprintf("HasConflict!! block: %d, txIndex: %d\n", txResult.txReq.block.NumberU64(), txResult.txReq.txIndex))
+			return err
+		}
 	}
 
 	// goroutine unsafe operation will be handled from here for safety
@@ -253,6 +260,8 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	// parallel execution
 	start := time.Now()
 	txLevels := NewTxLevels(p.allTxReqs, txDAG)
+	log.Debug("txLevels size", "txLevels size", len(txLevels))
+	parallelTxLevelsSizeMeter.Update(int64(len(txLevels)))
 	buildLevelsDuration := time.Since(start)
 	var executeDurations, confirmDurations int64 = 0, 0
 	err, txIndex := txLevels.Run(func(pr *PEVMTxRequest) (res *PEVMTxResult) {
@@ -274,8 +283,9 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 				atomic.AddUint64(&p.debugConflictRedoNum, 1)
 			}
 		}(time.Now())
+		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr)
-	})
+	}, p.unorderedMerge && txDAG != nil)
 	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
 		tx := allTxs[txIndex]
@@ -320,7 +330,17 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	p.engine.Finalize(p.bc, header, statedb, p.commonTxs, block.Uncles(), withdrawals)
 
 	var allLogs []*types.Log
+	var lindex = 0
+	var cumulativeGasUsed uint64
 	for _, receipt := range p.receipts {
+		// reset the log index
+		for _, log := range receipt.Logs {
+			log.Index = uint(lindex)
+			lindex++
+		}
+		// re-calculate the cumulativeGasUsed
+		cumulativeGasUsed += receipt.GasUsed
+		receipt.CumulativeGasUsed = cumulativeGasUsed
 		allLogs = append(allLogs, receipt.Logs...)
 	}
 	return p.receipts, allLogs, *usedGas, nil

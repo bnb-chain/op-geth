@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 )
 
 var runner chan func()
@@ -99,7 +101,7 @@ func (cq *confirmQueue) collect(result *PEVMTxResult) error {
 	return nil
 }
 
-func (cq *confirmQueue) confirmWithTrust(level TxLevel, execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
+func (cq *confirmQueue) confirmWithUnordered(level TxLevel, execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
 	// find all able-to-confirm transactions, and try to confirm them
 	for _, tx := range level {
 		i := tx.txIndex
@@ -187,16 +189,23 @@ func (cq *confirmQueue) rerun(i int, execute func(*PEVMTxRequest) *PEVMTxResult,
 
 // run runs the transactions in parallel
 // execute must return a non-nil result, otherwise it panics.
-func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
+func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error, unorderedMerge bool) (error, int) {
 	toConfirm := &confirmQueue{
 		queue:     make([]confirmation, tls.txCount()),
 		confirmed: -1,
 	}
 
-	trustDAG := false
+	totalExecutionTime := int64(0)
+	totalConfirmTime := int64(0)
+	maxLevelTxCount := 0
 
 	// execute all transactions in parallel
 	for _, txLevel := range tls {
+		start := time.Now()
+		log.Debug("txLevel tx count", "tx count", len(txLevel))
+		if len(txLevel) > maxLevelTxCount {
+			maxLevelTxCount = len(txLevel)
+		}
 		wait := sync.WaitGroup{}
 		trunks := txLevel.Split(runtime.NumCPU())
 		wait.Add(len(trunks))
@@ -215,9 +224,11 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 			runner <- run
 		}
 		wait.Wait()
+		totalExecutionTime += time.Since(start).Nanoseconds()
+		start = time.Now()
 		// all transactions of current level are executed, now try to confirm.
-		if trustDAG {
-			if err, txIndex := toConfirm.confirmWithTrust(txLevel, execute, confirm); err != nil {
+		if unorderedMerge {
+			if err, txIndex := toConfirm.confirmWithUnordered(txLevel, execute, confirm); err != nil {
 				// something very wrong, stop the process
 				return err, txIndex
 			}
@@ -227,7 +238,11 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 				return err, txIndex
 			}
 		}
+		totalConfirmTime += time.Since(start).Nanoseconds()
 	}
+	parallelTxLevelTxSizeMeter.Update(int64(maxLevelTxCount))
+	parallelExecutionTimer.Update(time.Duration(totalExecutionTime))
+	parallelConfirmTimer.Update(time.Duration(totalConfirmTime))
 	return nil, 0
 }
 

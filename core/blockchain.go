@@ -321,7 +321,6 @@ type BlockChain struct {
 	txDAGWriteCh      chan TxDAGOutputItem
 	txDAGReader       *TxDAGFileReader
 	serialProcessor   Processor
-	parallelProcessor Processor
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -566,6 +565,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 
 	if bc.vmConfig.EnableParallelExec {
 		bc.processor = newPEVMProcessor(chainConfig, bc, engine)
+		bc.serialProcessor = NewStateProcessor(chainConfig, bc, engine)
 		log.Info("Parallel V2 enabled", "parallelNum", ParallelNum())
 	} else {
 		bc.processor = NewStateProcessor(chainConfig, bc, engine)
@@ -1999,7 +1999,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Process block using the parent state as reference point
 			pstart = time.Now()
-			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
+			if bc.vmConfig.TxDAG == nil && bc.vmConfig.EnableParallelUnorderedMerge {
+				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
+			} else {
+				receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
+			}
 			if err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)

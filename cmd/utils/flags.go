@@ -29,7 +29,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	godebug "runtime/debug"
 	"strconv"
 	"strings"
@@ -1095,12 +1094,6 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.MetricsCategory,
 	}
 
-	ParallelTxLegacyFlag = &cli.BoolFlag{
-		Name:     "parallel-legacy",
-		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
-		Category: flags.VMCategory,
-	}
-
 	ParallelTxFlag = &cli.BoolFlag{
 		Name:     "parallel",
 		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
@@ -2029,37 +2022,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.EnablePreimageRecording = ctx.Bool(VMEnableDebugFlag.Name)
 	}
 
-	if ctx.IsSet(ParallelTxLegacyFlag.Name) {
-		cfg.ParallelTxLegacyMode = ctx.Bool(ParallelTxLegacyFlag.Name)
-		// The best parallel num will be tuned later, we do a simple parallel num set here
-		numCpu := runtime.NumCPU()
-		var parallelNum int
-		if ctx.IsSet(ParallelTxNumFlag.Name) {
-			// Use value set by "--parallel.num", and "--parallel.num 0" is not allowed and be set to 1
-			parallelNum = ctx.Int(ParallelTxNumFlag.Name)
-			if parallelNum < 1 {
-				parallelNum = 1
-			}
-		} else if numCpu == 1 {
-			parallelNum = 1 // single CPU core
-		} else {
-			// 1-2 core for merge (with parallel KV check)
-			// 1-2 core for others (bc optimizer, main)
-			// 1-2 core for possible other concurrent routine
-			parallelNum = max(1, numCpu-6)
-		}
-		cfg.ParallelTxNum = parallelNum
-	}
-
 	if ctx.IsSet(ParallelTxFlag.Name) {
 		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
 	}
 
 	if ctx.IsSet(ParallelTxUnorderedMergeFlag.Name) {
 		cfg.ParallelTxUnorderedMerge = ctx.Bool(ParallelTxUnorderedMergeFlag.Name)
-		if ctx.IsSet(ParallelTxLegacyFlag.Name) && ctx.Bool(ParallelTxLegacyFlag.Name) {
-			log.Warn("ParallelTxUnorderedMergeFlag does not have any effect in ParallelTxLegacy mode")
-		}
 	}
 
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {

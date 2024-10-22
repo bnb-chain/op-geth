@@ -535,11 +535,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
 	}
 
-	if bc.vmConfig.EnableParallelExecLegacy {
-		bc.CreateParallelProcessor(bc.vmConfig.ParallelTxNum)
-		bc.CreateSerialProcessor(chainConfig, bc, engine)
-		log.Info("Parallel V1 enabled", "parallelNum", bc.vmConfig.ParallelTxNum)
-	} else if bc.vmConfig.EnableParallelExec {
+	if bc.vmConfig.EnableParallelExec {
 		bc.processor = newPEVMProcessor(chainConfig, bc, engine)
 		log.Info("Parallel V2 enabled", "parallelNum", ParallelNum())
 	} else {
@@ -1915,20 +1911,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
 
-			if bc.vmConfig.EnableParallelExecLegacy {
-				bc.parseTxDAG(block)
-				txsCount := block.Transactions().Len()
-				threshold := min(bc.vmConfig.ParallelTxNum/2+2, 4)
-				if bc.vmConfig.ParallelTxNum < 2 || txsCount < threshold || bc.isEmptyTxDAG() {
-					bc.UseSerialProcessor()
-					log.Debug("Disable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
-				} else {
-					bc.UseParallelProcessor()
-					log.Debug("Enable Parallel Tx execution", "block", block.NumberU64(), "transactions", txsCount, "parallelTxNum", bc.vmConfig.ParallelTxNum)
-
-				}
-			}
-
 			if bc.vmConfig.EnableParallelExec {
 				bc.parseTxDAG(block)
 			}
@@ -1955,10 +1937,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// Process block using the parent state as reference point
 			pstart = time.Now()
 			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
-			if err == FallbackToSerialProcessorErr {
-				bc.UseSerialProcessor()
-				receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
-			}
 			if err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
@@ -1977,7 +1955,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
-		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExecLegacy && !bc.vmConfig.EnableParallelExec {
+		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec {
 			// compare input TxDAG when it enable in consensus
 			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
 			if err == nil {
@@ -2715,14 +2693,6 @@ func (bc *BlockChain) GetTrieFlushInterval() time.Duration {
 	return time.Duration(bc.flushInterval.Load())
 }
 
-func (bc *BlockChain) CreateParallelProcessor(parallelNum int) *BlockChain {
-	if bc.parallelProcessor == nil {
-		bc.parallelProcessor = newParallelStateProcessor(bc.Config(), bc, bc.engine, parallelNum)
-		bc.parallelExecution = true
-	}
-	return bc
-}
-
 func (bc *BlockChain) NoTries() bool {
 	return bc.stateCache.NoTries()
 }
@@ -2755,7 +2725,7 @@ func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 }
 
 func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
-	return bc.enableTxDAG && bc.txDAGWriteCh == nil && bc.txDAGReader == nil && !bc.vmConfig.EnableParallelExec && !bc.vmConfig.EnableParallelExecLegacy
+	return bc.enableTxDAG && bc.txDAGWriteCh == nil && bc.txDAGReader == nil && !bc.vmConfig.EnableParallelExec
 }
 
 func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
@@ -2801,25 +2771,6 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 			}
 		}
 	}()
-}
-
-func (bc *BlockChain) UseParallelProcessor() {
-	if bc.parallelProcessor != nil {
-		bc.parallelExecution = true
-		bc.processor = bc.parallelProcessor
-	} else {
-		log.Error("bc.ParallelProcessor is nil! fallback to serial processor!")
-		bc.UseSerialProcessor()
-	}
-}
-
-func (bc *BlockChain) UseSerialProcessor() {
-	if bc.serialProcessor != nil {
-		bc.parallelExecution = false
-		bc.processor = bc.serialProcessor
-	} else {
-		bc.CreateSerialProcessor(bc.chainConfig, bc, bc.engine)
-	}
 }
 
 type TxDAGOutputItem struct {

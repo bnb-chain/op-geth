@@ -224,7 +224,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording:      config.EnablePreimageRecording,
-			EnableParallelExecLegacy:     config.ParallelTxLegacyMode,
 			EnableParallelExec:           config.ParallelTxMode,
 			EnableParallelUnorderedMerge: config.ParallelTxUnorderedMerge,
 			ParallelTxNum:                config.ParallelTxNum,
@@ -278,8 +277,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if config.EnableParallelTxDAG {
 		if config.ParallelTxMode {
 			eth.blockchain.SetupTxDAGGeneration(config.ParallelTxDAGFile, config.ParallelTxMode)
-		} else {
-			eth.blockchain.SetupTxDAGGeneration(config.ParallelTxDAGFile, config.ParallelTxLegacyMode)
 		}
 	}
 	if chainConfig := eth.blockchain.Config(); chainConfig.Optimism != nil { // config.Genesis.Config.ChainID cannot be used because it's based on CLI flags only, thus default to mainnet L1

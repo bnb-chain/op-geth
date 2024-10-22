@@ -122,7 +122,7 @@ func (p *PEVMProcessor) executeInSlot(maindb *state.StateDB, txReq *PEVMTxReques
 // if it is in Stage 2 it is a likely result, not 100% sure
 func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult) error {
 	txReq := txResult.txReq
-	if !p.unorderedMerge || !txReq.useDAG {
+	if !p.unorderedMerge {
 		// If we do not use a DAG, then we need to check for conflicts to ensure correct execution.
 		// When we perform an unordered merge, we cannot conduct conflict checks
 		// and can only choose to trust that the DAG is correct and that conflicts do not exist.
@@ -166,7 +166,6 @@ func (p *PEVMProcessor) confirmTxResult(statedb *state.StateDB, gp *GasPool, res
 
 	isByzantium := p.config.IsByzantium(header.Number)
 	isEIP158 := p.config.IsEIP158(header.Number)
-	//result.slotDB.FinaliseForParallel(isByzantium || isEIP158, statedb)
 	if err := result.slotDB.Merge(isByzantium || isEIP158); err != nil {
 		// something very wrong, should not happen
 		log.Error("merge slotDB failed", "err", err)
@@ -285,16 +284,13 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 		}(time.Now())
 		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr)
-	}, p.unorderedMerge && txDAG != nil)
+	}, p.unorderedMerge)
 	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
 		tx := allTxs[txIndex]
 		log.Error("ProcessParallel tx failed", "txIndex", txIndex, "txHash", tx.Hash().Hex(), "err", err)
 		return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", txIndex, tx.Hash().Hex(), err)
 	}
-
-	//fmt.Printf("ProcessParallel tx all done, parallelNum:%d, txNum: %d, conflictNum: %d, executeDuration:%s, confirmDurations:%s, buildLevelsDuration:%s, runDuration:%s\n",
-	//	ParallelNum(), txNum, p.debugConflictRedoNum, time.Duration(executeDurations), time.Duration(confirmDurations), buildLevelsDuration, parallelRunDuration)
 
 	// len(commonTxs) could be 0, such as: https://bscscan.com/block/14580486
 	var redoRate int = 0
@@ -334,8 +330,8 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	var cumulativeGasUsed uint64
 	for _, receipt := range p.receipts {
 		// reset the log index
-		for _, log := range receipt.Logs {
-			log.Index = uint(lindex)
+		for _, oneLog := range receipt.Logs {
+			oneLog.Index = uint(lindex)
 			lindex++
 		}
 		// re-calculate the cumulativeGasUsed

@@ -1937,7 +1937,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			header := block.Header()
 			// Can not validate root concurrently
 			if root := statedb.IntermediateRoot(bc.chainConfig.IsEIP158(header.Number)); header.Root != root {
-				bc.reportBlock(block, receipts, fmt.Errorf("self mined block(hash: %x number %v) verify root err(mined: %x expected: %x) dberr: %w", block.Hash(), block.NumberU64(), header.Root, root, statedb.Error()))
+				err := fmt.Errorf("self mined block(hash: %x number %v) verify root err(mined: %x expected: %x) dberr: %w", block.Hash(), block.NumberU64(), header.Root, root, statedb.Error())
+				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
 				return it.index, err
 			}

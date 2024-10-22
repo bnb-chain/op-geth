@@ -172,6 +172,7 @@ var (
 		utils.RollupSuperchainUpgradesFlag,
 		utils.ParallelTxLegacyFlag,
 		utils.ParallelTxFlag,
+		utils.ParallelTxUnorderedMergeFlag,
 		utils.ParallelTxNumFlag,
 		utils.ParallelTxDAGFlag,
 		utils.ParallelTxDAGFileFlag,

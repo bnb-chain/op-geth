@@ -236,11 +236,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	var (
 		vmConfig = vm.Config{
-			EnablePreimageRecording:   config.EnablePreimageRecording,
-			EnableParallelExecLegacy:  config.ParallelTxLegacyMode,
-			EnableParallelExec:        config.ParallelTxMode,
-			ParallelTxNum:             config.ParallelTxNum,
-			EnableOpcodeOptimizations: config.EnableOpcodeOptimizing,
+			EnablePreimageRecording:      config.EnablePreimageRecording,
+			EnableParallelExecLegacy:     config.ParallelTxLegacyMode,
+			EnableParallelExec:           config.ParallelTxMode,
+			EnableParallelUnorderedMerge: config.ParallelTxUnorderedMerge,
+			ParallelTxNum:                config.ParallelTxNum,
+			EnableOpcodeOptimizations:    config.EnableOpcodeOptimizing,
 		}
 		cacheConfig = &core.CacheConfig{
 			TrieCleanLimit:       config.TrieCleanCache,

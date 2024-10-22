@@ -1112,6 +1112,12 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.VMCategory,
 	}
 
+	ParallelTxUnorderedMergeFlag = &cli.BoolFlag{
+		Name:     "parallel.unordered-merge",
+		Usage:    "Enable unordered merge mode, during the parallel confirm phase, merge transaction execution results without following the transaction order.",
+		Category: flags.VMCategory,
+	}
+
 	ParallelTxNumFlag = &cli.IntFlag{
 		Name:     "parallel.num",
 		Usage:    "Number of slot for transaction execution, only valid in parallel mode (runtime calculated, no fixed default value)",
@@ -2052,6 +2058,13 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(ParallelTxFlag.Name) {
 		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxUnorderedMergeFlag.Name) {
+		cfg.ParallelTxUnorderedMerge = ctx.Bool(ParallelTxUnorderedMergeFlag.Name)
+		if ctx.IsSet(ParallelTxLegacyFlag.Name) && ctx.Bool(ParallelTxLegacyFlag.Name) {
+			log.Warn("ParallelTxUnorderedMergeFlag does not have any effect in ParallelTxLegacy mode")
+		}
 	}
 
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {

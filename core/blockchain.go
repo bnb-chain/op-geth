@@ -101,6 +101,10 @@ var (
 
 	parallelTxNumMeter         = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
 	parallelConflictTxNumMeter = metrics.NewRegisteredMeter("chain/parallel/conflicttxs", nil)
+	parallelExecutionTimer     = metrics.NewRegisteredTimer("chain/parallel/exec", nil)
+	parallelConfirmTimer       = metrics.NewRegisteredTimer("chain/parallel/confirm", nil)
+	parallelTxLevelsSizeMeter  = metrics.NewRegisteredGauge("chain/parallel/txlevel/size", nil)
+	parallelTxLevelTxSizeMeter = metrics.NewRegisteredGauge("chain/parallel/txlevel/txsize", nil)
 
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
@@ -2881,7 +2885,7 @@ func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 }
 
 func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
-	return bc.enableTxDAG && bc.txDAGWriteCh == nil && bc.txDAGReader == nil
+	return bc.enableTxDAG && bc.txDAGWriteCh == nil && bc.txDAGReader == nil && !bc.vmConfig.EnableParallelExec && !bc.vmConfig.EnableParallelExecLegacy
 }
 
 func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {

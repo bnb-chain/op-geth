@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/golang/snappy"
 
 	"github.com/cometbft/cometbft/libs/rand"
@@ -21,14 +22,35 @@ var (
 
 func TestEncodeTxDAGCalldata(t *testing.T) {
 	tg := mockSimpleDAG()
+	originTg := tg
 	data, err := EncodeTxDAGCalldata(tg)
 	assert.Equal(t, nil, err)
 	tg, err = DecodeTxDAGCalldata(data)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, true, tg.TxCount() > 0)
+	assert.Equal(t, originTg, tg)
 
 	_, err = DecodeTxDAGCalldata(nil)
 	assert.NotEqual(t, nil, err)
+}
+
+func TestDecodeCalldata(t *testing.T) {
+	calldata := "0x5517ed8c000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000001b201f901aef901abc2c002c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c2c152c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c1c0c2c0010000000000000000000000000000"
+	decode, err := hexutil.Decode(calldata)
+	if err != nil {
+		return
+	}
+	dagCalldata, err := DecodeTxDAGCalldata(decode)
+	if err != nil {
+		t.Errorf("Error decoding calldata: %s", err)
+		return
+	}
+	//for i := 0; i < dagCalldata.TxCount(); i++ {
+	//	dep := dagCalldata.TxDep(i)
+	//	log.Printf("idx:%d,dep:%v", i, dep.TxIndexes)
+	//}
+	assert.Equal(t, true, dagCalldata.TxDep(186).Exist(82))
+	assert.Equal(t, 0, dagCalldata.TxDep(187).Count())
 }
 
 func TestTxDAG_SetTxDep(t *testing.T) {

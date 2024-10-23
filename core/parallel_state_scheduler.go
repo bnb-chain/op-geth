@@ -189,6 +189,8 @@ func (cq *confirmQueue) rerun(i int, execute func(*PEVMTxRequest) *PEVMTxResult,
 	return nil
 }
 
+var goMaxProcs = runtime.GOMAXPROCS(0)
+
 // run runs the transactions in parallel
 // execute must return a non-nil result, otherwise it panics.
 func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error, unorderedMerge bool) (error, int) {
@@ -209,7 +211,7 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 			maxLevelTxCount = len(txLevel)
 		}
 		wait := sync.WaitGroup{}
-		trunks := txLevel.Split(runtime.NumCPU())
+		trunks := txLevel.Split(goMaxProcs)
 		wait.Add(len(trunks))
 		// split tx into chunks, to save the cost of channel communication
 		for _, txs := range trunks {

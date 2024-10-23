@@ -2035,6 +2035,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.ParallelTxUnorderedMerge = ctx.Bool(ParallelTxUnorderedMergeFlag.Name)
 	}
 
+	if ctx.IsSet(ParallelTxNumFlag.Name) {
+		cfg.ParallelTxNum = ctx.Int(ParallelTxNumFlag.Name)
+	}
+
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {
 		cfg.EnableParallelTxDAG = ctx.Bool(ParallelTxDAGFlag.Name)
 	}

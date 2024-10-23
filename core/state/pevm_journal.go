@@ -292,14 +292,7 @@ func newJTransientStorage(addr common.Address, key, val common.Hash) *jTransient
 }
 
 func (j *jTransientStorage) revert(db *UncommittedDB) {
-	storage, ok := db.transientStorage[j.addr]
-	if !ok {
-		return
-	}
-	delete(storage, j.key)
-	if len(storage) == 0 {
-		delete(db.transientStorage, j.addr)
-	}
+	db.transientStorage.Set(j.addr, j.key, j.val)
 }
 
 type ujournal []ustate

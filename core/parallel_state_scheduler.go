@@ -9,14 +9,13 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
-	_ "go.uber.org/automaxprocs"
 )
 
 var runner chan func()
 
 func initParallelRunner(targetNum int) {
 	if targetNum == 0 {
-		targetNum = runtime.NumCPU()
+		targetNum = runtime.GOMAXPROCS(0)
 	}
 	runner = make(chan func(), targetNum)
 	for i := 0; i < targetNum; i++ {

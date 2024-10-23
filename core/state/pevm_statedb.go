@@ -316,7 +316,11 @@ func (pst *UncommittedDB) GetTransientState(addr common.Address, key common.Hash
 	return pst.transientStorage.Get(addr, key)
 }
 func (pst *UncommittedDB) SetTransientState(addr common.Address, key, value common.Hash) {
-	pst.journal.append(newJTransientStorage(addr, key, value))
+	prev := pst.transientStorage.Get(addr, key)
+	if prev == value {
+		return // no need to record the same value
+	}
+	pst.journal.append(newJTransientStorage(addr, key, prev))
 	pst.transientStorage.Set(addr, key, value)
 }
 

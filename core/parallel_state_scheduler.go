@@ -13,10 +13,12 @@ import (
 
 var runner chan func()
 
-func init() {
-	cpuNum := runtime.NumCPU()
-	runner = make(chan func(), cpuNum)
-	for i := 0; i < cpuNum; i++ {
+func initParallelRunner(targetNum int) {
+	if targetNum == 0 {
+		targetNum = runtime.GOMAXPROCS(0)
+	}
+	runner = make(chan func(), targetNum)
+	for i := 0; i < targetNum; i++ {
 		go func() {
 			for f := range runner {
 				f()
@@ -187,6 +189,8 @@ func (cq *confirmQueue) rerun(i int, execute func(*PEVMTxRequest) *PEVMTxResult,
 	return nil
 }
 
+var goMaxProcs = runtime.GOMAXPROCS(0)
+
 // run runs the transactions in parallel
 // execute must return a non-nil result, otherwise it panics.
 func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error, unorderedMerge bool) (error, int) {
@@ -207,7 +211,7 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 			maxLevelTxCount = len(txLevel)
 		}
 		wait := sync.WaitGroup{}
-		trunks := txLevel.Split(runtime.NumCPU())
+		trunks := txLevel.Split(goMaxProcs)
 		wait.Add(len(trunks))
 		// split tx into chunks, to save the cost of channel communication
 		for _, txs := range trunks {

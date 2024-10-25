@@ -79,6 +79,7 @@ func (p *PEVMProcessor) hasConflict(txResult *PEVMTxResult) error {
 	}
 	// check whether the slot db reads during execution are correct.
 	if err := slotDB.ConflictsToMaindb(); err != nil {
+		atomic.AddUint64(&p.debugConflictRedoNum, 1)
 		log.Debug("executed result conflicts", "err", err)
 		return err
 	}
@@ -267,9 +268,6 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	err, txIndex := txLevels.Run(func(pr *PEVMTxRequest) (res *PEVMTxResult) {
 		defer func(t0 time.Time) {
 			atomic.AddInt64(&executeDurations, time.Since(t0).Nanoseconds())
-			if res.err != nil {
-				atomic.AddUint64(&p.debugConflictRedoNum, 1)
-			}
 		}(time.Now())
 
 		if err := buildMessage(pr, signer, header); err != nil {
@@ -279,9 +277,6 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	}, func(pr *PEVMTxResult) (err error) {
 		defer func(t0 time.Time) {
 			atomic.AddInt64(&confirmDurations, time.Since(t0).Nanoseconds())
-			if err != nil {
-				atomic.AddUint64(&p.debugConflictRedoNum, 1)
-			}
 		}(time.Now())
 		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr)

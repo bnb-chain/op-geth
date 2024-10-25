@@ -188,17 +188,7 @@ func newJSelfDestruct(obj *state) *jSelfDestruct {
 	}
 	return &jSelfDestruct{
 		addr: obj.addr,
-		obj: &state{
-			modified: obj.modified,
-			addr:     obj.addr,
-			balance:  new(uint256.Int).Set(obj.balance),
-			nonce:    obj.nonce,
-			code:     append([]byte(nil), obj.code...),
-			codeHash: append([]byte(nil), obj.codeHash...),
-			codeSize: obj.codeSize,
-			created:  obj.created,
-			deleted:  obj.deleted,
-		},
+		obj:  obj.clone(),
 	}
 }
 

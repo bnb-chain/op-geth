@@ -133,17 +133,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
 
-	// Assemble the Ethereum object
-	chainDb, err := stack.OpenDatabaseWithFreezer(ChainData, config.DatabaseCache, config.DatabaseHandles,
-		config.DatabaseFreezer, ChainDBNamespace, false)
-	if err != nil {
-		return nil, err
-	}
-	config.StateScheme, err = rawdb.ParseStateScheme(config.StateScheme, chainDb)
-	if err != nil {
-		return nil, err
-	}
-
 	if config.StateScheme == rawdb.HashScheme && config.NoPruning && config.TrieDirtyCache > 0 {
 		if config.SnapshotCache > 0 {
 			config.TrieCleanCache += config.TrieDirtyCache * 3 / 5

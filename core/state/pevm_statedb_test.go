@@ -799,6 +799,111 @@ func TestPevmSelfDestruct(t *testing.T) {
 	}
 }
 
+func TestPevmSelfDestruct6780AndRevert(t *testing.T) {
+	shadow := newStateDB()
+	uncommitted := newUncommittedDB(newStateDB())
+	//prepare: create an account, set state, set balance
+	// A1{key1: val1, balance: 100, accesslist: 0x33}
+	prepare := Tx{
+		{"Create", Address1},
+		{"SetState", Address1, "key1", "val1"},
+		{"AddBalance", Address1, big.NewInt(100)},
+		{"AddSlots", Address1, common.Hash{0x33}},
+	}
+	prepareCheck := Checks{
+		{"balance", Address1, big.NewInt(100)},
+		{"state", Address1, "key1", "val1"},
+		{"slot", Address1, common.Hash{0x33}, true},
+	}
+	check := func(verify Checks, shadow, uncommitted vm.StateDB) {
+		if err := verify.Verify(shadow); err != nil {
+			t.Fatalf("maindb verify failed, err=%s", err.Error())
+		}
+		if err := verify.Verify(uncommitted); err != nil {
+			t.Fatalf("uncommitted verify failed, err=%s", err.Error())
+		}
+	}
+	prepare.Call(shadow)
+	prepare.Call(uncommitted)
+	check(prepareCheck, shadow, uncommitted)
+
+	// do the following operations, and then selfdestruct, and then revert
+	// 1. add balance 200,
+	// 2. set state key1: val2
+	// 3. add slot 0x34
+	// 4. selfdestruct
+	// 5. revert
+	case1 := Tx{
+		{"AddBalance", Address1, big.NewInt(200)},
+		{"SetState", Address1, "key1", "val2"},
+		{"SetState", Address1, "key2", "val0"},
+		{"AddSlots", Address1, common.Hash{0x34}},
+	}
+	case1SelfDestruct := Tx{
+		{"SelfDestruct6780", Address1},
+	}
+	beforeSelfDestruct := Checks{
+		{"balance", Address1, big.NewInt(300)},
+		{"state", Address1, "key1", "val2"},
+		{"state", Address1, "key2", "val0"},
+		{"slot", Address1, common.Hash{0x34}, true},
+		{"slot", Address1, common.Hash{0x33}, true},
+	}
+	beforeRevert := Checks{
+		{"balance", Address1, big.NewInt(0)},
+		{"state", Address1, "key1", "val2"},
+		{"state", Address1, "key2", "val0"},
+		{"slot", Address1, common.Hash{0x34}, true},
+		{"slot", Address1, common.Hash{0x33}, true},
+	}
+	afterRevert := Checks{
+		{"balance", Address1, big.NewInt(100)},
+		{"state", Address1, "key1", "val1"},
+		{"state", Address1, "key2", ""},
+		{"slot", Address1, common.Hash{0x34}, false},
+		{"slot", Address1, common.Hash{0x33}, true},
+	}
+	// run the case1 on shadow
+	snapshot := shadow.Snapshot()
+	case1.Call(shadow)
+	if err := beforeSelfDestruct.Verify(shadow); err != nil {
+		t.Fatalf("maindb ut failed, err:%s", err.Error())
+	}
+	case1SelfDestruct.Call(shadow)
+	if err := beforeRevert.Verify(shadow); err != nil {
+		t.Fatalf("maindb ut failed, err:%s", err.Error())
+	}
+	shadow.RevertToSnapshot(snapshot)
+	if err := afterRevert.Verify(shadow); err != nil {
+		t.Fatalf("maindb ut failed, err:%s", err.Error())
+	}
+
+	// now on uncommitted
+	snapshot = uncommitted.Snapshot()
+	case1.Call(uncommitted)
+	if err := beforeSelfDestruct.Verify(uncommitted); err != nil {
+		t.Fatalf("uncommitted ut failed, err:%s", err.Error())
+	}
+	case1SelfDestruct.Call(uncommitted)
+	if err := beforeRevert.Verify(uncommitted); err != nil {
+		t.Fatalf("uncommitted ut failed, err:%s", err.Error())
+	}
+	uncommitted.RevertToSnapshot(snapshot)
+	if err := afterRevert.Verify(uncommitted); err != nil {
+		t.Fatalf("uncommitted ut failed, err:%s", err.Error())
+	}
+
+	// now compare the mercle root of shadow and uncommitted
+	shadow.Finalise(true)
+	if err := uncommitted.Merge(true); err != nil {
+		t.Fatalf("ut failed, err:%s", err.Error())
+	}
+	uncommitted.Finalise(true)
+	if shadow.IntermediateRoot(true) != uncommitted.maindb.IntermediateRoot(true) {
+		t.Fatalf("ut failed, err: the mercle root of shadow and uncommitted are different")
+	}
+}
+
 func TestPevmSelfDestructAndRevert(t *testing.T) {
 	shadow := newStateDB()
 	uncommitted := newUncommittedDB(newStateDB())

@@ -263,7 +263,7 @@ func (pst *UncommittedDB) Selfdestruct6780(addr common.Address) {
 		return
 	}
 	if obj.created {
-		pst.cache.selfDestruct(addr)
+		pst.SelfDestruct(addr)
 	}
 }
 

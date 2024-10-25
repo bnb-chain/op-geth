@@ -912,7 +912,6 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 		}
 		total += ancient.size()
 	}
-
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Database", "Category", "Size", "Items"})
 	table.SetFooter([]string{"", "Total", total.String(), " "})

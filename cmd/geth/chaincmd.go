@@ -538,20 +538,13 @@ func importPreimages(ctx *cli.Context) error {
 }
 
 func parseDumpConfig(ctx *cli.Context, stack *node.Node) (*state.DumpConfig, ethdb.Database, common.Hash, error) {
+	db := utils.MakeChainDatabase(ctx, stack, true)
+	defer db.Close()
+
+	var header *types.Header
 	if ctx.NArg() > 1 {
 		return nil, nil, common.Hash{}, fmt.Errorf("expected 1 argument (number or hash), got %d", ctx.NArg())
 	}
-
-	db := utils.MakeChainDatabase(ctx, stack, true)
-	scheme, err := rawdb.ParseStateScheme(ctx.String(utils.StateSchemeFlag.Name), db)
-	if err != nil {
-		return nil, nil, common.Hash{}, err
-	}
-	if scheme == rawdb.PathScheme {
-		fmt.Println("You are using geth dump in path mode, please use `geth dump-roothash` command to get all available blocks.")
-	}
-
-	header := &types.Header{}
 	if ctx.NArg() == 1 {
 		arg := ctx.Args().First()
 		if hashish(arg) {

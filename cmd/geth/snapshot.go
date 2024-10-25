@@ -201,6 +201,9 @@ func pruneState(ctx *cli.Context) error {
 	chaindb := utils.MakeChainDatabase(ctx, stack, false)
 	defer chaindb.Close()
 
+	if rawdb.ReadStateScheme(chaindb) != rawdb.HashScheme {
+		log.Crit("Offline pruning is not required for path scheme")
+	}
 	prunerconfig := pruner.Config{
 		Datadir:   stack.ResolvePath(""),
 		BloomSize: ctx.Uint64(utils.BloomFilterSizeFlag.Name),

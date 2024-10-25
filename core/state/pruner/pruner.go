@@ -97,12 +97,12 @@ func (p *Pruner) PruneAll(genesis *core.Genesis) error {
 	return pruneAll(p.db, genesis)
 }
 
-func pruneAll(maindb ethdb.Database, g *core.Genesis) error {
+func pruneAll(mainDB ethdb.Database, g *core.Genesis) error {
 	var pruneDB ethdb.Database
-	if maindb != nil && maindb.StateStore() != nil {
-		pruneDB = maindb.StateStore()
+	if mainDB != nil && mainDB.StateStore() != nil {
+		pruneDB = mainDB.StateStore()
 	} else {
-		pruneDB = maindb
+		pruneDB = mainDB
 	}
 	var (
 		count  int

@@ -2344,11 +2344,11 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.Database {
 	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
 	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) * 90 / 100
-	statediskdb, err := stack.OpenDatabaseWithFreezer("chaindata/state", cache, handles, "", "", readonly, true)
+	stateDiskDb, err := stack.OpenDatabaseWithFreezer("chaindata/state", cache, handles, "", "", readonly, true)
 	if err != nil {
 		Fatalf("Failed to open separate trie database: %v", err)
 	}
-	return statediskdb
+	return stateDiskDb
 }
 
 // MakeBlockDatabase open a separate block database using the flags passed to the client and will hard crash if it fails.

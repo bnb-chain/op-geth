@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"math/big"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,6 +80,10 @@ func (mt *mockTx) From() int {
 
 func (mt *mockTx) To() int {
 	return int(mt.req.value)
+}
+
+func init() {
+	initParallelRunner(runtime.GOMAXPROCS(0))
 }
 
 func (mt *mockTx) execute(req *PEVMTxRequest) *PEVMTxResult {

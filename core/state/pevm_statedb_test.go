@@ -2215,10 +2215,13 @@ func runConflictCase(prepare, txs1, txs2 Txs, checks []Check) error {
 	if err := txs2.Call(un2); err != nil {
 		return fmt.Errorf("failed to call txs2, err:%s", err.Error())
 	}
+	if err := un1.ConflictsToMaindb(); err != nil {
+		return fmt.Errorf("failed to check conflicts of un1, err:%s", err.Error())
+	}
 	if err := un1.Merge(true); err != nil {
 		return fmt.Errorf("failed to merge un1, err:%s", err.Error())
 	}
-	if err := un2.Merge(true); err == nil {
+	if err := un2.ConflictsToMaindb(); err == nil {
 		return fmt.Errorf("un2 merge is expected to be failed")
 	}
 	for _, c := range checks {

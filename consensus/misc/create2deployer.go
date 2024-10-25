@@ -2,7 +2,6 @@ package misc
 
 import (
 	"github.com/ethereum-optimism/superchain-registry/superchain"
-	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -30,8 +29,7 @@ func init() {
 }
 
 func EnsureCreate2Deployer(c *params.ChainConfig, timestamp uint64, db vm.StateDB) {
-	// add chainId condition just for opbnb qanet env, don't use this except it!
-	if !c.IsOptimism() || c.CanyonTime == nil || *c.CanyonTime != timestamp || c.ChainID.Cmp(big.NewInt(6495)) == 0 {
+	if !c.IsOptimism() || c.CanyonTime == nil || *c.CanyonTime != timestamp {
 		return
 	}
 	log.Info("Setting Create2Deployer code", "address", create2DeployerAddress, "codeHash", create2DeployerCodeHash)

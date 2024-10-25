@@ -188,17 +188,7 @@ func newJSelfDestruct(obj *state) *jSelfDestruct {
 	}
 	return &jSelfDestruct{
 		addr: obj.addr,
-		obj: &state{
-			modified: obj.modified,
-			addr:     obj.addr,
-			balance:  new(uint256.Int).Set(obj.balance),
-			nonce:    obj.nonce,
-			code:     append([]byte(nil), obj.code...),
-			codeHash: append([]byte(nil), obj.codeHash...),
-			codeSize: obj.codeSize,
-			created:  obj.created,
-			deleted:  obj.deleted,
-		},
+		obj:  obj.clone(),
 	}
 }
 
@@ -292,14 +282,7 @@ func newJTransientStorage(addr common.Address, key, val common.Hash) *jTransient
 }
 
 func (j *jTransientStorage) revert(db *UncommittedDB) {
-	storage, ok := db.transientStorage[j.addr]
-	if !ok {
-		return
-	}
-	delete(storage, j.key)
-	if len(storage) == 0 {
-		delete(db.transientStorage, j.addr)
-	}
+	db.transientStorage.Set(j.addr, j.key, j.val)
 }
 
 type ujournal []ustate
@@ -309,9 +292,6 @@ func (j *ujournal) append(st ustate) {
 }
 
 func (j *ujournal) revertTo(db *UncommittedDB, snapshot int) {
-	if snapshot < 0 || snapshot >= len(*j) {
-		return // invalid snapshot index
-	}
 	for i := len(*j) - 1; i >= snapshot; i-- {
 		(*j)[i].revert(db)
 	}

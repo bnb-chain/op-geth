@@ -263,7 +263,7 @@ func (pst *UncommittedDB) Selfdestruct6780(addr common.Address) {
 		return
 	}
 	if obj.created {
-		pst.cache.selfDestruct(addr)
+		pst.SelfDestruct(addr)
 	}
 }
 
@@ -316,7 +316,11 @@ func (pst *UncommittedDB) GetTransientState(addr common.Address, key common.Hash
 	return pst.transientStorage.Get(addr, key)
 }
 func (pst *UncommittedDB) SetTransientState(addr common.Address, key, value common.Hash) {
-	pst.journal.append(newJTransientStorage(addr, key, value))
+	prev := pst.transientStorage.Get(addr, key)
+	if prev == value {
+		return // no need to record the same value
+	}
+	pst.journal.append(newJTransientStorage(addr, key, prev))
 	pst.transientStorage.Set(addr, key, value)
 }
 
@@ -345,8 +349,10 @@ func (pst *UncommittedDB) AddSlotToAccessList(addr common.Address, slot common.H
 
 // ===============================================
 // Snapshot Methods
-// (is it necessary to do snapshot and revert ?)
 func (pst *UncommittedDB) RevertToSnapshot(id int) {
+	if id < 0 || id > len(pst.journal) {
+		panic(fmt.Sprintf("invalid snapshot index, out of range, snapshot:%d, len:%d", id, len(pst.journal)))
+	}
 	pst.journal.revertTo(pst, id)
 }
 func (pst *UncommittedDB) Snapshot() int {

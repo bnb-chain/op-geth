@@ -12,19 +12,22 @@ import (
 )
 
 var runner chan func()
+var runnerOnce sync.Once
 
 func initParallelRunner(targetNum int) {
-	if targetNum == 0 {
-		targetNum = runtime.GOMAXPROCS(0)
-	}
-	runner = make(chan func(), targetNum)
-	for i := 0; i < targetNum; i++ {
-		go func() {
-			for f := range runner {
-				f()
-			}
-		}()
-	}
+	runnerOnce.Do(func() {
+		if targetNum == 0 {
+			targetNum = runtime.GOMAXPROCS(0)
+		}
+		runner = make(chan func(), targetNum)
+		for i := 0; i < targetNum; i++ {
+			go func() {
+				for f := range runner {
+					f()
+				}
+			}()
+		}
+	})
 }
 
 func ParallelNum() int {

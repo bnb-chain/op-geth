@@ -349,8 +349,10 @@ func (pst *UncommittedDB) AddSlotToAccessList(addr common.Address, slot common.H
 
 // ===============================================
 // Snapshot Methods
-// (is it necessary to do snapshot and revert ?)
 func (pst *UncommittedDB) RevertToSnapshot(id int) {
+	if id < 0 || id > len(pst.journal) {
+		panic(fmt.Sprintf("invalid snapshot index, out of range, snapshot:%d, len:%d", id, len(pst.journal)))
+	}
 	pst.journal.revertTo(pst, id)
 }
 func (pst *UncommittedDB) Snapshot() int {

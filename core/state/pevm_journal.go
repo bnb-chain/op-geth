@@ -292,9 +292,6 @@ func (j *ujournal) append(st ustate) {
 }
 
 func (j *ujournal) revertTo(db *UncommittedDB, snapshot int) {
-	if snapshot < 0 || snapshot >= len(*j) {
-		return // invalid snapshot index
-	}
 	for i := len(*j) - 1; i >= snapshot; i-- {
 		(*j)[i].revert(db)
 	}

@@ -85,66 +85,62 @@ func (t *TxDAGFileReader) InitAndStartReading(startBlockNum uint64) error {
 	if t.scanner == nil {
 		return errors.New("TxDAG reader init fail,missing scanner")
 	}
-	for t.scanner.Scan() {
-		text := t.scanner.Text()
-		blockNum, err := readTxDAGBlockNumFromLine(text)
-		if err != nil {
-			log.Error("TxDAG reader init fail at readTxDAGBlockNumFromLine", "err", err, "text", text)
-			return err
+	if startBlockNum > 0 {
+		//We move the scanner to the position of startBlockNum-1 so that we can start reading data from startBlockNum next.
+		startBlockNum = startBlockNum - 1
+		for t.scanner.Scan() {
+			text := t.scanner.Text()
+			blockNum, err := readTxDAGBlockNumFromLine(text)
+			if err != nil {
+				log.Error("TxDAG reader init fail at readTxDAGBlockNumFromLine", "err", err, "text", text)
+				return err
+			}
+			if startBlockNum > blockNum {
+				continue
+			}
+			t.latest = blockNum
+			break
 		}
-		if startBlockNum > blockNum {
-			continue
+		if t.scanner.Err() != nil {
+			log.Error("TxDAG reader init, scan TxDAG file got err", "err", t.scanner.Err(), "startBlockNum", startBlockNum, "latest", t.latest)
+			return t.scanner.Err()
 		}
-		t.latest = blockNum
-		break
 	}
-	if t.scanner.Err() != nil {
-		log.Error("TxDAG reader init, scan TxDAG file got err", "err", t.scanner.Err(), "startBlockNum", startBlockNum, "latest", t.latest)
-		return t.scanner.Err()
-	}
-	go t.loopReadDAGIntoChan()
 	log.Info("TxDAG reader init done", "startBlockNum", startBlockNum, "latest", t.latest)
+	go t.loopReadDAGIntoChan()
 	t.isInit = true
 	return nil
 }
 
 func (t *TxDAGFileReader) loopReadDAGIntoChan() {
 	start := time.Now()
-	for {
+
+	for t.scanner.Scan() {
+		text := t.scanner.Text()
+		num, dag, err := readTxDAGItemFromLine(text)
+		if err != nil {
+			log.Error("query TxDAG error", "latest", t.latest, "err", err)
+			continue
+		}
 		select {
 		case <-t.closeChan:
 			close(t.dagChan)
 			log.Info("TxDAG reader is closed. Exiting...", "latest", t.latest)
 			return
 		default:
-			for t.scanner.Scan() {
-				text := t.scanner.Text()
-				num, dag, err := readTxDAGItemFromLine(text)
-				if err != nil {
-					log.Error("query TxDAG error", "latest", t.latest, "err", err)
-					continue
-				}
-				select {
-				case <-t.closeChan:
-					close(t.dagChan)
-					log.Info("TxDAG reader is closed. Exiting...", "latest", t.latest)
-					return
-				default:
-					t.dagChan <- &TxDAGOutputItem{blockNumber: num, txDAG: dag}
-					t.latest = num
-					if t.chanFirstBlockNumber == 0 {
-						t.chanFirstBlockNumber = num
-					}
-					if time.Since(start) > 1*time.Minute {
-						log.Debug("TxDAG reader dagChan report", "dagChanSize", len(t.dagChan), "latest", t.latest, "chanFirstBlockNumber", t.chanFirstBlockNumber)
-						start = time.Now()
-					}
-				}
+			t.dagChan <- &TxDAGOutputItem{blockNumber: num, txDAG: dag}
+			t.latest = num
+			if t.chanFirstBlockNumber == 0 {
+				t.chanFirstBlockNumber = num
 			}
-			if t.scanner.Err() != nil {
-				log.Error("scan TxDAG file got err", "latest", t.latest, "err", t.scanner.Err())
+			if time.Since(start) > 1*time.Minute {
+				log.Debug("TxDAG reader dagChan report", "dagChanSize", len(t.dagChan), "latest", t.latest, "chanFirstBlockNumber", t.chanFirstBlockNumber)
+				start = time.Now()
 			}
 		}
+	}
+	if t.scanner.Err() != nil {
+		log.Error("scan TxDAG file got err", "latest", t.latest, "err", t.scanner.Err())
 	}
 }
 
@@ -170,18 +166,22 @@ func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
 	}
 
 	for {
-		dag := <-t.dagChan
-		if dag == nil {
+		select {
+		case dag := <-t.dagChan:
+			if dag == nil {
+				return nil
+			}
+			t.chanFirstBlockNumber = dag.blockNumber + 1
+			if dag.blockNumber < expect {
+				continue
+			} else if dag.blockNumber > expect {
+				log.Warn("dag.blockNumber > expect", "dag.blockNumber", dag.blockNumber, "expect", expect, "chanFirstBlockNumber", t.chanFirstBlockNumber)
+				return nil
+			} else {
+				return dag.txDAG
+			}
+		default:
 			return nil
-		}
-		t.chanFirstBlockNumber = dag.blockNumber + 1
-		if dag.blockNumber < expect {
-			continue
-		} else if dag.blockNumber > expect {
-			log.Error("dag.blockNumber > expect,should be never happened", "dag.blockNumber", dag.blockNumber, "expect", expect, "chanFirstBlockNumber", t.chanFirstBlockNumber)
-			return nil
-		} else {
-			return dag.txDAG
 		}
 	}
 }

@@ -14,7 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-var TxDAGCacheSize = uint64(1000)
+var TxDAGCacheSize = uint64(300)
 
 type TxDAGFileReader struct {
 	output               string

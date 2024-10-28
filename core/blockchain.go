@@ -95,7 +95,8 @@ var (
 	triedbCommitExternalTimer = metrics.NewRegisteredTimer("chain/triedb/commit/external", nil)
 	innerExecutionTimer       = metrics.NewRegisteredTimer("chain/inner/execution", nil)
 
-	txDAGGenerateTimer = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+	txDAGGenerateTimer   = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+	txDAGReaderChanGauge = metrics.NewRegisteredGauge("chain/block/txdag/reader/chan", nil)
 
 	parallelTxNumMeter         = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
 	parallelConflictTxNumMeter = metrics.NewRegisteredMeter("chain/parallel/conflicttxs", nil)

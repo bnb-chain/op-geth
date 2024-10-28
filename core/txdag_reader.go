@@ -135,6 +135,7 @@ func (t *TxDAGFileReader) loopReadDAGIntoChan() {
 			}
 			if time.Since(start) > 1*time.Minute {
 				log.Debug("TxDAG reader dagChan report", "dagChanSize", len(t.dagChan), "latest", t.latest, "chanFirstBlockNumber", t.chanFirstBlockNumber)
+				txDAGReaderChanGauge.Update(int64(len(t.dagChan)))
 				start = time.Now()
 			}
 		}

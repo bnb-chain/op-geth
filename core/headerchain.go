@@ -141,9 +141,9 @@ func (hc *HeaderChain) Reorg(headers []*types.Header) error {
 	// pile them onto the existing chain. Otherwise, do the necessary
 	// reorgs.
 	var (
-		first = headers[0]
-		last  = headers[len(headers)-1]
-		batch = hc.chainDb.NewBatch()
+		first      = headers[0]
+		last       = headers[len(headers)-1]
+		blockBatch = hc.chainDb.BlockStore().NewBatch()
 	)
 	if first.ParentHash != hc.currentHeaderHash {
 		// Delete any canonical number assignments above the new head
@@ -152,7 +152,7 @@ func (hc *HeaderChain) Reorg(headers []*types.Header) error {
 			if hash == (common.Hash{}) {
 				break
 			}
-			rawdb.DeleteCanonicalHash(batch, i)
+			rawdb.DeleteCanonicalHash(blockBatch, i)
 		}
 		// Overwrite any stale canonical number assignments, going
 		// backwards from the first header in this import until the
@@ -163,7 +163,7 @@ func (hc *HeaderChain) Reorg(headers []*types.Header) error {
 			headHash   = header.Hash()
 		)
 		for rawdb.ReadCanonicalHash(hc.chainDb, headNumber) != headHash {
-			rawdb.WriteCanonicalHash(batch, headHash, headNumber)
+			rawdb.WriteCanonicalHash(blockBatch, headHash, headNumber)
 			if headNumber == 0 {
 				break // It shouldn't be reached
 			}
@@ -178,16 +178,16 @@ func (hc *HeaderChain) Reorg(headers []*types.Header) error {
 	for i := 0; i < len(headers)-1; i++ {
 		hash := headers[i+1].ParentHash // Save some extra hashing
 		num := headers[i].Number.Uint64()
-		rawdb.WriteCanonicalHash(batch, hash, num)
-		rawdb.WriteHeadHeaderHash(batch, hash)
+		rawdb.WriteCanonicalHash(blockBatch, hash, num)
+		rawdb.WriteHeadHeaderHash(blockBatch, hash)
 	}
 	// Write the last header
 	hash := headers[len(headers)-1].Hash()
 	num := headers[len(headers)-1].Number.Uint64()
-	rawdb.WriteCanonicalHash(batch, hash, num)
-	rawdb.WriteHeadHeaderHash(batch, hash)
+	rawdb.WriteCanonicalHash(blockBatch, hash, num)
+	rawdb.WriteHeadHeaderHash(blockBatch, hash)
 
-	if err := batch.Write(); err != nil {
+	if err := blockBatch.Write(); err != nil {
 		return err
 	}
 	// Last step update all in-memory head header markers
@@ -213,7 +213,7 @@ func (hc *HeaderChain) WriteHeaders(headers []*types.Header) (int, error) {
 		newTD       = new(big.Int).Set(ptd) // Total difficulty of inserted chain
 		inserted    []rawdb.NumberHash      // Ephemeral lookup of number/hash for the chain
 		parentKnown = true                  // Set to true to force hc.HasHeader check the first iteration
-		batch       = hc.chainDb.NewBatch()
+		blockBatch  = hc.chainDb.BlockStore().NewBatch()
 	)
 	for i, header := range headers {
 		var hash common.Hash
@@ -233,10 +233,10 @@ func (hc *HeaderChain) WriteHeaders(headers []*types.Header) (int, error) {
 		alreadyKnown := parentKnown && hc.HasHeader(hash, number)
 		if !alreadyKnown {
 			// Irrelevant of the canonical status, write the TD and header to the database.
-			rawdb.WriteTd(batch, hash, number, newTD)
+			rawdb.WriteTd(blockBatch, hash, number, newTD)
 			hc.tdCache.Add(hash, new(big.Int).Set(newTD))
 
-			rawdb.WriteHeader(batch, header)
+			rawdb.WriteHeader(blockBatch, header)
 			inserted = append(inserted, rawdb.NumberHash{Number: number, Hash: hash})
 			hc.headerCache.Add(hash, header)
 			hc.numberCache.Add(hash, number)
@@ -249,7 +249,7 @@ func (hc *HeaderChain) WriteHeaders(headers []*types.Header) (int, error) {
 		return 0, errors.New("aborted")
 	}
 	// Commit to disk!
-	if err := batch.Write(); err != nil {
+	if err := blockBatch.Write(); err != nil {
 		log.Crit("Failed to write headers", "error", err)
 	}
 	return len(inserted), nil
@@ -578,7 +578,7 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 	}
 	var (
 		parentHash common.Hash
-		batch      = hc.chainDb.NewBatch()
+		blockBatch = hc.chainDb.BlockStore().NewBatch()
 		origin     = true
 	)
 	done := func(header *types.Header) bool {
@@ -604,7 +604,7 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 		// first then remove the relative data from the database.
 		//
 		// Update head first(head fast block, head full block) before deleting the data.
-		markerBatch := hc.chainDb.NewBatch()
+		markerBatch := hc.chainDb.BlockStore().NewBatch()
 		if updateFn != nil {
 			newHead, force := updateFn(markerBatch, parent)
 			if force && ((headTime > 0 && newHead.Time < headTime) || (headTime == 0 && newHead.Number.Uint64() < headBlock)) {
@@ -625,7 +625,7 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 		// we don't end up with dangling daps in the database
 		var nums []uint64
 		if origin {
-			for n := num + 1; len(rawdb.ReadAllHashes(hc.chainDb, n)) > 0; n++ {
+			for n := num + 1; len(rawdb.ReadAllHashes(hc.chainDb.BlockStore(), n)) > 0; n++ {
 				nums = append([]uint64{n}, nums...) // suboptimal, but we don't really expect this path
 			}
 			origin = false
@@ -635,23 +635,23 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 		// Remove the related data from the database on all sidechains
 		for _, num := range nums {
 			// Gather all the side fork hashes
-			hashes := rawdb.ReadAllHashes(hc.chainDb, num)
+			hashes := rawdb.ReadAllHashes(hc.chainDb.BlockStore(), num)
 			if len(hashes) == 0 {
 				// No hashes in the database whatsoever, probably frozen already
 				hashes = append(hashes, hdr.Hash())
 			}
 			for _, hash := range hashes {
 				if delFn != nil {
-					delFn(batch, hash, num)
+					delFn(blockBatch, hash, num)
 				}
-				rawdb.DeleteHeader(batch, hash, num)
-				rawdb.DeleteTd(batch, hash, num)
+				rawdb.DeleteHeader(blockBatch, hash, num)
+				rawdb.DeleteTd(blockBatch, hash, num)
 			}
-			rawdb.DeleteCanonicalHash(batch, num)
+			rawdb.DeleteCanonicalHash(blockBatch, num)
 		}
 	}
 	// Flush all accumulated deletions.
-	if err := batch.Write(); err != nil {
+	if err := blockBatch.Write(); err != nil {
 		log.Crit("Failed to rewind block", "error", err)
 	}
 	// Clear out any stale content from the caches

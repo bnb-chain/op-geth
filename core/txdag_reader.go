@@ -96,6 +96,7 @@ func (t *TxDAGFileReader) InitAndStartReading(startBlockNum uint64) error {
 			continue
 		}
 		t.latest = blockNum
+		break
 	}
 	if t.scanner.Err() != nil {
 		log.Error("TxDAG reader init, scan TxDAG file got err", "err", t.scanner.Err(), "startBlockNum", startBlockNum, "latest", t.latest)

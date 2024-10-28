@@ -44,8 +44,8 @@ func NewTxDAGFileReader(output string) (*TxDAGFileReader, error) {
 func (t *TxDAGFileReader) Close() {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	t.closeFile()
 	t.closeChan <- struct{}{}
+	t.closeFile()
 }
 
 func (t *TxDAGFileReader) openFile(output string) error {
@@ -116,18 +116,18 @@ func (t *TxDAGFileReader) loopReadDAGIntoChan() {
 	start := time.Now()
 
 	for t.scanner.Scan() {
-		text := t.scanner.Text()
-		num, dag, err := readTxDAGItemFromLine(text)
-		if err != nil {
-			log.Error("query TxDAG error", "latest", t.latest, "err", err)
-			continue
-		}
 		select {
 		case <-t.closeChan:
 			close(t.dagChan)
 			log.Info("TxDAG reader is closed. Exiting...", "latest", t.latest)
 			return
 		default:
+			text := t.scanner.Text()
+			num, dag, err := readTxDAGItemFromLine(text)
+			if err != nil {
+				log.Error("query TxDAG error", "latest", t.latest, "err", err)
+				continue
+			}
 			t.dagChan <- &TxDAGOutputItem{blockNumber: num, txDAG: dag}
 			t.latest = num
 			if t.chanFirstBlockNumber == 0 {
@@ -142,6 +142,8 @@ func (t *TxDAGFileReader) loopReadDAGIntoChan() {
 	}
 	if t.scanner.Err() != nil {
 		log.Error("scan TxDAG file got err", "latest", t.latest, "err", t.scanner.Err())
+	} else {
+		log.Info("TxDAG reader done. Exiting...", "latest", t.latest)
 	}
 }
 

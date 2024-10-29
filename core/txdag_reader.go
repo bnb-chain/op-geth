@@ -32,7 +32,7 @@ func NewTxDAGFileReader(output string) (*TxDAGFileReader, error) {
 	reader := &TxDAGFileReader{
 		output:    output,
 		dagChan:   make(chan *TxDAGOutputItem, TxDAGCacheSize),
-		closeChan: make(chan struct{}),
+		closeChan: make(chan struct{}, 1),
 	}
 	err := reader.openFile(output)
 	if err != nil {

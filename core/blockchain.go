@@ -2927,3 +2927,15 @@ func readTxDAGItemFromLine(line string) (uint64, types.TxDAG, error) {
 	}
 	return uint64(num), txDAG, nil
 }
+
+func readTxDAGBlockFromLine(line string) (uint64, error) {
+	tokens := strings.Split(line, ",")
+	if len(tokens) != 2 {
+		return 0, errors.New("txDAG output contain wrong size")
+	}
+	num, err := strconv.Atoi(tokens[0])
+	if err != nil {
+		return 0, err
+	}
+	return uint64(num), nil
+}

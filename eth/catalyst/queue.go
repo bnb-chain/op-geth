@@ -23,7 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/miner"
 )
 
@@ -88,23 +87,6 @@ func (q *payloadQueue) get(id engine.PayloadID, full bool) *engine.ExecutionPayl
 				return item.payload.Resolve()
 			}
 			return item.payload.ResolveFull()
-		}
-	}
-	return nil
-}
-
-// getWithoutStatus retrieves a previously stored payload item or nil if it does not exist.
-func (q *payloadQueue) getWithoutStatus(id engine.PayloadID) *miner.Payload {
-	q.lock.RLock()
-	defer q.lock.RUnlock()
-
-	for _, item := range q.payloads {
-		if item == nil {
-			log.Info("getting payload not found", "id", id)
-			return nil // no more items
-		}
-		if item.id == id {
-			return item.payload
 		}
 	}
 	return nil

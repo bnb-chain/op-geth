@@ -363,7 +363,7 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	}
 
 	//check state of parent block
-	_, err = w.retrieveParentState(w.chain.CurrentBlock())
+	_, err = w.retrieveParentState(fullParams)
 	if err != nil && strings.Contains(err.Error(), "missing trie node") {
 		log.Error("missing parent state when building block, try to fix...")
 		// fix state data
@@ -452,54 +452,6 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	return payload, nil
 }
 
-// retryPayloadUpdate retries the payload update process after a fix operation.
-//
-// This function reconstructs the block using the provided BuildPayloadArgs and
-// attempts to update the payload in the system. It performs validation of the
-// block parameters and updates the payload if the block is successfully built.
-func (w *worker) retryPayloadUpdate(args *BuildPayloadArgs, payload *Payload) error {
-	fullParams := &generateParams{
-		timestamp:   args.Timestamp,
-		forceTime:   true,
-		parentHash:  args.Parent,
-		coinbase:    args.FeeRecipient,
-		random:      args.Random,
-		withdrawals: args.Withdrawals,
-		beaconRoot:  args.BeaconRoot,
-		noTxs:       false,
-		txs:         args.Transactions,
-		gasLimit:    args.GasLimit,
-	}
-
-	// Since we skip building the empty block when using the tx pool, we need to explicitly
-	// validate the BuildPayloadArgs here.
-	_, err := w.validateParams(fullParams)
-	if err != nil {
-		log.Error("Failed to validate payload parameters", "id", payload.id, "err", err)
-		return fmt.Errorf("failed to validate payload parameters: %w", err)
-	}
-
-	// set shared interrupt
-	fullParams.interrupt = payload.interrupt
-
-	r := w.getSealingBlock(fullParams)
-	if r.err != nil {
-		log.Error("Failed to build full payload after fix", "id", payload.id, "err", r.err)
-		return fmt.Errorf("failed to build full payload after fix: %w", r.err)
-	}
-
-	payload.update(r, 0, func() {
-		w.cacheMiningBlock(r.block, r.env)
-	})
-
-	if r.err == nil {
-		fullParams.isUpdate = true
-	}
-
-	log.Info("Successfully updated payload after fix", "id", payload.id)
-	return nil
-}
-
 func (w *worker) cacheMiningBlock(block *types.Block, env *environment) {
 	var (
 		start    = time.Now()
@@ -537,9 +489,21 @@ func (w *worker) cacheMiningBlock(block *types.Block, env *environment) {
 		"elapsed", common.PrettyDuration(time.Since(start)))
 }
 
-func (w *worker) retrieveParentState(parent *types.Header) (state *state.StateDB, err error) {
-	// Retrieve the parent state to execute on top and start a prefetcher for
-	// the miner to speed block sealing up a bit.
+func (w *worker) retrieveParentState(genParams *generateParams) (state *state.StateDB, err error) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	log.Info("retrieveParentState validate")
+	// Find the parent block for sealing task
+	parent := w.chain.CurrentBlock()
+	if genParams.parentHash != (common.Hash{}) {
+		block := w.chain.GetBlockByHash(genParams.parentHash)
+		if block == nil {
+			return nil, fmt.Errorf("missing parent")
+		}
+		parent = block.Header()
+	}
+
 	state, err = w.chain.StateAt(parent.Root)
 
 	// If there is an error and Optimism is enabled in the chainConfig, allow reorg

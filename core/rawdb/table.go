@@ -27,6 +27,26 @@ type table struct {
 	prefix string
 }
 
+func (t *table) BlockStoreReader() ethdb.Reader {
+	return t
+}
+
+func (t *table) BlockStoreWriter() ethdb.Writer {
+	return t
+}
+
+func (t *table) BlockStore() ethdb.Database {
+	return t
+}
+
+func (t *table) SetBlockStore(block ethdb.Database) {
+	panic("not implement")
+}
+
+func (t *table) HasSeparateBlockStore() bool {
+	panic("not implement")
+}
+
 // NewTable returns a database object that prefixes all keys with a given string.
 func NewTable(db ethdb.Database, prefix string) ethdb.Database {
 	return &table{
@@ -193,6 +213,22 @@ func (t *table) Compact(start []byte, limit []byte) error {
 // pre-configured string.
 func (t *table) NewBatch() ethdb.Batch {
 	return &tableBatch{t.db.NewBatch(), t.prefix}
+}
+
+func (t *table) StateStore() ethdb.Database {
+	return nil
+}
+
+func (t *table) SetStateStore(state ethdb.Database) {
+	panic("not implement")
+}
+
+func (t *table) GetStateStore() ethdb.Database {
+	return nil
+}
+
+func (t *table) StateStoreReader() ethdb.Reader {
+	return nil
 }
 
 // NewBatchWithSize creates a write-only database batch with pre-allocated buffer.

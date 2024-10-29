@@ -5,8 +5,10 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/holiman/uint256"
 )
 
 var (
@@ -20,12 +22,18 @@ type cacheForMiner struct {
 	pending  map[common.Address]map[*types.Transaction]struct{}
 	locals   map[common.Address]bool
 	addrLock sync.Mutex
+
+	allCache      map[common.Address][]*txpool.LazyTransaction
+	filteredCache map[common.Address][]*txpool.LazyTransaction
+	cacheLock     sync.Mutex
 }
 
 func newCacheForMiner() *cacheForMiner {
 	return &cacheForMiner{
-		pending: make(map[common.Address]map[*types.Transaction]struct{}),
-		locals:  make(map[common.Address]bool),
+		pending:       make(map[common.Address]map[*types.Transaction]struct{}),
+		locals:        make(map[common.Address]bool),
+		allCache:      make(map[common.Address][]*txpool.LazyTransaction),
+		filteredCache: make(map[common.Address][]*txpool.LazyTransaction),
 	}
 }
 
@@ -67,8 +75,9 @@ func (pc *cacheForMiner) del(txs types.Transactions, signer types.Signer) {
 	}
 }
 
-func (pc *cacheForMiner) dump() map[common.Address]types.Transactions {
+func (pc *cacheForMiner) sync2cache(pool txpool.LazyResolver, filter func(txs types.Transactions, addr common.Address) types.Transactions) {
 	pending := make(map[common.Address]types.Transactions)
+
 	pc.txLock.Lock()
 	for addr, txlist := range pc.pending {
 		pending[addr] = make(types.Transactions, 0, len(txlist))
@@ -77,10 +86,46 @@ func (pc *cacheForMiner) dump() map[common.Address]types.Transactions {
 		}
 	}
 	pc.txLock.Unlock()
-	for _, txs := range pending {
+
+	// convert pending to lazyTransactions
+	filteredLazy := make(map[common.Address][]*txpool.LazyTransaction)
+	allLazy := make(map[common.Address][]*txpool.LazyTransaction)
+	for addr, txs := range pending {
 		// sorted by nonce
 		sort.Sort(types.TxByNonce(txs))
+		filterd := filter(txs, addr)
+		if len(txs) > 0 {
+			lazies := make([]*txpool.LazyTransaction, len(txs))
+			for i, tx := range txs {
+				lazies[i] = &txpool.LazyTransaction{
+					Pool:      pool,
+					Hash:      tx.Hash(),
+					Tx:        tx,
+					Time:      tx.Time(),
+					GasFeeCap: uint256.MustFromBig(tx.GasFeeCap()),
+					GasTipCap: uint256.MustFromBig(tx.GasTipCap()),
+					Gas:       tx.Gas(),
+					BlobGas:   tx.BlobGas(),
+				}
+			}
+			allLazy[addr] = lazies
+			filteredLazy[addr] = lazies[:len(filterd)]
+		}
 	}
+
+	pc.cacheLock.Lock()
+	pc.filteredCache = filteredLazy
+	pc.allCache = allLazy
+	pc.cacheLock.Unlock()
+}
+
+func (pc *cacheForMiner) dump(filtered bool) map[common.Address][]*txpool.LazyTransaction {
+	pc.cacheLock.Lock()
+	pending := pc.allCache
+	if filtered {
+		pending = pc.filteredCache
+	}
+	pc.cacheLock.Unlock()
 	return pending
 }
 
@@ -91,7 +136,7 @@ func (pc *cacheForMiner) markLocal(addr common.Address) {
 	pc.locals[addr] = true
 }
 
-func (pc *cacheForMiner) isLocal(addr common.Address) bool {
+func (pc *cacheForMiner) IsLocal(addr common.Address) bool {
 	pc.addrLock.Lock()
 	defer pc.addrLock.Unlock()
 	return pc.locals[addr]

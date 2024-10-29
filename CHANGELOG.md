@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.5.1
+
+This release includes various optimizations and improvements to transaction processing, CI support, and network infrastructure.
+
+This is a minor release for opBNB Mainnet and Testnet.
+Upgrading is optional.
+
+### What's Changed
+
+* fix(ci): support building arm64 architecture (#165)
+* optimization: enqueue transactions in parallel from p2p (#173)
+* optimization: enlarge p2p buffer size and add some metrics for performance monitor (#171)
+* optimization: txpool pricedlist only reheap when pool is full (#175)
+* optimization: txpool pending cache improvement (#177)
+* chore: add bootnode in us region(testnet) (#194)
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.1
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.0...v0.5.1
+
 ## v0.5.0
 This release includes code merging from the upstream version v1.101315.2 along with several fixs and improvements. Fjord fork from upstream is included.
 Fjord fork is scheduled to launch on the opBNB: 

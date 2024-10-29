@@ -24,6 +24,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -260,9 +261,42 @@ func (db *Database) loadLayers() layer {
 	if !(root == types.EmptyRootHash && errors.Is(err, errMissJournal)) {
 		log.Info("Failed to load journal, discard it", "err", err)
 	}
-	// Return single layer with persistent state.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval, db.config.NotifyKeep)
-	dl := newDiskLayer(root, rawdb.ReadPersistentStateID(db.diskdb), db, nil, nb)
+
+	var (
+		nb      trienodebuffer
+		dl      *diskLayer
+		stateID = rawdb.ReadPersistentStateID(db.diskdb)
+	)
+
+	if (errors.Is(err, errMissJournal) || errors.Is(err, errUnmatchedJournal)) && db.fastRecovery &&
+		db.config.TrieNodeBufferType == NodeBufferList && !db.useBase {
+		start := time.Now()
+		if db.freezer == nil {
+			log.Crit("Use unopened freezer db to recover node buffer list")
+		}
+		log.Info("Recover node buffer list from ancient db")
+
+		nb, err = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
+			db.config.ProposeBlockInterval, db.config.NotifyKeep, db.freezer, db.fastRecovery, db.useBase)
+		if err != nil {
+			log.Error("Failed to new trie node buffer for recovery", "error", err)
+		} else {
+			root, stateID, _ = nb.getLatestStatus()
+			log.Info("Finish recovering node buffer list", "elapsed", common.PrettyDuration(time.Since(start)),
+				"latest root hash", root.String(), "latest state_id", stateID)
+		}
+	}
+	if nb == nil || err != nil {
+		// Return single layer with persistent state.
+		nb, err = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
+			db.config.ProposeBlockInterval, db.config.NotifyKeep, nil, false, db.useBase)
+		if err != nil {
+			log.Crit("Failed to new trie node buffer", "error", err)
+			return nil
+		}
+	}
+
+	dl = newDiskLayer(root, stateID, db, nil, nb)
 	nb.setClean(dl.cleans)
 	return dl
 }
@@ -330,7 +364,12 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 	}
 
 	// Calculate the internal state transitions by id difference.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval, db.config.NotifyKeep)
+	nb, err := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval,
+		db.config.NotifyKeep, nil, false, db.useBase)
+	if err != nil {
+		log.Error("Failed to new trie node buffer", "error", err)
+		return nil, err
+	}
 	base := newDiskLayer(root, id, db, nil, nb)
 	nb.setClean(base.cleans)
 	return base, nil
@@ -374,18 +413,7 @@ func (db *Database) loadDiffLayer(parent layer, r *rlp.Stream, journalTypeForRea
 	if err := journalBuf.Decode(&encoded); err != nil {
 		return nil, fmt.Errorf("failed to load diff nodes: %v", err)
 	}
-	nodes := make(map[common.Hash]map[string]*trienode.Node)
-	for _, entry := range encoded {
-		subset := make(map[string]*trienode.Node)
-		for _, n := range entry.Nodes {
-			if len(n.Blob) > 0 {
-				subset[string(n.Path)] = trienode.New(crypto.Keccak256Hash(n.Blob), n.Blob)
-			} else {
-				subset[string(n.Path)] = trienode.NewDeleted()
-			}
-		}
-		nodes[entry.Owner] = subset
-	}
+	nodes := flattenTrieNodes(encoded)
 	// Read state changes from journal
 	var (
 		jaccounts  journalAccounts
@@ -509,14 +537,7 @@ func (dl *diffLayer) journal(w io.Writer, journalType JournalType) error {
 		return err
 	}
 	// Write the accumulated trie nodes into buffer
-	nodes := make([]journalNodes, 0, len(dl.nodes))
-	for owner, subset := range dl.nodes {
-		entry := journalNodes{Owner: owner}
-		for path, node := range subset {
-			entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: node.Blob})
-		}
-		nodes = append(nodes, entry)
-	}
+	nodes := compressTrieNodes(dl.nodes)
 	if err := rlp.Encode(journalBuf, nodes); err != nil {
 		return err
 	}
@@ -622,4 +643,53 @@ func (db *Database) Journal(root common.Hash) error {
 	db.readOnly = true
 	log.Info("Persisted dirty state to disk", "size", common.StorageSize(journalSize), "elapsed", common.PrettyDuration(time.Since(start)))
 	return nil
+}
+
+// compressTrieNodes returns a compressed journal nodes slice.
+func compressTrieNodes(nodes map[common.Hash]map[string]*trienode.Node) []journalNodes {
+	jn := make([]journalNodes, 0, len(nodes))
+	for owner, subset := range nodes {
+		entry := journalNodes{Owner: owner}
+		for path, node := range subset {
+			entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: node.Blob})
+		}
+		jn = append(jn, entry)
+	}
+	return jn
+}
+
+// flattenTrieNodes returns a two-dimensional map for internal nodes.
+func flattenTrieNodes(jn []journalNodes) map[common.Hash]map[string]*trienode.Node {
+	nodes := make(map[common.Hash]map[string]*trienode.Node)
+	for _, entry := range jn {
+		subset := make(map[string]*trienode.Node)
+		for _, n := range entry.Nodes {
+			if len(n.Blob) > 0 {
+				subset[string(n.Path)] = trienode.New(crypto.Keccak256Hash(n.Blob), n.Blob)
+			} else {
+				subset[string(n.Path)] = trienode.NewDeleted()
+			}
+		}
+		nodes[entry.Owner] = subset
+	}
+	return nodes
+}
+
+func checkAncientAndNodeBuffer(ancient string, nodeBufferType NodeBufferType) bool {
+	if !common.FileExist(filepath.Join(ancient, rawdb.StateFreezerName)) {
+		return true
+	}
+
+	if rawdb.DetectTrieNodesFile(ancient) {
+		if nodeBufferType == AsyncNodeBuffer || nodeBufferType == SyncNodeBuffer {
+			log.Warn(fmt.Sprintf("%s node buffer is deprecated!", nodeBufferTypeToString[nodeBufferType]))
+			log.Warn("Recommend using nodebufferlist!")
+			if err := rawdb.DeleteTrieNodesFile(ancient); err != nil {
+				log.Crit("Failed to delete trie nodes file", "error", err)
+			}
+			return false
+		}
+		return true
+	}
+	return false
 }

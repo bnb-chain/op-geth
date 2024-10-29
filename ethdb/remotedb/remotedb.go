@@ -32,6 +32,26 @@ type Database struct {
 	remote *rpc.Client
 }
 
+func (db *Database) BlockStoreReader() ethdb.Reader {
+	return db
+}
+
+func (db *Database) BlockStoreWriter() ethdb.Writer {
+	return db
+}
+
+func (db *Database) BlockStore() ethdb.Database {
+	return db
+}
+
+func (db *Database) HasSeparateBlockStore() bool {
+	return false
+}
+
+func (db *Database) SetBlockStore(block ethdb.Database) {
+	panic("not supported")
+}
+
 func (db *Database) Has(key []byte) (bool, error) {
 	if _, err := db.Get(key); err != nil {
 		return false, nil
@@ -80,6 +100,22 @@ func (db *Database) Tail() (uint64, error) {
 
 func (db *Database) AncientSize(kind string) (uint64, error) {
 	panic("not supported")
+}
+
+func (db *Database) StateStore() ethdb.Database {
+	panic("not supported")
+}
+
+func (db *Database) SetStateStore(state ethdb.Database) {
+	panic("not supported")
+}
+
+func (db *Database) GetStateStore() ethdb.Database {
+	panic("not supported")
+}
+
+func (db *Database) StateStoreReader() ethdb.Reader {
+	return db
 }
 
 func (db *Database) ReadAncients(fn func(op ethdb.AncientReaderOp) error) (err error) {

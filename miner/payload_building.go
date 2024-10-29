@@ -17,6 +17,7 @@
 package miner
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -29,7 +30,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -279,32 +282,29 @@ func (payload *Payload) stopBuilding() {
 // missing the block), it attempts to retrieve the block header from peers and triggers
 //
 // blockHash: The hash of the latest block that needs to be recovered and fixed.
-func (w *worker) fix(blockHash common.Hash, resultChan chan FixResult) {
+func (w *worker) fix(blockHash common.Hash) error {
 	log.Info("Fix operation started")
 
 	// Try to recover from local data
-	err := w.fixManager.RecoverFromLocal(w, blockHash)
+	err := w.stateFixManager.RecoverFromLocal(w, blockHash)
 	if err != nil {
 		// Only proceed to peer recovery if the error is "block not found in local chain"
 		if strings.Contains(err.Error(), "block not found") {
 			log.Warn("Local recovery failed, trying to recover from peers", "err", err)
 
 			// Try to recover from peers
-			err = w.fixManager.RecoverFromPeer(blockHash)
+			err = w.stateFixManager.RecoverFromPeer(blockHash)
 			if err != nil {
-				log.Error("Failed to recover from peers", "err", err)
-				resultChan <- FixResult{Success: false, Err: err}
-				return
+				return err
 			}
 		} else {
 			log.Error("Failed to recover from local data", "err", err)
-			resultChan <- FixResult{Success: false, Err: err}
-			return
+			return err
 		}
 	}
 
 	log.Info("Fix operation completed successfully")
-	resultChan <- FixResult{Success: true, Err: nil}
+	return nil
 }
 
 // buildPayload builds the payload according to the provided parameters.
@@ -362,6 +362,18 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 		return nil, err
 	}
 
+	//check state of parent block
+	_, err = w.retrieveParentState(w.chain.CurrentBlock())
+	if err != nil && strings.Contains(err.Error(), "missing trie node") {
+		log.Error("missing parent state when building block, try to fix...")
+		// fix state data
+		fixErr := w.StartStateFix(args.Id(), fullParams.parentHash)
+		if fixErr != nil {
+			log.Error("fix failed", "err", fixErr)
+		}
+		return nil, err
+	}
+
 	payload := newPayload(nil, args.Id())
 	// set shared interrupt
 	fullParams.interrupt = payload.interrupt
@@ -394,13 +406,6 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			start := time.Now()
 			// getSealingBlock is interrupted by shared interrupt
 			r := w.getSealingBlock(fullParams)
-
-			// if state missing, init fixing routine
-			if r.err != nil && strings.Contains(r.err.Error(), "missing trie node") {
-				log.Info("step into fixing")
-				w.StartFix(payload.id, fullParams.parentHash)
-				return 0
-			}
 
 			dur := time.Since(start)
 			// update handles error case
@@ -530,4 +535,32 @@ func (w *worker) cacheMiningBlock(block *types.Block, env *environment) {
 
 	log.Info("Successfully cached sealed new block", "number", block.Number(), "root", block.Root(), "hash", hash,
 		"elapsed", common.PrettyDuration(time.Since(start)))
+}
+
+func (w *worker) retrieveParentState(parent *types.Header) (state *state.StateDB, err error) {
+	// Retrieve the parent state to execute on top and start a prefetcher for
+	// the miner to speed block sealing up a bit.
+	state, err = w.chain.StateAt(parent.Root)
+
+	// If there is an error and Optimism is enabled in the chainConfig, allow reorg
+	if err != nil && w.chainConfig.Optimism != nil {
+		if historicalBackend, ok := w.eth.(BackendWithHistoricalState); ok {
+			// Attempt to retrieve the historical state
+			var release tracers.StateReleaseFunc
+			parentBlock := w.eth.BlockChain().GetBlockByHash(parent.Hash())
+			state, release, err = historicalBackend.StateAtBlock(
+				context.Background(), parentBlock, ^uint64(0), nil, false, false,
+			)
+
+			// Copy the state and release the resources
+			state = state.Copy()
+			release()
+		}
+	}
+
+	// Return the state and any error encountered
+	if err != nil {
+		return nil, err
+	}
+	return state, nil
 }

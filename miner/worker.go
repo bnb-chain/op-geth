@@ -27,6 +27,8 @@ import (
 
 	mapset "github.com/deckarep/golang-set/v2"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -44,7 +46,6 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
-	"github.com/holiman/uint256"
 )
 
 const (
@@ -271,15 +272,11 @@ type worker struct {
 	bundleCache *BundleCache
 
 	// FixManager
-	fixManager *FixManager
+	stateFixManager *StateFixManager
 }
 
-func (w *worker) StartFix(id engine.PayloadID, parentHash common.Hash) {
-	w.fixManager.StartFix(w, id, parentHash)
-}
-
-func (w *worker) ListenFixCompletion(id engine.PayloadID, payload *Payload, args *BuildPayloadArgs) {
-	w.fixManager.ListenFixCompletion(w, id, payload, args)
+func (w *worker) StartStateFix(id engine.PayloadID, parentHash common.Hash) error {
+	return w.stateFixManager.StartFix(w, id, parentHash)
 }
 
 func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(header *types.Header) bool, init bool) *worker {
@@ -306,7 +303,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
 		bundleCache:        NewBundleCache(),
-		fixManager:         NewFixManager(eth.Downloader()),
+		stateFixManager:    NewFixManager(eth.Downloader()),
 	}
 	// Subscribe for transaction insertion events (whether from network or resurrects)
 	worker.txsSub = eth.TxPool().SubscribeTransactions(worker.txsCh, true)

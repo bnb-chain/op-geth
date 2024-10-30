@@ -408,7 +408,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		if currentSafe != nil && currentFinalize != nil {
 			if currentSafe.Number.Uint64() > head.Number.Uint64() || currentFinalize.Number.Uint64() > head.Number.Uint64() {
 				log.Info("current unsafe is behind safe, reset")
-				bc.hc.SetHead(head.Number.Uint64(), nil, createDelFn(bc))
+				bc.HeaderChainForceSetHead(head.Number.Uint64())
 
 				// Update the safe and finalized block conditionally
 				if currentSafe.Number.Uint64() > head.Number.Uint64() {

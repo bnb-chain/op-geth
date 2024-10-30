@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 	"golang.org/x/exp/slices"
 )
 
@@ -57,7 +58,13 @@ func (f *fuzzer) readInt() uint64 {
 }
 
 func (f *fuzzer) randomTrie(n int) (*trie.Trie, map[string]*kv) {
-	trie := trie.NewEmpty(triedb.NewDatabase(rawdb.NewMemoryDatabase(), nil))
+	pathConfig := pathdb.Defaults
+	pathConfig.UseBase = true
+	trie := trie.NewEmpty(triedb.NewDatabase(rawdb.NewMemoryDatabase(), &triedb.Config{
+		Preimages: true,
+		PathDB:    pathConfig,
+		// HashDB:    hashdb.Defaults,
+	}))
 	vals := make(map[string]*kv)
 	size := f.readInt()
 	// Fill it with some fluff
@@ -165,7 +172,7 @@ func (f *fuzzer) fuzz() int {
 			break
 		}
 		ok = 1
-		//nodes, subtrie
+		// nodes, subtrie
 		hasMore, err := trie.VerifyRangeProof(tr.Hash(), first, keys, vals, proof)
 		if err != nil {
 			if hasMore {

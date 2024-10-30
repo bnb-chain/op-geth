@@ -112,6 +112,7 @@ type Config struct {
 	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
 	JournalFilePath      string         // The journal file path
 	JournalFile          bool           // Whether to use journal file mode
+	UseBase              bool           // Flag to use base and no other buffers for nodebufferlist, it's used for init genesis and unit tes
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -150,15 +151,17 @@ type Database struct {
 	// readOnly is the flag whether the mutation is allowed to be applied.
 	// It will be set automatically when the database is journaled during
 	// the shutdown to reject all following unexpected mutations.
-	readOnly   bool                     // Flag if database is opened in read only mode
-	waitSync   bool                     // Flag if database is deactivated due to initial state sync
-	bufferSize int                      // Memory allowance (in bytes) for caching dirty nodes
-	config     *Config                  // Configuration for database
-	diskdb     ethdb.Database           // Persistent storage for matured trie nodes
-	tree       *layerTree               // The group for all known layers
-	freezer    *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
-	lock       sync.RWMutex             // Lock to prevent mutations from happening at the same time
-	capLock    sync.Mutex
+	readOnly     bool                     // Flag if database is opened in read only mode
+	waitSync     bool                     // Flag if database is deactivated due to initial state sync
+	fastRecovery bool                     // Flag if recover nodebufferlist
+	useBase      bool                     // Flag to use base and no other buffers for nodebufferlist
+	bufferSize   int                      // Memory allowance (in bytes) for caching dirty nodes
+	config       *Config                  // Configuration for database
+	diskdb       ethdb.Database           // Persistent storage for matured trie nodes
+	tree         *layerTree               // The group for all known layers
+	freezer      *rawdb.ResettableFreezer // Freezer for storing trie histories, nil possible in tests
+	lock         sync.RWMutex             // Lock to prevent mutations from happening at the same time
+	capLock      sync.Mutex
 }
 
 // New attempts to load an already existing layer from a persistent key-value
@@ -175,7 +178,20 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 		bufferSize: config.DirtyCacheSize,
 		config:     config,
 		diskdb:     diskdb,
+		useBase:    config.UseBase,
 	}
+
+	// Open the freezer for state history if the passed database contains an
+	// ancient store. Otherwise, all the relevant functionalities are disabled.
+	if ancient, err := diskdb.AncientDatadir(); err == nil && ancient != "" && !db.readOnly {
+		db.fastRecovery = checkAncientAndNodeBuffer(ancient, config.TrieNodeBufferType)
+		freezer, err := rawdb.NewStateFreezer(ancient, false, db.fastRecovery)
+		if err != nil {
+			log.Crit("Failed to open state history freezer", "err", err)
+		}
+		db.freezer = freezer
+	}
+
 	// Construct the layer tree by resolving the in-disk singleton state
 	// and in-memory layer journal.
 	db.tree = newLayerTree(db.loadLayers())
@@ -186,13 +202,7 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 	// Because the freezer can only be opened once at the same time, this
 	// mechanism also ensures that at most one **non-readOnly** database
 	// is opened at the same time to prevent accidental mutation.
-	if ancient, err := diskdb.AncientDatadir(); err == nil && ancient != "" && !db.readOnly {
-		freezer, err := rawdb.NewStateFreezer(ancient, false)
-		if err != nil {
-			log.Crit("Failed to open state history freezer", "err", err)
-		}
-		db.freezer = freezer
-
+	if db.freezer != nil && !db.readOnly {
 		diskLayerID := db.tree.bottom().stateID()
 		if diskLayerID == 0 {
 			// Reset the entire state histories in case the trie database is
@@ -211,7 +221,7 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 		} else {
 			// Truncate the extra state histories above in freezer in case
 			// it's not aligned with the disk layer.
-			pruned, err := truncateFromHead(db.diskdb, freezer, diskLayerID)
+			pruned, err := truncateFromHead(db.diskdb, db.freezer, diskLayerID)
 			if err != nil {
 				log.Crit("Failed to truncate extra state histories", "err", err)
 			}
@@ -357,7 +367,12 @@ func (db *Database) Enable(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	nb := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval, db.config.NotifyKeep)
+	nb, err := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval,
+		db.config.NotifyKeep, nil, false, false)
+	if err != nil {
+		log.Error("Failed to new trie node buffer", "error", err)
+		return err
+	}
 	dl := newDiskLayer(root, 0, db, nil, nb)
 	nb.setClean(dl.cleans)
 	db.tree.reset(dl)
@@ -396,7 +411,7 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		dl    = db.tree.bottom()
 	)
 	for dl.rootHash() != root {
-		h, err := readHistory(db.freezer, dl.stateID())
+		h, err := readHistory(db.freezer, dl.stateID(), db.fastRecovery)
 		if err != nil {
 			return err
 		}
@@ -409,12 +424,13 @@ func (db *Database) Recover(root common.Hash, loader triestate.TrieLoader) error
 		// disk layer won't be accessible from outside.
 		db.tree.reset(dl)
 	}
-	db.DeleteTrieJournal(db.diskdb)
-	_, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
+	_ = db.DeleteTrieJournal(db.diskdb)
+	truncatedNumber, err := truncateFromHead(db.diskdb, db.freezer, dl.stateID())
 	if err != nil {
 		return err
 	}
-	log.Debug("Recovered state", "root", root, "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Debug("Recovered state", "root", root, "elapsed", common.PrettyDuration(time.Since(start)),
+		"truncate number", truncatedNumber)
 	return nil
 }
 

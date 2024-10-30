@@ -67,6 +67,7 @@ type oneLine struct {
 	depList       [][]uint64
 	flags         []uint8
 	emptyDepRate  float64
+	totalTxCount  int
 	txLevelLength int
 	txLevelDetail levelDetails
 }
@@ -77,6 +78,7 @@ func (l *oneLine) toCsvStringList() []string {
 	result = append(result, fmt.Sprintf("%v", l.depList))
 	result = append(result, fmt.Sprintf("%v", l.flags))
 	result = append(result, fmt.Sprintf("%.4f", l.emptyDepRate))
+	result = append(result, fmt.Sprintf("%v", l.totalTxCount))
 	result = append(result, fmt.Sprintf("%v", l.txLevelLength))
 	result = append(result, fmt.Sprintf("%v", l.txLevelDetail))
 	return result
@@ -106,7 +108,7 @@ func (l *levelDetail) String() string {
 
 func scanAndOutput(scanner *bufio.Scanner, writer *csv.Writer, toBlock uint64) error {
 	defer writer.Flush()
-	err := writer.Write([]string{"block", "depList", "flags", "emptyDepRate", "txLevelLength", "txLevelDetail"})
+	err := writer.Write([]string{"block", "depList", "flags", "emptyDepRate", "totalTxCount", "txLevelLength", "txLevelDetail"})
 	if err != nil {
 		return err
 	}
@@ -162,6 +164,7 @@ func dagToCSVOneLine(number uint64, dag types.TxDAG) *oneLine {
 		depList:       depList,
 		flags:         flags,
 		emptyDepRate:  float64(emptyDepCount) / float64(dag.TxCount()),
+		totalTxCount:  dag.TxCount(),
 		txLevelLength: len(txLevels),
 		txLevelDetail: txLevelDetail,
 	}

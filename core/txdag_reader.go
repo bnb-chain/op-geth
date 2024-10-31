@@ -21,7 +21,7 @@ type TxDAGFileReader struct {
 	file                 *os.File
 	scanner              *bufio.Scanner
 	dagChan              chan *TxDAGOutputItem
-	chanFirstBlockNumber uint64
+	chanFirstBlockNumber int64
 	latest               uint64
 	lock                 sync.RWMutex
 	isInit               bool
@@ -30,9 +30,10 @@ type TxDAGFileReader struct {
 
 func NewTxDAGFileReader(output string) (*TxDAGFileReader, error) {
 	reader := &TxDAGFileReader{
-		output:    output,
-		dagChan:   make(chan *TxDAGOutputItem, TxDAGCacheSize),
-		closeChan: make(chan struct{}, 1),
+		output:               output,
+		dagChan:              make(chan *TxDAGOutputItem, TxDAGCacheSize),
+		closeChan:            make(chan struct{}, 1),
+		chanFirstBlockNumber: -1,
 	}
 	err := reader.openFile(output)
 	if err != nil {
@@ -75,10 +76,12 @@ func (t *TxDAGFileReader) Latest() uint64 {
 	defer t.lock.RUnlock()
 	return t.latest
 }
-
-func (t *TxDAGFileReader) InitAndStartReading(startBlockNum uint64) error {
+func (t *TxDAGFileReader) InitAndStartReadingLock(startBlockNum uint64) error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
+	return t.initAndStartReading(startBlockNum)
+}
+func (t *TxDAGFileReader) initAndStartReading(startBlockNum uint64) error {
 	if t.isInit {
 		return nil
 	}
@@ -130,8 +133,8 @@ func (t *TxDAGFileReader) loopReadDAGIntoChan() {
 			}
 			t.dagChan <- &TxDAGOutputItem{blockNumber: num, txDAG: dag}
 			t.latest = num
-			if t.chanFirstBlockNumber == 0 {
-				t.chanFirstBlockNumber = num
+			if t.chanFirstBlockNumber == -1 {
+				t.chanFirstBlockNumber = int64(num)
 			}
 			if time.Since(start) > 1*time.Minute {
 				log.Debug("TxDAG reader dagChan report", "dagChanSize", len(t.dagChan), "latest", t.latest, "chanFirstBlockNumber", t.chanFirstBlockNumber)
@@ -152,18 +155,15 @@ func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
 	defer t.lock.Unlock()
 
 	if !t.isInit {
-		err := t.InitAndStartReading(expect)
-		if err != nil {
-			log.Error("TxDAG reader init fail", "expect", expect, "err", err)
-			return nil
-		}
+		log.Error("TxDAG reader not init yet")
+		return nil
 	}
 
 	if t.scanner == nil {
 		return nil
 	}
 
-	if t.chanFirstBlockNumber > expect {
+	if t.chanFirstBlockNumber > int64(expect) {
 		log.Debug("expect less than chanFirstBlockNumber,skip", "expect", expect, "chanFirstBlockNumber", t.chanFirstBlockNumber)
 		return nil
 	}
@@ -174,7 +174,7 @@ func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
 			if dag == nil {
 				return nil
 			}
-			t.chanFirstBlockNumber = dag.blockNumber + 1
+			t.chanFirstBlockNumber = int64(dag.blockNumber + 1)
 			if dag.blockNumber < expect {
 				continue
 			} else if dag.blockNumber > expect {
@@ -198,9 +198,11 @@ func (t *TxDAGFileReader) Reset(number uint64) error {
 		return err
 	}
 	t.latest = 0
-	t.chanFirstBlockNumber = 0
+	t.chanFirstBlockNumber = -1
 	t.isInit = false
-	err := t.InitAndStartReading(number)
+	t.closeChan = make(chan struct{}, 1)
+	t.dagChan = make(chan *TxDAGOutputItem, TxDAGCacheSize)
+	err := t.initAndStartReading(number)
 	if err != nil {
 		return err
 	}

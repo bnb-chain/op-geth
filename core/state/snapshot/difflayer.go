@@ -40,7 +40,7 @@ var (
 	// Note, bumping this up might drastically increase the size of the bloom
 	// filters that's stored in every diff layer. Don't do that without fully
 	// understanding all the implications.
-	aggregatorMemoryLimit = uint64(4 * 1024 * 1024)
+	aggregatorMemoryLimit = uint64(4 * 1024 * 1024 * 3) // opBNB block gas limit is about 3 times to Ethereum
 
 	// aggregatorItemLimit is an approximate number of items that will end up
 	// in the aggregator layer before it's flushed out to disk. A plain account
@@ -50,6 +50,9 @@ var (
 	// smaller number to be on the safe side.
 	aggregatorItemLimit = aggregatorMemoryLimit / 42
 
+	// bloomItemLimit is an approximate number of all difflayer items (128 difflayers + 1 aggregatorlayer)
+	bloomItemLimit = 128*10000*2 + aggregatorItemLimit
+
 	// bloomTargetError is the target false positive rate when the aggregator
 	// layer is at its fullest. The actual value will probably move around up
 	// and down from this number, it's mostly a ballpark figure.
@@ -57,16 +60,16 @@ var (
 	// Note, dropping this down might drastically increase the size of the bloom
 	// filters that's stored in every diff layer. Don't do that without fully
 	// understanding all the implications.
-	bloomTargetError = 0.02
+	bloomTargetError = 0.01
 
 	// bloomSize is the ideal bloom filter size given the maximum number of items
 	// it's expected to hold and the target false positive error rate.
-	bloomSize = math.Ceil(float64(aggregatorItemLimit) * math.Log(bloomTargetError) / math.Log(1/math.Pow(2, math.Log(2))))
+	bloomSize = math.Ceil(float64(bloomItemLimit) * math.Log(bloomTargetError) / math.Log(1/math.Pow(2, math.Log(2))))
 
 	// bloomFuncs is the ideal number of bits a single entry should set in the
 	// bloom filter to keep its size to a minimum (given it's size and maximum
 	// entry count).
-	bloomFuncs = math.Round((bloomSize / float64(aggregatorItemLimit)) * math.Log(2))
+	bloomFuncs = math.Round((bloomSize / float64(bloomItemLimit)) * math.Log(2))
 
 	// the bloom offsets are runtime constants which determines which part of the
 	// account/storage hash the hasher functions looks at, to determine the

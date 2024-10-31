@@ -91,7 +91,7 @@ func (t *TxDAGFileReader) initAndStartReading(startBlockNum uint64) error {
 	if startBlockNum > 0 {
 		//We move the scanner to the position of startBlockNum-1 so that we can start reading data from startBlockNum next.
 		startBlockNum = startBlockNum - 1
-		for t.scanner.Scan() {
+		for t.scanner != nil && t.scanner.Scan() {
 			text := t.scanner.Text()
 			blockNum, err := readTxDAGBlockNumFromLine(text)
 			if err != nil {
@@ -104,7 +104,7 @@ func (t *TxDAGFileReader) initAndStartReading(startBlockNum uint64) error {
 			t.latest = blockNum
 			break
 		}
-		if t.scanner.Err() != nil {
+		if t.scanner != nil && t.scanner.Err() != nil {
 			log.Error("TxDAG reader init, scan TxDAG file got err", "err", t.scanner.Err(), "startBlockNum", startBlockNum, "latest", t.latest)
 			return t.scanner.Err()
 		}
@@ -118,7 +118,7 @@ func (t *TxDAGFileReader) initAndStartReading(startBlockNum uint64) error {
 func (t *TxDAGFileReader) loopReadDAGIntoChan() {
 	start := time.Now()
 
-	for t.scanner.Scan() {
+	for t.scanner != nil && t.scanner.Scan() {
 		select {
 		case <-t.closeChan:
 			close(t.dagChan)
@@ -143,7 +143,7 @@ func (t *TxDAGFileReader) loopReadDAGIntoChan() {
 			}
 		}
 	}
-	if t.scanner.Err() != nil {
+	if t.scanner != nil && t.scanner.Err() != nil {
 		log.Error("scan TxDAG file got err", "latest", t.latest, "err", t.scanner.Err())
 	} else {
 		log.Info("TxDAG reader done. Exiting...", "latest", t.latest)

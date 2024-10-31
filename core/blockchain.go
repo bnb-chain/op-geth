@@ -2879,7 +2879,7 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 			log.Error("read TxDAG err", "err", err)
 		}
 		// startup with latest block
-		curHeader := bc.CurrentHeader()
+		curHeader := bc.CurrentBlock()
 		if curHeader != nil && bc.txDAGReader != nil {
 			err := bc.txDAGReader.InitAndStartReadingLock(curHeader.Number.Uint64())
 			if err != nil {

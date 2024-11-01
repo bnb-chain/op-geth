@@ -391,7 +391,7 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserve txpool.A
 }
 
 func (pool *LegacyPool) loopOfSync() {
-	ticker := time.NewTicker(200 * time.Millisecond)
+	ticker := time.NewTicker(200 * time.Second)
 	for {
 		select {
 		case <-pool.reorgShutdownCh:
@@ -1892,6 +1892,7 @@ func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) {
 	}
 	demoteTxMeter.Mark(int64(len(demoteAddrs)))
 
+	var removed = 0
 	// Iterate over all accounts and demote any non-executable transactions
 	gasLimit := txpool.EffectiveGasLimit(pool.chainconfig, pool.currentHead.Load().GasLimit, pool.config.EffectiveGasCeil)
 	for _, addr := range demoteAddrs {
@@ -1955,7 +1956,9 @@ func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) {
 			}
 		}
 		pool.pendingCache.del(dropPendingCache, pool.signer)
+		removed += len(dropPendingCache)
 	}
+	pool.priced.Removed(removed)
 }
 
 // addressByHeartbeat is an account address tagged with its last activity timestamp.

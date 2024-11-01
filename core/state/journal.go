@@ -153,16 +153,7 @@ type (
 
 func (ch createObjectChange) revert(dber StateDBer) {
 	s := dber.getBaseStateDB()
-	if s.parallel.isSlotDB {
-		delete(s.parallel.dirtiedStateObjectsInSlot, *ch.account)
-		delete(s.parallel.addrStateChangesInSlot, *ch.account)
-		delete(s.parallel.nonceChangesInSlot, *ch.account)
-		delete(s.parallel.balanceChangesInSlot, *ch.account)
-		delete(s.parallel.codeChangesInSlot, *ch.account)
-		delete(s.parallel.kvChangesInSlot, *ch.account)
-	} else {
-		s.deleteStateObj(*ch.account)
-	}
+	s.deleteStateObj(*ch.account)
 	delete(s.stateObjectsDirty, *ch.account)
 }
 
@@ -172,25 +163,13 @@ func (ch createObjectChange) dirtied() *common.Address {
 
 func (ch resetObjectChange) revert(dber StateDBer) {
 	s := dber.getBaseStateDB()
-	if s.parallel.isSlotDB {
-		// ch.prev must be from dirtiedStateObjectsInSlot, put it back
-		s.parallel.dirtiedStateObjectsInSlot[ch.prev.address] = ch.prev
-	} else {
-		// ch.prev was got from main DB, put it back to main DB.
-		s.setStateObject(ch.prev)
-	}
+	// ch.prev was got from main DB, put it back to main DB.
+	s.setStateObject(ch.prev)
 
 	if !ch.prevdestruct {
 		s.stateObjectDestructLock.Lock()
 		s.removeStateObjectsDestruct(ch.prev.address)
 		s.stateObjectDestructLock.Unlock()
-		if s.isParallel && s.parallel.isSlotDB {
-			s.snapParallelLock.Lock()
-			if _, ok := s.snapDestructs[ch.prev.address]; ok {
-				delete(s.snapDestructs, ch.prev.address)
-			}
-			s.snapParallelLock.Unlock()
-		}
 	}
 	if ch.prevAccount != nil {
 		s.accounts[ch.prev.addrHash] = ch.prevAccount

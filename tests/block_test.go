@@ -18,14 +18,16 @@ package tests
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/rawdb"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 )
 
 func TestBlockchainWithTxDAG(t *testing.T) {
@@ -130,6 +132,7 @@ func execBlockTestWithTxDAG(t *testing.T, bt *testMatcher, test *BlockTest) {
 	}
 
 	// run again with dagFile
+	core.InitPevmRunner(1)
 	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, true)); err != nil {
 		t.Errorf("test in path mode with snapshotter failed: %v", err)
 		return

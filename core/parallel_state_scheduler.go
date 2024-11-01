@@ -30,6 +30,10 @@ func initParallelRunner(targetNum int) {
 	})
 }
 
+func InitPevmRunner(targetNum int) {
+	initParallelRunner(targetNum)
+}
+
 func ParallelNum() int {
 	return cap(runner)
 }

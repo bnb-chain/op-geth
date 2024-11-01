@@ -273,7 +273,7 @@ func (pst *UncommittedDB) Exist(addr common.Address) bool {
 
 func (pst *UncommittedDB) Empty(addr common.Address) bool {
 	obj := pst.getObject(addr)
-	return obj == nil || obj.empty()
+	return obj == nil || obj.empty(pst)
 }
 
 // ===============================================
@@ -529,7 +529,7 @@ func (pst *UncommittedDB) Merge(deleteEmptyObjects bool) error {
 	}
 	// clean empty objects if needed
 	for _, obj := range pst.cache {
-		if obj.selfDestruct || (deleteEmptyObjects && obj.empty()) {
+		if obj.selfDestruct || (deleteEmptyObjects && obj.empty(pst)) {
 			obj.deleted = true
 		}
 		// we don't need to do obj.finalize() here, it will be done in the maindb.Finalize()
@@ -641,13 +641,15 @@ func (pst *UncommittedDB) getDeletedObjectWithCode(addr common.Address, maindb *
 	}
 	// load code from maindb
 	deletedObj := pst.maindb.getDeletedStateObject(addr)
+	var code = []byte{}
+	var codeHash = common.Hash{}
 	if deletedObj == nil {
 		pst.reads.recordCodeOnce(addr, common.Hash{}, nil)
 	} else {
 		pst.reads.recordCodeOnce(addr, common.BytesToHash(deletedObj.CodeHash()), deletedObj.Code())
+		// set code into the cache
+		code, codeHash = deletedObj.Code(), common.BytesToHash(deletedObj.CodeHash())
 	}
-	// set code into the cache
-	code, codeHash := deletedObj.Code(), common.BytesToHash(deletedObj.CodeHash())
 	o.code = code
 	o.codeHash = codeHash[:]
 	o.codeSize = len(code)
@@ -794,8 +796,21 @@ func (s state) merge(maindb *StateDB) {
 	}
 }
 
-func (s *state) empty() bool {
-	return s.nonce == 0 && s.balance.Sign() == 0 && bytes.Equal(s.codeHash, types.EmptyCodeHash.Bytes())
+func (s *state) empty(pst *UncommittedDB) bool {
+	return s.nonce == 0 && s.balance.Sign() == 0 && s.codeIsEmpty(pst)
+}
+
+func (s *state) codeIsEmpty(pst *UncommittedDB) bool {
+	if !s.codeIsLoaded() {
+		codeState := pst.getDeletedObjectWithCode(s.addr, pst.maindb)
+		if codeState == nil {
+			return true
+		}
+		s.code = codeState.code
+		s.codeHash = codeState.codeHash
+		s.codeSize = codeState.codeSize
+	}
+	return bytes.Equal(s.codeHash, types.EmptyCodeHash.Bytes()) || bytes.Equal(s.code, common.Hash{}.Bytes())
 }
 
 func (s *state) codeIsLoaded() bool {

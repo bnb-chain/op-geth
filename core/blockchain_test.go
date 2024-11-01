@@ -4339,39 +4339,33 @@ func TestTxDAGFile_ReadWrite(t *testing.T) {
 		0: types.NewEmptyTxDAG(),
 		1: makeEmptyPlainTxDAG(1),
 		2: makeEmptyPlainTxDAG(2, types.NonDependentRelFlag),
-	}
-	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
-	require.NoError(t, err)
-	for num, dag := range except {
-		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
-	}
-	writeFile.Close()
-
-	except2 := map[uint64]types.TxDAG{
 		3: types.NewEmptyTxDAG(),
 		4: makeEmptyPlainTxDAG(4, types.NonDependentRelFlag, types.ExcludedTxFlag),
 		5: makeEmptyPlainTxDAG(5, types.NonDependentRelFlag, types.ExcludedTxFlag),
 	}
-	writeFile, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
 	require.NoError(t, err)
-	for num, dag := range except2 {
-		if num == 5 {
-			writeFile.WriteString("num,txdag\n")
-			continue
+	for i := uint64(0); i < 6; i++ {
+		if i == 3 {
+			writeFile.WriteString("num,tag\n")
 		}
-		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: dag}))
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: i, txDAG: except[i]}))
 	}
+	writeFile.Sync()
 	writeFile.Close()
 
 	reader, err := NewTxDAGFileReader(path)
 	require.NoError(t, err)
-	for i := 0; i < 5; i++ {
+	err = reader.InitAndStartReadingLock(0)
+	require.NoError(t, err)
+	for reader.latest < 5 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	for i := 0; i < 6; i++ {
 		num := uint64(i)
 		if except[num] != nil {
-			require.Equal(t, except[num], reader.TxDAG(num))
-			continue
+			require.Equal(t, except[num], reader.TxDAG(num), "num:%d", num)
 		}
-		require.Equal(t, except2[num], reader.TxDAG(num))
 	}
 }
 
@@ -4392,18 +4386,29 @@ func TestTxDAGFile_LargeRead(t *testing.T) {
 	for num := uint64(0); num < totalSize; num++ {
 		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: except[num]}))
 	}
+	writeFile.Sync()
 	writeFile.Close()
 
 	reader, err := NewTxDAGFileReader(path)
 	require.NoError(t, err)
+	err = reader.InitAndStartReadingLock(0)
+	require.NoError(t, err)
+
 	for i := uint64(0); i < totalSize; i++ {
+		for reader.latest < i || reader.latest == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
 		require.Equal(t, except[i], reader.TxDAG(i), i)
 	}
 
 	// test reset to genesis
 	err = reader.Reset(0)
 	require.NoError(t, err)
+
 	for i := uint64(0); i < totalSize; i++ {
+		for reader.latest < i || reader.latest == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
 		require.Equal(t, except[i], reader.TxDAG(i), i)
 	}
 
@@ -4411,6 +4416,9 @@ func TestTxDAGFile_LargeRead(t *testing.T) {
 	err = reader.Reset(totalSize - TxDAGCacheSize)
 	require.NoError(t, err)
 	for i := totalSize - TxDAGCacheSize; i < totalSize; i++ {
+		for reader.latest < i || reader.latest == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
 		require.Equal(t, except[i], reader.TxDAG(i), i)
 	}
 }

@@ -18,7 +18,6 @@
 package core
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/hex"
 	"errors"
@@ -97,7 +96,8 @@ var (
 	triedbCommitExternalTimer = metrics.NewRegisteredTimer("chain/triedb/commit/external", nil)
 	innerExecutionTimer       = metrics.NewRegisteredTimer("chain/inner/execution", nil)
 
-	txDAGGenerateTimer = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+	txDAGGenerateTimer   = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+	txDAGReaderChanGauge = metrics.NewRegisteredGauge("chain/block/txdag/reader/chan", nil)
 
 	parallelTxNumMeter         = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
 	parallelConflictTxNumMeter = metrics.NewRegisteredMeter("chain/parallel/conflicttxs", nil)
@@ -920,7 +920,10 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.futureBlocks.Purge()
 
 	if bc.txDAGReader != nil {
-		bc.txDAGReader.Reset(head)
+		err := bc.txDAGReader.Reset(head)
+		if err != nil {
+			log.Error("reset txDAG reader fail", "err", err)
+		}
 	}
 
 	// Clear safe block, finalized block if needed
@@ -2878,33 +2881,38 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 		// startup with latest block
 		curHeader := bc.CurrentHeader()
 		if curHeader != nil && bc.txDAGReader != nil {
-			bc.txDAGReader.TxDAG(curHeader.Number.Uint64())
-			log.Info("load TxDAG from file", "output", output, "block", curHeader.Number, "latest", bc.txDAGReader.Latest())
-		}
-		return
-	}
-
-	// write handler
-	go func() {
-		writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
-		if err != nil {
-			log.Error("OpenFile when open the txDAG output file", "file", output, "err", err)
-			return
-		}
-		bc.txDAGWriteCh = make(chan TxDAGOutputItem, 10000)
-		defer writeHandle.Close()
-		for {
-			select {
-			case <-bc.quit:
-				return
-			case item := <-bc.txDAGWriteCh:
-				if err := writeTxDAGToFile(writeHandle, item); err != nil {
-					log.Error("encode TxDAG err in OutputHandler", "err", err)
-					continue
-				}
+			err := bc.txDAGReader.InitAndStartReadingLock(curHeader.Number.Uint64())
+			if err != nil {
+				log.Error("load TxDAG from file err", "err", err, "output", output, "block", curHeader.Number, "latest", bc.txDAGReader.Latest())
+			} else {
+				log.Info("load TxDAG from file", "output", output, "block", curHeader.Number, "latest", bc.txDAGReader.Latest())
 			}
 		}
-	}()
+		return
+	} else {
+		// write handler
+		go func() {
+			writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+			if err != nil {
+				log.Error("OpenFile when open the txDAG output file", "file", output, "err", err)
+				return
+			}
+			bc.txDAGWriteCh = make(chan TxDAGOutputItem, 10000)
+			defer writeHandle.Close()
+			for {
+				select {
+				case <-bc.quit:
+					return
+				case item := <-bc.txDAGWriteCh:
+					if err := writeTxDAGToFile(writeHandle, item); err != nil {
+						log.Error("encode TxDAG err in OutputHandler", "err", err)
+						continue
+					}
+				}
+			}
+		}()
+	}
+
 }
 
 type TxDAGOutputItem struct {
@@ -2924,136 +2932,4 @@ func writeTxDAGToFile(writeHandle *os.File, item TxDAGOutputItem) error {
 	buf.WriteByte('\n')
 	_, err = writeHandle.Write(buf.Bytes())
 	return err
-}
-
-var TxDAGCacheSize = uint64(10000)
-
-type TxDAGFileReader struct {
-	output  string
-	file    *os.File
-	scanner *bufio.Scanner
-	cache   map[uint64]types.TxDAG
-	latest  uint64
-	lock    sync.RWMutex
-}
-
-func NewTxDAGFileReader(output string) (*TxDAGFileReader, error) {
-	reader := &TxDAGFileReader{output: output}
-	err := reader.openFile(output)
-	if err != nil {
-		return nil, err
-	}
-	return reader, nil
-}
-
-func (t *TxDAGFileReader) Close() {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	t.closeFile()
-}
-
-func (t *TxDAGFileReader) openFile(output string) error {
-	file, err := os.Open(output)
-	if err != nil {
-		return err
-	}
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 5*1024*1024), 5*1024*1024)
-	t.file = file
-	t.scanner = scanner
-	return nil
-}
-
-func (t *TxDAGFileReader) closeFile() {
-	if t.scanner != nil {
-		t.scanner = nil
-	}
-	if t.file != nil {
-		t.file.Close()
-		t.file = nil
-	}
-}
-
-func (t *TxDAGFileReader) Latest() uint64 {
-	t.lock.RLock()
-	defer t.lock.RUnlock()
-	return t.latest
-}
-
-func (t *TxDAGFileReader) TxDAG(expect uint64) types.TxDAG {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-
-	if t.cache != nil && t.latest >= expect {
-		return t.cache[expect]
-	}
-	if t.scanner == nil {
-		return nil
-	}
-
-	logTime := time.Now()
-	t.cache = make(map[uint64]types.TxDAG, TxDAGCacheSize)
-	for t.scanner.Scan() {
-		num, dag, err := readTxDAGItemFromLine(t.scanner.Text())
-		if err != nil {
-			log.Error("query TxDAG error", "latest", t.latest, "err", err)
-			continue
-		}
-		if time.Since(logTime) > 10*time.Second {
-			logTime = time.Now()
-			log.Info("try load TxDAG from file", "num", num, "expect", expect, "cached", len(t.cache))
-		}
-		// skip lower blocks
-		if expect > num {
-			continue
-		}
-		t.cache[num] = dag
-		t.latest = num
-		if uint64(len(t.cache)) >= TxDAGCacheSize {
-			break
-		}
-	}
-	if t.scanner.Err() != nil {
-		log.Error("scan TxDAG file got err", "expect", expect, "err", t.scanner.Err())
-	}
-
-	if time.Since(logTime) > 10*time.Second {
-		log.Info("try load TxDAG from file", "expect", expect, "cached", len(t.cache))
-	}
-	return t.cache[expect]
-}
-
-func (t *TxDAGFileReader) Reset(number uint64) error {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-	if t.latest-TxDAGCacheSize <= number {
-		return nil
-	}
-	t.closeFile()
-	if err := t.openFile(t.output); err != nil {
-		return err
-	}
-	t.latest = 0
-	t.cache = nil
-	return nil
-}
-
-func readTxDAGItemFromLine(line string) (uint64, types.TxDAG, error) {
-	tokens := strings.Split(line, ",")
-	if len(tokens) != 2 {
-		return 0, nil, errors.New("txDAG output contain wrong size")
-	}
-	num, err := strconv.Atoi(tokens[0])
-	if err != nil {
-		return 0, nil, err
-	}
-	enc, err := hex.DecodeString(tokens[1])
-	if err != nil {
-		return 0, nil, err
-	}
-	txDAG, err := types.DecodeTxDAG(enc)
-	if err != nil {
-		return 0, nil, err
-	}
-	return uint64(num), txDAG, nil
 }

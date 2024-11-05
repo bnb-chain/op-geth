@@ -303,7 +303,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
 		bundleCache:        NewBundleCache(),
-		stateFixManager:    NewFixManager(eth.Downloader()),
+		stateFixManager:    NewFixManager(),
 	}
 	// Subscribe for transaction insertion events (whether from network or resurrects)
 	worker.txsSub = eth.TxPool().SubscribeTransactions(worker.txsCh, true)

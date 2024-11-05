@@ -6,23 +6,18 @@ import (
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/log"
 )
 
 // StateFixManager manages the fix operation state and notification mechanism.
 type StateFixManager struct {
-	mutex           sync.Mutex             // Protects access to fix state
-	isFixInProgress bool                   // Tracks if a fix operation is in progress
-	downloader      *downloader.Downloader // Used to trigger BeaconSync operations
+	mutex           sync.Mutex // Protects access to fix state
+	isFixInProgress bool       // Tracks if a fix operation is in progress
 }
 
 // NewFixManager initializes a FixManager with required dependencies
-func NewFixManager(downloader *downloader.Downloader) *StateFixManager {
-	return &StateFixManager{
-		downloader: downloader,
-	}
+func NewFixManager() *StateFixManager {
+	return &StateFixManager{}
 }
 
 // StartFix launches a goroutine to manage the fix process and tracks the fix state.
@@ -66,34 +61,5 @@ func (fm *StateFixManager) RecoverFromLocal(w *worker, blockHash common.Hash) er
 	}
 
 	log.Info("Recovered states up to block", "latestValid", latestValid)
-	return nil
-}
-
-// RecoverFromPeer attempts to retrieve the block header from peers and triggers BeaconSync if successful.
-//
-// blockHash: The latest header(unsafe block) hash of the block to recover.
-func (fm *StateFixManager) RecoverFromPeer(blockHash common.Hash) error {
-	peers := fm.downloader.GetAllPeers()
-	if len(peers) == 0 {
-		return fmt.Errorf("no peers available")
-	}
-
-	var header *types.Header
-	var err error
-	for _, peer := range peers {
-		header, err = fm.downloader.GetHeaderByHashFromPeer(peer, blockHash)
-		if err == nil && header != nil {
-			break
-		}
-		log.Warn("Failed to retrieve header from peer", "err", err)
-	}
-
-	if header == nil {
-		return fmt.Errorf("failed to retrieve header from  all valid peers")
-	}
-
-	log.Info("Successfully retrieved header from peer", "blockHash", blockHash)
-
-	fm.downloader.BeaconSync(downloader.FullSync, header, nil)
 	return nil
 }

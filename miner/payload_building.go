@@ -269,18 +269,7 @@ func (payload *Payload) stopBuilding() {
 }
 
 // fix attempts to recover and repair the block and its associated data (such as MPT)
-// either from the local blockchain or from peers.
-//
-// In most cases, the block can be recovered from the local node's data. However,
-// there is a corner case where this may not be possible: If the sequencer
-// broadcasts a block but the local node crashes before fully writing the block to its local
-// storage, the local chain might be lagging behind by one block compared to peers.
-// In such cases, we need to recover the missing block data from peers.
-//
-// The function first tries to recover the block using the local blockchain via the
-// fixManager.RecoverFromLocal method. If local recovery fails (e.g., due to the node
-// missing the block), it attempts to retrieve the block header from peers and triggers
-//
+// from the local blockchain
 // blockHash: The hash of the latest block that needs to be recovered and fixed.
 func (w *worker) fix(blockHash common.Hash) error {
 	log.Info("Fix operation started")
@@ -288,19 +277,8 @@ func (w *worker) fix(blockHash common.Hash) error {
 	// Try to recover from local data
 	err := w.stateFixManager.RecoverFromLocal(w, blockHash)
 	if err != nil {
-		// Only proceed to peer recovery if the error is "block not found in local chain"
-		if strings.Contains(err.Error(), "block not found") {
-			log.Warn("Local recovery failed, trying to recover from peers", "err", err)
-
-			// Try to recover from peers
-			err = w.stateFixManager.RecoverFromPeer(blockHash)
-			if err != nil {
-				return err
-			}
-		} else {
-			log.Error("Failed to recover from local data", "err", err)
-			return err
-		}
+		log.Error("Failed to recover from local data", "err", err)
+		return err
 	}
 
 	log.Info("Fix operation completed successfully")
@@ -406,10 +384,8 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			start := time.Now()
 			// getSealingBlock is interrupted by shared interrupt
 			r := w.getSealingBlock(fullParams)
-
 			dur := time.Since(start)
 			// update handles error case
-
 			payload.update(r, dur, func() {
 				w.cacheMiningBlock(r.block, r.env)
 			})

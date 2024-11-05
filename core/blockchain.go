@@ -2015,7 +2015,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if bc.snaps != nil {
 			snapDiffItems, snapBufItems = bc.snaps.Size()
 		}
-		trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
+		var trieDiffNodes common.StorageSize = 0
+		var trieBufNodes common.StorageSize = 0
+		var trieImmutableBufNodes common.StorageSize = 0
+		if !minerMode {
+			trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ = bc.triedb.Size()
+		}
 		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, setHead)
 		blockGasUsedGauge.Update(int64(block.GasUsed()) / 1000000)
 

@@ -173,7 +173,6 @@ func (p *PEVMProcessor) confirmTxResult(statedb *state.StateDB, gp *GasPool, res
 		log.Error("merge slotDB failed", "err", err)
 		return err
 	}
-	result.slotDB.Finalise(isByzantium || isEIP158)
 
 	delayGasFee := result.result.delayFees
 	// add delayed gas fee
@@ -188,6 +187,7 @@ func (p *PEVMProcessor) confirmTxResult(statedb *state.StateDB, gp *GasPool, res
 			statedb.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
 		}
 	}
+	result.slotDB.Finalise(isByzantium || isEIP158)
 
 	// Do IntermediateRoot after mergeSlotDB.
 	if !isByzantium {

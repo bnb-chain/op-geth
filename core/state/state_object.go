@@ -325,15 +325,6 @@ func (s *stateObject) GetState(key common.Hash) common.Hash {
 	// Otherwise return the entry's original value
 	result := s.GetCommittedState(key)
 	// Record first read for conflict verify
-	if s.db.isParallel && s.db.parallel.isSlotDB {
-		addr := s.address
-		if s.db.parallel.kvReadsInSlot[addr] == nil {
-			s.db.parallel.kvReadsInSlot[addr] = newStorage(false)
-		}
-		if _, ok := s.db.parallel.kvReadsInSlot[addr].GetValue(key); !ok {
-			s.db.parallel.kvReadsInSlot[addr].StoreValue(key, result)
-		}
-	}
 	return result
 }
 
@@ -348,32 +339,6 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		return value
 	}
 
-	if s.db.isParallel && s.db.parallel.isSlotDB {
-		// Need to confirm the object is not destructed in unconfirmed db and resurrected in this tx.
-		// otherwise there is an issue for cases like:
-		//	B0: TX0 --> createAccount @addr1	-- merged into DB
-		//			  B1: Tx1 and Tx2
-		//			      Tx1 account@addr1, setState(key0), setState(key1) selfDestruct  -- unconfirmed
-		//			      Tx2 recreate account@addr2, setState(key0)  	-- executing
-		//			      TX2 GetState(addr2, key1) ---
-		//			 key1 is never set after recurrsect, and should not return state in trie as it destructed in unconfirmed
-		if s.db.parallel.useDAG != true {
-			obj, exist := s.dbItf.GetStateObjectFromUnconfirmedDB(s.address)
-			if exist {
-				if obj.deleted || obj.selfDestructed {
-					return common.Hash{}
-				}
-			}
-		}
-		// also test whether the object is in mainDB and deleted.
-		pdb := s.db.parallel.baseStateDB
-		obj, exist := pdb.getStateObjectFromStateObjects(s.address)
-		if exist {
-			if obj.deleted || obj.selfDestructed {
-				return common.Hash{}
-			}
-		}
-	}
 	// If the object was destructed in *this* block (and potentially resurrected),
 	// the storage has been cleared out, and we should *not* consult the previous
 	// database about any storage values. The only possible alternatives are:
@@ -451,10 +416,6 @@ func (s *stateObject) SetState(key, value common.Hash) {
 		key:      key,
 		prevalue: prev,
 	})
-
-	if s.db.isParallel && s.db.parallel.isSlotDB {
-		s.db.parallel.kvChangesInSlot[s.address][key] = struct{}{}
-	}
 	s.setState(key, value)
 }
 
@@ -529,14 +490,6 @@ func (s *stateObject) finaliseRWSet() {
 // storage change at all.
 func (s *stateObject) updateTrie() (Trie, error) {
 	maindb := s.db
-	if s.db.isParallel && s.db.parallel.isSlotDB {
-		// we need to fixup the origin storage with the mainDB. otherwise the changes maybe problematic since the origin
-		// is wrong.
-		maindb = s.db.parallel.baseStateDB
-		// For dirty/pending/origin Storage access and update.
-		s.storageRecordsLock.Lock()
-		defer s.storageRecordsLock.Unlock()
-	}
 	// Make sure all dirty slots are finalized into the pending storage area
 	s.finalise(false)
 
@@ -972,40 +925,4 @@ func (s *stateObject) GetCommittedStateNoUpdate(key common.Hash) common.Hash {
 		value.SetBytes(val)
 	}
 	return value
-}
-
-// fixUpOriginAndResetPendingStorage is used for slot object only, the target is to fix up the origin storage of the
-// object with the latest mainDB. And reset the pendingStorage as the execution recorded the changes in dirty and the
-// dirties will be merged to pending at finalise. so the current pendingStorage contains obsoleted info mainly from
-// lightCopy()
-func (s *stateObject) fixUpOriginAndResetPendingStorage() {
-	if s.db.isParallel && s.db.parallel.isSlotDB {
-		mainDB := s.db.parallel.baseStateDB
-		origObj := mainDB.getStateObject(s.address)
-		s.storageRecordsLock.Lock()
-		if origObj != nil && origObj.originStorage.Length() != 0 {
-			// There can be racing issue with CopyForSlot/LightCopy
-			origObj.storageRecordsLock.RLock()
-			originStorage := origObj.originStorage.Copy()
-			origObj.storageRecordsLock.RUnlock()
-			// During the tx execution, the originStorage can be updated with GetCommittedState()
-			// But is never get updated for the already existed one as there is no finalise called in execution.
-			// so here get the latest object in MainDB, and update the object storage with
-			s.originStorage.Range(func(keyItf, valueItf interface{}) bool {
-				key := keyItf.(common.Hash)
-				value := valueItf.(common.Hash)
-				// Skip noop changes, persist actual changes
-				if _, ok := originStorage.GetValue(key); !ok {
-					originStorage.StoreValue(key, value)
-				}
-				return true
-			})
-			s.originStorage = originStorage
-		}
-		// isParallel is unnecessary since the pendingStorage for slotObject will be used serially from now on.
-		if s.pendingStorage.Length() > 0 {
-			s.pendingStorage = newStorage(false)
-		}
-		s.storageRecordsLock.Unlock()
-	}
 }

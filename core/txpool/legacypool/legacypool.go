@@ -646,7 +646,26 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 		baseFeeBig = filter.BaseFee.ToBig()
 	}
 	pending := make(map[common.Address][]*txpool.LazyTransaction, len(pool.pending))
+	var staled map[common.Hash]struct{}
+	if currHeader := pool.chain.CurrentBlock(); currHeader != nil {
+		currBlock := pool.chain.GetBlock(currHeader.Hash(), currHeader.Number.Uint64())
+		staled = make(map[common.Hash]struct{}, len(currBlock.Transactions()))
+		for _, tx := range currBlock.Transactions() {
+			staled[tx.Hash()] = struct{}{}
+		}
+	}
 	for addr, txs := range pool.pendingCache.dump() {
+		// remove nonce too low transactions
+		if len(staled) > 0 {
+			noncetoolow := 0
+			for i, tx := range txs {
+				if _, hit := staled[tx.Hash()]; !hit {
+					break
+				}
+				noncetoolow = i
+			}
+			txs = txs[noncetoolow:]
+		}
 
 		// If the miner requests tip enforcement, cap the lists now
 		if minTipBig != nil && !pool.locals.contains(addr) {

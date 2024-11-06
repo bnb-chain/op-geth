@@ -19,4 +19,5 @@ jobs:
           go-version-file: go.mod
       - run: |
           git apply tests/0001-diff-go-ethereum.patch
+          git apply tests/fix_unit_test.patch
           make test

@@ -133,6 +133,11 @@ var (
 	reorgresetTimer           = metrics.NewRegisteredTimer("txpool/reorgresettime", nil)
 	truncateTimer             = metrics.NewRegisteredTimer("txpool/truncatetime", nil)
 	reorgresetNoblockingTimer = metrics.NewRegisteredTimer("txpool/noblocking/reorgresettime", nil)
+
+	//nonce too low
+	nonceTooLowHeaderTimer = metrics.NewRegisteredTimer("txpool/nonce/too/low/header/duration", nil)
+	nonceTooLowBlockTimer  = metrics.NewRegisteredTimer("txpool/nonce/too/low/block/duration", nil)
+	nonceTooLowTxMeter     = metrics.NewRegisteredMeter("txpool/nonce/too/low/tx", nil)
 )
 
 // BlockChain defines the minimal set of methods needed to back a tx pool with
@@ -638,7 +643,18 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 	var (
 		minTipBig  *big.Int
 		baseFeeBig *big.Int
+
+		blockNumber        uint64        = 0
+		blockHash          common.Hash   = common.Hash{}
+		nonceTooLowCount                 = 0
+		currBlockDuration  time.Duration = 0
+		currHeaderDuration time.Duration = 0
+		txHashesDuration   time.Duration = 0
+		staled                           = make(map[common.Hash]struct{})
 	)
+	defer func() {
+		log.Info("perf-trace  Pending() nonce too low", "blockNumber", blockNumber, "blockHash", blockHash, "nonceTooLowCount", nonceTooLowCount, "staled", len(staled), "currHeaderDuration", currHeaderDuration, "currBlockDuration", currBlockDuration, "txHashesDuration", txHashesDuration)
+	}()
 	if filter.MinTip != nil {
 		minTipBig = filter.MinTip.ToBig()
 	}
@@ -646,25 +662,31 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 		baseFeeBig = filter.BaseFee.ToBig()
 	}
 	pending := make(map[common.Address][]*txpool.LazyTransaction, len(pool.pending))
-	var staled map[common.Hash]struct{}
+	t0 := time.Now()
 	if currHeader := pool.chain.CurrentBlock(); currHeader != nil {
-		currBlock := pool.chain.GetBlock(currHeader.Hash(), currHeader.Number.Uint64())
+		currHeaderDuration = time.Since(t0)
+		blockNumber = currHeader.Number.Uint64()
+		blockHash = currHeader.Hash()
+		currBlock := pool.chain.GetBlock(blockHash, currHeader.Number.Uint64())
+		currBlockDuration = time.Since(t0) - currHeaderDuration
 		staled = make(map[common.Hash]struct{}, len(currBlock.Transactions()))
 		for _, tx := range currBlock.Transactions() {
 			staled[tx.Hash()] = struct{}{}
 		}
+		txHashesDuration = time.Since(t0) - currBlockDuration - currHeaderDuration
 	}
 	for addr, txs := range pool.pendingCache.dump() {
 		// remove nonce too low transactions
 		if len(staled) > 0 {
-			noncetoolow := 0
+			noncetoolow := -1
 			for i, tx := range txs {
 				if _, hit := staled[tx.Hash()]; !hit {
 					break
 				}
 				noncetoolow = i
 			}
-			txs = txs[noncetoolow:]
+			nonceTooLowCount += noncetoolow + 1
+			txs = txs[noncetoolow+1:]
 		}
 
 		// If the miner requests tip enforcement, cap the lists now

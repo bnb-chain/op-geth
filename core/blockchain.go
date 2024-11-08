@@ -2012,12 +2012,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		stats.usedGas += usedGas
 
 		var snapDiffItems, snapBufItems common.StorageSize
-		if bc.snaps != nil {
+		if bc.snaps != nil && !minerMode {
 			snapDiffItems, snapBufItems = bc.snaps.Size()
 		}
-		var trieDiffNodes common.StorageSize = 0
-		var trieBufNodes common.StorageSize = 0
-		var trieImmutableBufNodes common.StorageSize = 0
+		
+		var trieDiffNodes, trieBufNodes, trieImmutableBufNodes common.StorageSize
 		if !minerMode {
 			trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ = bc.triedb.Size()
 		}

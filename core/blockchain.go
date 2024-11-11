@@ -252,7 +252,7 @@ type BlockChain struct {
 	stateCache            state.Database                   // State database to reuse between imports (contains state cache)
 	proofKeeper           *ProofKeeper                     // Store/Query op-proposal proof to ensure consistent.
 	txIndexer             *txIndexer                       // Transaction indexer, might be nil if not enabled
-	stateRecoveringStatus bool
+	stateRecoveringStatus atomic.Bool
 
 	hc            *HeaderChain
 	rmLogsFeed    event.Feed
@@ -338,25 +338,24 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	}
 
 	bc := &BlockChain{
-		chainConfig:           chainConfig,
-		cacheConfig:           cacheConfig,
-		db:                    db,
-		triedb:                triedb,
-		triegc:                prque.New[int64, common.Hash](nil),
-		quit:                  make(chan struct{}),
-		chainmu:               syncx.NewClosableMutex(),
-		bodyCache:             lru.NewCache[common.Hash, *types.Body](bodyCacheLimit),
-		bodyRLPCache:          lru.NewCache[common.Hash, rlp.RawValue](bodyCacheLimit),
-		receiptsCache:         lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
-		blockCache:            lru.NewCache[common.Hash, *types.Block](blockCacheLimit),
-		txLookupCache:         lru.NewCache[common.Hash, txLookup](txLookupCacheLimit),
-		miningReceiptsCache:   lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
-		miningTxLogsCache:     lru.NewCache[common.Hash, []*types.Log](txLogsCacheLimit),
-		miningStateCache:      lru.NewCache[common.Hash, *state.StateDB](miningStateCacheLimit),
-		futureBlocks:          lru.NewCache[common.Hash, *types.Block](maxFutureBlocks),
-		engine:                engine,
-		vmConfig:              vmConfig,
-		stateRecoveringStatus: false,
+		chainConfig:         chainConfig,
+		cacheConfig:         cacheConfig,
+		db:                  db,
+		triedb:              triedb,
+		triegc:              prque.New[int64, common.Hash](nil),
+		quit:                make(chan struct{}),
+		chainmu:             syncx.NewClosableMutex(),
+		bodyCache:           lru.NewCache[common.Hash, *types.Body](bodyCacheLimit),
+		bodyRLPCache:        lru.NewCache[common.Hash, rlp.RawValue](bodyCacheLimit),
+		receiptsCache:       lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
+		blockCache:          lru.NewCache[common.Hash, *types.Block](blockCacheLimit),
+		txLookupCache:       lru.NewCache[common.Hash, txLookup](txLookupCacheLimit),
+		miningReceiptsCache: lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
+		miningTxLogsCache:   lru.NewCache[common.Hash, []*types.Log](txLogsCacheLimit),
+		miningStateCache:    lru.NewCache[common.Hash, *state.StateDB](miningStateCacheLimit),
+		futureBlocks:        lru.NewCache[common.Hash, *types.Block](maxFutureBlocks),
+		engine:              engine,
+		vmConfig:            vmConfig,
 	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
@@ -2234,14 +2233,14 @@ func (bc *BlockChain) RecoverStateAndSetHead(block *types.Block) (common.Hash, e
 // recoverAncestors is only used post-merge.
 // We return the hash of the latest block that we could correctly validate.
 func (bc *BlockChain) recoverAncestors(block *types.Block) (common.Hash, error) {
-	if bc.stateRecoveringStatus {
+	if bc.stateRecoveringStatus.Load() {
 		log.Warn("recover is already in progress, skipping", "block", block.Hash())
 		return common.Hash{}, errors.New("state recover in progress")
 	}
 
-	bc.stateRecoveringStatus = true
+	bc.stateRecoveringStatus.Store(true)
 	defer func() {
-		bc.stateRecoveringStatus = false
+		bc.stateRecoveringStatus.Store(false)
 	}()
 
 	// Gather all the sidechain hashes (full blocks may be memory heavy)

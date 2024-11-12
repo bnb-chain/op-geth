@@ -639,7 +639,7 @@ func TestPevmSelfDestructStateDB(t *testing.T) {
 	if err := checks.Verify(statedb); err != nil {
 		t.Fatalf("[statedb] unexpected selfdestruct state after finalized, err=%s", err.Error())
 	}
-	if err := checks.Verify(uncommitedState.maindb); err != nil {
+	if err := checks.Verify(uncommitedState.maindb.(vm.StateDB)); err != nil {
 		t.Fatalf("[uncommitted] unexpected selfdestruct state after finalized, err=%s", err.Error())
 	}
 	statedb.IntermediateRoot(true)
@@ -654,7 +654,7 @@ func TestPevmSelfDestructStateDB(t *testing.T) {
 	if err := checks.Verify(statedb); err != nil {
 		t.Fatalf("[statedb] unexpected selfdestruct state after committed, err=%s", err.Error())
 	}
-	if err := checks.Verify(uncommitedState.maindb); err != nil {
+	if err := checks.Verify(uncommitedState.maindb.(vm.StateDB)); err != nil {
 		t.Fatalf("[unstate.maindb] unexpected selfdestruct state after committed, err=%s", err.Error())
 	}
 }
@@ -2188,7 +2188,7 @@ func runTxOnUncommittedDB(txs Txs, db *UncommittedDB, check CheckState) (common.
 		}
 	}
 	for _, check := range check.BeforeMerge.Maindb {
-		if err := check.Verify(db.maindb); err != nil {
+		if err := check.Verify(db.maindb.(vm.StateDB)); err != nil {
 			return common.Hash{}, fmt.Errorf("[before merge][maindb] failed to verify : %v", err)
 		}
 	}
@@ -2246,7 +2246,7 @@ func runCase(txs Txs, state *StateDB, unstate *UncommittedDB, check CheckState) 
 			return fmt.Errorf("[after merge] failed to verify statedb: %v", err)
 		}
 		// an uncommitted is invalid after merge, so we verify its maindb instead
-		if err := check.Verify(unstate.maindb); err != nil {
+		if err := check.Verify(unstate.maindb.(vm.StateDB)); err != nil {
 			return fmt.Errorf("[after merge] failed to verify uncommited db: %v", err)
 		}
 	}

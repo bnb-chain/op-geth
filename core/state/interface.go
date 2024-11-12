@@ -76,6 +76,23 @@ type StateDBer interface {
 
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
-
-	GetStateObjectFromUnconfirmedDB(addr common.Address) (*stateObject, bool)
+	GetPreimage(common.Hash) ([]byte, bool)
+	StopPrefetcher()
+	StartPrefetcher(namespace string)
+	SetExpectedStateRoot(root common.Hash)
+	ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (types.TxDAG, error)
+	ResolveStats() map[int]*types.ExeStat
+	IntermediateRoot(deleteEmptyObjects bool) common.Hash
+	Error() error
+	Timers() *Timers
+	Preimages() map[common.Hash][]byte
+	Commit(block uint64, deleteEmptyObjects bool) (common.Hash, error)
+	SetBalance(addr common.Address, amount *uint256.Int)
+	PrepareForParallel()
+	Finalise(deleteEmptyObjects bool)
+	MarkFullProcessed()
+	AccessListCopy() *accessList
+	SetTxContext(hash common.Hash, index int)
+	SetAccessList(list *accessList)
+	getDeletedStateObject(addr common.Address) *stateObject
 }

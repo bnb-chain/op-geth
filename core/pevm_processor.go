@@ -57,7 +57,7 @@ type PEVMTxResult struct {
 
 type PEVMTxRequest struct {
 	txIndex     int
-	baseStateDB *state.StateDB
+	baseStateDB state.StateDBer
 	tx          *types.Transaction
 	gasLimit    uint64
 	msg         *Message
@@ -69,7 +69,7 @@ type PEVMTxRequest struct {
 }
 
 // resetState clear slot state for each block.
-func (p *PEVMProcessor) resetState(txNum int, statedb *state.StateDB) {
+func (p *PEVMProcessor) resetState(txNum int, statedb state.StateDBer) {
 	statedb.PrepareForParallel()
 	p.allTxReqs = make([]*PEVMTxRequest, txNum)
 }
@@ -91,7 +91,7 @@ func (p *PEVMProcessor) hasConflict(txResult *PEVMTxResult) error {
 }
 
 // executeInSlot do tx execution with thread local slot.
-func (p *PEVMProcessor) executeInSlot(maindb *state.StateDB, txReq *PEVMTxRequest) *PEVMTxResult {
+func (p *PEVMProcessor) executeInSlot(maindb state.StateDBer, txReq *PEVMTxRequest) *PEVMTxResult {
 	slotDB := state.NewUncommittedDB(maindb)
 	blockContext := NewEVMBlockContext(txReq.block.Header(), p.bc, nil, p.config, slotDB) // can share blockContext within a block for efficiency
 	txContext := NewEVMTxContext(txReq.msg)
@@ -154,7 +154,7 @@ func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult) error {
 }
 
 // wait until the next Tx is executed and its result is merged to the main stateDB
-func (p *PEVMProcessor) confirmTxResult(statedb *state.StateDB, gp *GasPool, result *PEVMTxResult) error {
+func (p *PEVMProcessor) confirmTxResult(statedb state.StateDBer, gp *ParallelGasPool, result *PEVMTxResult) error {
 	checkErr := p.toConfirmTxIndexResult(result)
 	// ok, the tx result is valid and can be merged
 	if checkErr != nil {
@@ -204,22 +204,22 @@ func (p *PEVMProcessor) confirmTxResult(statedb *state.StateDB, gp *GasPool, res
 }
 
 // Process implements BEP-130 Parallel Transaction Execution
-func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
+func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
 	var (
 		usedGas = new(uint64)
 		header  = block.Header()
-		gp      = new(GasPool).AddGas(block.GasLimit())
+		gp      = new(ParallelGasPool).AddGas(block.GasLimit())
 	)
 
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(statedb)
+		misc.ApplyDAOHardFork2(statedb)
 	}
 	if p.config.PreContractForkBlock != nil && p.config.PreContractForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyPreContractHardFork(statedb)
+		misc.ApplyPreContractHardFork2(statedb)
 	}
 
-	misc.EnsureCreate2Deployer(p.config, block.Time(), statedb)
+	misc.EnsureCreate2Deployer(p.config, block.Time(), statedb.(vm.StateDB))
 
 	allTxs := block.Transactions()
 	p.resetState(len(allTxs), statedb)
@@ -227,12 +227,12 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb *state.StateDB, cfg 
 	var (
 		// with parallel mode, vmenv will be created inside of slot
 		blockContext = NewEVMBlockContext(block.Header(), p.bc, nil, p.config, statedb)
-		vmenv        = vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
+		vmenv        = vm.NewEVM(blockContext, vm.TxContext{}, statedb.(vm.StateDB), p.config, cfg)
 		signer       = types.MakeSigner(p.bc.chainConfig, block.Number(), block.Time())
 	)
 
 	if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
-		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
+		ProcessBeaconBlockRoot2(*beaconRoot, vmenv, statedb)
 	}
 	statedb.MarkFullProcessed()
 	txDAG := cfg.TxDAG

@@ -295,7 +295,7 @@ type BlockChain struct {
 
 	miningReceiptsCache *lru.Cache[common.Hash, []*types.Receipt]
 	miningTxLogsCache   *lru.Cache[common.Hash, []*types.Log]
-	miningStateCache    *lru.Cache[common.Hash, *state.StateDB]
+	miningStateCache    *lru.Cache[common.Hash, state.StateDBer]
 
 	// future blocks are blocks added for later processing
 	futureBlocks *lru.Cache[common.Hash, *types.Block]
@@ -370,7 +370,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		txLookupCache:       lru.NewCache[common.Hash, txLookup](txLookupCacheLimit),
 		miningReceiptsCache: lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
 		miningTxLogsCache:   lru.NewCache[common.Hash, []*types.Log](txLogsCacheLimit),
-		miningStateCache:    lru.NewCache[common.Hash, *state.StateDB](miningStateCacheLimit),
+		miningStateCache:    lru.NewCache[common.Hash, state.StateDBer](miningStateCacheLimit),
 		futureBlocks:        lru.NewCache[common.Hash, *types.Block](maxFutureBlocks),
 		engine:              engine,
 		vmConfig:            vmConfig,
@@ -1471,7 +1471,7 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 
 // writeBlockWithState writes block, metadata and corresponding state data to the
 // database.
-func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.StateDB) error {
+func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state state.StateDBer) error {
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
@@ -1593,7 +1593,7 @@ func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types
 
 // writeBlockAndSetHead is the internal implementation of WriteBlockAndSetHead.
 // This function expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state state.StateDBer, emitHeadEvent bool) (status WriteStatus, err error) {
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
@@ -1818,7 +1818,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		return it.index, err
 	}
 	// No validation errors for the first block (or chain prefix skipped)
-	var activeState *state.StateDB
+	var activeState state.StateDBer
 	defer func() {
 		// The chain importer is starting and stopping trie prefetchers. If a bad
 		// block or other error is hit however, an early return may not properly
@@ -1904,18 +1904,22 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if parent == nil {
 				parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
 			}
-			statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
+			// Enable prefetching to pull in trie node paths while processing transactions
+			if bc.vmConfig.EnableParallelExec {
+				bc.parseTxDAG(block)
+			}
+			if !bc.parallelExecution || (bc.vmConfig.TxDAG == nil && bc.vmConfig.EnableParallelUnorderedMerge) {
+				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
+			} else {
+				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
+			}
 			if err != nil {
 				return it.index, err
 			}
 
-			// Enable prefetching to pull in trie node paths while processing transactions
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
 
-			if bc.vmConfig.EnableParallelExec {
-				bc.parseTxDAG(block)
-			}
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
 			// parallel mode has a pipeline, similar to this prefetch, to save CPU we disable this prefetch for parallel
@@ -1983,21 +1987,30 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		}
 
 		// Update the metrics touched during block processing and validation
-		accountReadTimer.Update(statedb.AccountReads)                 // Account reads are complete(in processing)
-		storageReadTimer.Update(statedb.StorageReads)                 // Storage reads are complete(in processing)
-		snapshotAccountReadTimer.Update(statedb.SnapshotAccountReads) // Account reads are complete(in processing)
-		snapshotStorageReadTimer.Update(statedb.SnapshotStorageReads) // Storage reads are complete(in processing)
-		accountUpdateTimer.Update(statedb.AccountUpdates)             // Account updates are complete(in validation)
-		storageUpdateTimer.Update(statedb.StorageUpdates)             // Storage updates are complete(in validation)
-		accountHashTimer.Update(statedb.AccountHashes)                // Account hashes are complete(in validation)
-		storageHashTimer.Update(statedb.StorageHashes)                // Storage hashes are complete(in validation)
-		txDAGGenerateTimer.Update(statedb.TxDAGGenerate)
+		timers := statedb.Timers()
+		accountReadTimer.Update(timers.AccountReads)                 // Account reads are complete(in processing)
+		storageReadTimer.Update(timers.StorageReads)                 // Storage reads are complete(in processing)
+		snapshotAccountReadTimer.Update(timers.SnapshotAccountReads) // Account reads are complete(in processing)
+		snapshotStorageReadTimer.Update(timers.SnapshotStorageReads) // Storage reads are complete(in processing)
+		accountUpdateTimer.Update(timers.AccountUpdates)             // Account updates are complete(in validation)
+		storageUpdateTimer.Update(timers.StorageUpdates)             // Storage updates are complete(in validation)
+		accountHashTimer.Update(timers.AccountHashes)                // Account hashes are complete(in validation)
+		storageHashTimer.Update(timers.StorageHashes)                // Storage hashes are complete(in validation)
+		txDAGGenerateTimer.Update(timers.TxDAGGenerate)
 		blockExecutionTimer.Update(ptime)  // The time spent on block execution
 		blockValidationTimer.Update(vtime) // The time spent on block validation
 
 		innerExecutionTimer.Update(DebugInnerExecutionDuration)
 
-		log.Debug("New payload execution and validation metrics", "hash", block.Hash(), "execution", common.PrettyDuration(ptime), "validation", common.PrettyDuration(vtime), "accountReads", common.PrettyDuration(statedb.AccountReads), "storageReads", common.PrettyDuration(statedb.StorageReads), "snapshotAccountReads", common.PrettyDuration(statedb.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(statedb.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(statedb.AccountUpdates), "storageUpdates", common.PrettyDuration(statedb.StorageUpdates), "accountHashes", common.PrettyDuration(statedb.AccountHashes), "storageHashes", common.PrettyDuration(statedb.StorageHashes))
+		log.Debug("New payload execution and validation metrics", "hash", block.Hash(), "execution",
+			common.PrettyDuration(ptime), "validation", common.PrettyDuration(vtime), "accountReads",
+			common.PrettyDuration(timers.AccountReads), "storageReads", common.PrettyDuration(timers.StorageReads),
+			"snapshotAccountReads", common.PrettyDuration(timers.SnapshotAccountReads),
+			"snapshotStorageReads", common.PrettyDuration(timers.SnapshotStorageReads),
+			"accountUpdates", common.PrettyDuration(timers.AccountUpdates),
+			"storageUpdates", common.PrettyDuration(timers.StorageUpdates),
+			"accountHashes", common.PrettyDuration(timers.AccountHashes),
+			"storageHashes", common.PrettyDuration(timers.StorageHashes))
 
 		// Write the block to the chain and get the status.
 		var (
@@ -2015,17 +2028,23 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			return it.index, err
 		}
 		// Update the metrics touched during block commit
-		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
-		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
-		snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
-		triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
-		trieCommitTimer.Update(statedb.TrieCommits)
-		codeCommitTimer.Update(statedb.CodeCommits)
+		accountCommitTimer.Update(timers.AccountCommits)   // Account commits are complete, we can mark them
+		storageCommitTimer.Update(timers.StorageCommits)   // Storage commits are complete, we can mark them
+		snapshotCommitTimer.Update(timers.SnapshotCommits) // Snapshot commits are complete, we can mark them
+		triedbCommitTimer.Update(timers.TrieDBCommits)     // Trie database commits are complete, we can mark them
+		trieCommitTimer.Update(timers.TrieCommits)
+		codeCommitTimer.Update(timers.CodeCommits)
 
 		blockWriteTimer.UpdateSince(wstart)
 		blockInsertTimer.UpdateSince(start)
 
-		log.Debug("New payload db write metrics", "hash", block.Hash(), "insert", common.PrettyDuration(time.Since(start)), "writeDB", common.PrettyDuration(time.Since(wstart)), "writeBlock", common.PrettyDuration(time.Since(wstart)), "accountCommit", common.PrettyDuration(statedb.AccountCommits), "storageCommit", common.PrettyDuration(statedb.StorageCommits), "snapshotCommits", common.PrettyDuration(statedb.SnapshotCommits), "triedbCommit", common.PrettyDuration(statedb.TrieDBCommits))
+		log.Debug("New payload db write metrics", "hash", block.Hash(),
+			"insert", common.PrettyDuration(time.Since(start)), "writeDB", common.PrettyDuration(time.Since(wstart)),
+			"writeBlock", common.PrettyDuration(time.Since(wstart)),
+			"accountCommit", common.PrettyDuration(timers.AccountCommits),
+			"storageCommit", common.PrettyDuration(timers.StorageCommits),
+			"snapshotCommits", common.PrettyDuration(timers.SnapshotCommits),
+			"triedbCommit", common.PrettyDuration(timers.TrieDBCommits))
 
 		// Report the import stats before returning the various results
 		stats.processed++

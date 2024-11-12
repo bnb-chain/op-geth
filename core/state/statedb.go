@@ -231,8 +231,23 @@ type StateDB struct {
 	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
 }
 
-func (s *StateDB) GetStateObjectFromUnconfirmedDB(addr common.Address) (*stateObject, bool) {
-	return nil, false
+type Timers struct {
+	// Measurements gathered during execution for debugging purposes
+	AccountReads         time.Duration
+	AccountHashes        time.Duration
+	AccountUpdates       time.Duration
+	AccountCommits       time.Duration
+	StorageReads         time.Duration
+	StorageHashes        time.Duration
+	StorageUpdates       time.Duration
+	StorageCommits       time.Duration
+	SnapshotAccountReads time.Duration
+	SnapshotStorageReads time.Duration
+	SnapshotCommits      time.Duration
+	TrieDBCommits        time.Duration
+	TrieCommits          time.Duration
+	CodeCommits          time.Duration
+	TxDAGGenerate        time.Duration
 }
 
 // New creates a new state from a given trie.
@@ -2161,4 +2176,37 @@ func (s *StateDB) PrepareForParallel() {
 			s.parallel.stateObjects.StoreStateObject(addr, newObj)
 		}
 	}
+}
+
+func (s *StateDB) Timers() *Timers {
+	return &Timers{
+		AccountReads:         s.AccountReads,
+		AccountHashes:        s.AccountHashes,
+		AccountUpdates:       s.AccountUpdates,
+		AccountCommits:       s.AccountCommits,
+		StorageReads:         s.StorageReads,
+		StorageHashes:        s.StorageHashes,
+		StorageUpdates:       s.StorageUpdates,
+		StorageCommits:       s.StorageCommits,
+		SnapshotAccountReads: s.SnapshotAccountReads,
+		SnapshotStorageReads: s.SnapshotStorageReads,
+		SnapshotCommits:      s.SnapshotCommits,
+		TrieDBCommits:        s.TrieDBCommits,
+		TrieCommits:          s.TrieCommits,
+		CodeCommits:          s.CodeCommits,
+		TxDAGGenerate:        s.TxDAGGenerate,
+	}
+}
+
+func (s *StateDB) AccessListCopy() *accessList {
+	return s.accessList.Copy()
+}
+
+func (s *StateDB) SetAccessList(list *accessList) {
+	s.accessList = list
+}
+
+func (s *StateDB) GetPreimage(hash common.Hash) ([]byte, bool) {
+	bytes, ok := s.preimages[hash]
+	return bytes, ok
 }

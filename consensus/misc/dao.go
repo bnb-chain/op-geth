@@ -85,3 +85,16 @@ func ApplyDAOHardFork(statedb *state.StateDB) {
 		statedb.SetBalance(addr, new(uint256.Int))
 	}
 }
+
+func ApplyDAOHardFork2(statedb state.StateDBer) {
+	// Retrieve the contract to refund balances into
+	if !statedb.Exist(params.DAORefundContract) {
+		statedb.CreateAccount(params.DAORefundContract)
+	}
+
+	// Move every DAO account and extra-balance account funds into the refund contract
+	for _, addr := range params.DAODrainList() {
+		statedb.AddBalance(params.DAORefundContract, statedb.GetBalance(addr))
+		statedb.SetBalance(addr, new(uint256.Int))
+	}
+}

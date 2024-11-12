@@ -30,6 +30,7 @@ func (fm *StateFixManager) StartFix(worker *worker, id engine.PayloadID, parentH
 		return nil
 	}
 
+	fm.isFixInProgress = true
 	defer func() {
 		fm.isFixInProgress = false
 	}()

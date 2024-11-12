@@ -1,0 +1,19 @@
+Subject: [PATCH] fix unit test
+---
+Index: core/txpool/legacypool/legacypool.go
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/core/txpool/legacypool/legacypool.go b/core/txpool/legacypool/legacypool.go
+--- a/core/txpool/legacypool/legacypool.go	(revision 1233f69823ec26df160575add475f1e949cde211)
++++ b/core/txpool/legacypool/legacypool.go	(date 1730875125704)
+@@ -391,7 +391,7 @@
+ }
+ 
+ func (pool *LegacyPool) loopOfSync() {
+-	ticker := time.NewTicker(200 * time.Second)
++	ticker := time.NewTicker(200 * time.Millisecond)
+ 	for {
+ 		select {
+ 		case <-pool.reorgShutdownCh:

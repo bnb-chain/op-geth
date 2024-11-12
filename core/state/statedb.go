@@ -765,15 +765,6 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	return nil
 }
 
-// GetStateNoUpdate retrieves a value from the given account's storage trie, but do not update the db.stateObjects cache.
-func (s *StateDB) GetStateNoUpdate(addr common.Address, hash common.Hash) (ret common.Hash) {
-	object := s.getStateObjectNoUpdate(addr)
-	if object != nil {
-		return object.GetStateNoUpdate(hash)
-	}
-	return common.Hash{}
-}
-
 // getStateObjectNoUpdate is similar with getStateObject except that it does not
 // update stateObjects records.
 func (s *StateDB) getStateObjectNoUpdate(addr common.Address) *stateObject {
@@ -2209,4 +2200,88 @@ func (s *StateDB) SetAccessList(list *accessList) {
 func (s *StateDB) GetPreimage(hash common.Hash) ([]byte, bool) {
 	bytes, ok := s.preimages[hash]
 	return bytes, ok
+}
+
+func (s *StateDB) appendJournal(journalEntry journalEntry) {
+	s.journal.append(journalEntry)
+}
+
+func (s *StateDB) addJournalDirty(address common.Address) {
+	s.journal.dirty(address)
+}
+
+func (s *StateDB) getPrefetcher() *triePrefetcher {
+	return s.prefetcher
+}
+
+func (s *StateDB) getDB() Database {
+	return s.db
+}
+
+func (s *StateDB) getOriginalRoot() common.Hash {
+	return s.originalRoot
+}
+
+func (s *StateDB) getTrie() Trie {
+	return s.trie
+}
+
+func (s *StateDB) getStateObjectDestructLock() *sync.RWMutex {
+	return &s.stateObjectDestructLock
+}
+
+func (s *StateDB) getSnap() snapshot.Snapshot {
+	return s.snap
+}
+
+func (s *StateDB) timeAddSnapshotStorageReads(du time.Duration) {
+	s.SnapshotStorageReads += du
+}
+
+func (s *StateDB) getTrieParallelLock() *sync.Mutex {
+	return &s.trieParallelLock
+}
+
+func (s *StateDB) timeAddStorageReads(du time.Duration) {
+	s.StorageReads += du
+}
+
+func (s *StateDB) timeAddStorageUpdates(du time.Duration) {
+	s.StorageUpdates += du
+}
+
+func (s *StateDB) countAddStorageDeleted(diff int) {
+	s.StorageDeleted += diff
+}
+
+func (s *StateDB) countAddStorageUpdated(diff int) {
+	s.StorageUpdated += diff
+}
+
+func (s *StateDB) getStorageMux() *sync.Mutex {
+	return &s.StorageMux
+}
+
+func (s *StateDB) getStorages(hash common.Hash) map[common.Hash][]byte {
+	return s.storages[hash]
+}
+
+func (s *StateDB) setStorages(hash common.Hash, storage map[common.Hash][]byte) {
+	s.storages[hash] = storage
+}
+
+func (s *StateDB) getStoragesOrigin(address common.Address) map[common.Hash][]byte {
+	return s.storagesOrigin[address]
+}
+
+func (s *StateDB) setStoragesOrigin(address common.Address, origin map[common.Hash][]byte) {
+	s.storagesOrigin[address] = origin
+}
+
+func (s *StateDB) timeAddStorageHashes(du time.Duration) {
+	s.StorageHashes += du
+}
+
+func (s *StateDB) timeAddStorageCommits(du time.Duration) {
+	s.StorageCommits += du
 }

@@ -1111,15 +1111,15 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.VMCategory,
 	}
 
-	ParallelTxNumFlag = &cli.IntFlag{
-		Name:     "parallel.num",
-		Usage:    "Number of slot for transaction execution, only valid in parallel mode (runtime calculated, no fixed default value)",
+	ParallelTxParallelMergeFlag = &cli.BoolFlag{
+		Name:     "parallel.parallel-merge",
+		Usage:    "Enable concurrent merge mode, during the parallel confirm phase, multiple goroutines will be used to perform concurrent merging of execution results. This option will override parallel.unordered-merge",
 		Category: flags.VMCategory,
 	}
 
-	ParallelThresholdFlag = &cli.IntFlag{
-		Name:     "parallel.threshold",
-		Usage:    "Threshold of transaction count to trigger parallel execution, only valid in parallel mode (runtime calculated, no fixed default value)",
+	ParallelTxNumFlag = &cli.IntFlag{
+		Name:     "parallel.num",
+		Usage:    "Number of slot for transaction execution, only valid in parallel mode (runtime calculated, no fixed default value)",
 		Category: flags.VMCategory,
 	}
 
@@ -2041,12 +2041,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.ParallelTxUnorderedMerge = ctx.Bool(ParallelTxUnorderedMergeFlag.Name)
 	}
 
-	if ctx.IsSet(ParallelTxNumFlag.Name) {
-		cfg.ParallelTxNum = ctx.Int(ParallelTxNumFlag.Name)
+	if ctx.IsSet(ParallelTxParallelMergeFlag.Name) {
+		cfg.ParallelTxParallelMerge = ctx.Bool(ParallelTxParallelMergeFlag.Name)
 	}
 
-	if ctx.IsSet(ParallelThresholdFlag.Name) {
-		cfg.ParallelThreshold = ctx.Int(ParallelThresholdFlag.Name)
+	if ctx.IsSet(ParallelTxNumFlag.Name) {
+		cfg.ParallelTxNum = ctx.Int(ParallelTxNumFlag.Name)
 	}
 
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {

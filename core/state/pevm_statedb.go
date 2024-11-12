@@ -1078,7 +1078,7 @@ func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree) (*Parallel
 }
 
 func (p *ParallelStateDB) getBaseStateDB() *StateDB {
-	return nil
+	panic("ParallelStateDB not support get base stateDB")
 }
 
 func (p *ParallelStateDB) getStateObject(address common.Address) *stateObject {
@@ -2266,4 +2266,102 @@ func (p *ParallelStateDB) updateStateObject(obj *stateObject) {
 			p.accountsOrigin.Store(obj.address, types.SlimAccountRLP(*obj.origin))
 		}
 	}
+}
+
+func (p *ParallelStateDB) appendJournal(journalEntry journalEntry) {
+	if journalEntry.dirtied() != nil {
+		p.stateObjectsDirty.Store(journalEntry.dirtied(), struct{}{})
+	}
+}
+
+func (p *ParallelStateDB) addJournalDirty(address common.Address) {
+	p.stateObjectsDirty.Store(address, struct{}{})
+}
+
+func (p *ParallelStateDB) getPrefetcher() *triePrefetcher {
+	return nil
+}
+
+func (p *ParallelStateDB) getDB() Database {
+	return p.db
+}
+
+func (p *ParallelStateDB) getOriginalRoot() common.Hash {
+	return p.originalRoot
+}
+
+func (p *ParallelStateDB) getTrie() Trie {
+	return p.trie
+}
+
+func (p *ParallelStateDB) getStateObjectDestructLock() *sync.RWMutex {
+	return &p.stateObjectDestructLock
+}
+
+func (p *ParallelStateDB) getSnap() snapshot.Snapshot {
+	return p.snap
+}
+
+func (p *ParallelStateDB) timeAddSnapshotStorageReads(du time.Duration) {
+	p.SnapshotStorageReads += du
+}
+
+func (p *ParallelStateDB) getTrieParallelLock() *sync.Mutex {
+	return &p.trieParallelLock
+}
+
+func (p *ParallelStateDB) timeAddStorageReads(du time.Duration) {
+	p.StorageReads += du
+}
+
+func (p *ParallelStateDB) RecordWrite(key types.RWKey, value interface{}) {
+	//do nothing
+}
+
+func (p *ParallelStateDB) timeAddStorageUpdates(du time.Duration) {
+	p.StorageUpdates += du
+}
+
+func (p *ParallelStateDB) countAddStorageDeleted(diff int) {
+	p.StorageDeleted += diff
+}
+
+func (p *ParallelStateDB) countAddStorageUpdated(diff int) {
+	p.StorageUpdated += diff
+}
+
+func (p *ParallelStateDB) getStorageMux() *sync.Mutex {
+	return &p.StorageMux
+}
+
+func (p *ParallelStateDB) getStorages(hash common.Hash) map[common.Hash][]byte {
+	value, ok := p.storages.Load(hash)
+	if ok {
+		return value.(map[common.Hash][]byte)
+	}
+	return nil
+}
+
+func (p *ParallelStateDB) setStorages(hash common.Hash, storage map[common.Hash][]byte) {
+	p.storages.Store(hash, storage)
+}
+
+func (p *ParallelStateDB) getStoragesOrigin(address common.Address) map[common.Hash][]byte {
+	value, ok := p.storagesOrigin.Load(address)
+	if ok {
+		return value.(map[common.Hash][]byte)
+	}
+	return nil
+}
+
+func (p *ParallelStateDB) setStoragesOrigin(address common.Address, origin map[common.Hash][]byte) {
+	p.storagesOrigin.Store(address, origin)
+}
+
+func (p *ParallelStateDB) timeAddStorageHashes(du time.Duration) {
+	p.StorageHashes += du
+}
+
+func (p *ParallelStateDB) timeAddStorageCommits(du time.Duration) {
+	p.StorageCommits += du
 }

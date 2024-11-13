@@ -1069,6 +1069,7 @@ func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree) (*Parallel
 		snaps:        snaps,
 		accessList:   newAccessList(),
 		hasher:       crypto.NewKeccakState(),
+		stateObjects: &StateObjectSyncMap{},
 	}
 	if sdb.snaps != nil {
 		sdb.snap = sdb.snaps.Snapshot(root)

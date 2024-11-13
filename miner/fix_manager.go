@@ -11,8 +11,7 @@ import (
 
 // StateFixManager manages the fix operation state and notification mechanism.
 type StateFixManager struct {
-	mutex           sync.Mutex // Protects access to fix state
-	isFixInProgress bool       // Tracks if a fix operation is in progress
+	mutex sync.Mutex // Protects access to fix state
 }
 
 // NewFixManager initializes a FixManager with required dependencies
@@ -25,17 +24,8 @@ func (fm *StateFixManager) StartFix(worker *worker, id engine.PayloadID, parentH
 	fm.mutex.Lock()
 	defer fm.mutex.Unlock()
 
-	if fm.isFixInProgress {
-		log.Warn("Fix is already in progress for this block", "id", id)
-		return nil
-	}
+	log.Info("Fix is in progress for the block", "id", id)
 
-	fm.isFixInProgress = true
-	defer func() {
-		fm.isFixInProgress = false
-	}()
-
-	log.Info("Starting synchronous fix process", "id", id)
 	err := worker.fix(parentHash)
 	if err != nil {
 		log.Error("Fix process failed", "error", err)

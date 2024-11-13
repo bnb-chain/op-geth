@@ -242,16 +242,17 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
-	db            ethdb.Database                   // Low level persistent database to store final content in
-	snaps         *snapshot.Tree                   // Snapshot tree for fast trie leaf access
-	triegc        *prque.Prque[int64, common.Hash] // Priority queue mapping block numbers to tries to gc
-	gcproc        time.Duration                    // Accumulates canonical block processing for trie dumping
-	lastWrite     uint64                           // Last block when the state was flushed
-	flushInterval atomic.Int64                     // Time interval (processing time) after which to flush a state
-	triedb        *triedb.Database                 // The database handler for maintaining trie nodes.
-	stateCache    state.Database                   // State database to reuse between imports (contains state cache)
-	proofKeeper   *ProofKeeper                     // Store/Query op-proposal proof to ensure consistent.
-	txIndexer     *txIndexer                       // Transaction indexer, might be nil if not enabled
+	db                    ethdb.Database                   // Low level persistent database to store final content in
+	snaps                 *snapshot.Tree                   // Snapshot tree for fast trie leaf access
+	triegc                *prque.Prque[int64, common.Hash] // Priority queue mapping block numbers to tries to gc
+	gcproc                time.Duration                    // Accumulates canonical block processing for trie dumping
+	lastWrite             uint64                           // Last block when the state was flushed
+	flushInterval         atomic.Int64                     // Time interval (processing time) after which to flush a state
+	triedb                *triedb.Database                 // The database handler for maintaining trie nodes.
+	stateCache            state.Database                   // State database to reuse between imports (contains state cache)
+	proofKeeper           *ProofKeeper                     // Store/Query op-proposal proof to ensure consistent.
+	txIndexer             *txIndexer                       // Transaction indexer, might be nil if not enabled
+	stateRecoveringStatus atomic.Bool
 
 	hc            *HeaderChain
 	rmLogsFeed    event.Feed
@@ -2223,11 +2224,25 @@ func (bc *BlockChain) insertSideChain(block *types.Block, it *insertIterator) (i
 	return 0, nil
 }
 
+func (bc *BlockChain) RecoverStateAndSetHead(block *types.Block) (common.Hash, error) {
+	return bc.recoverStateAndSetHead(block)
+}
+
 // recoverAncestors finds the closest ancestor with available state and re-execute
 // all the ancestor blocks since that.
 // recoverAncestors is only used post-merge.
 // We return the hash of the latest block that we could correctly validate.
 func (bc *BlockChain) recoverAncestors(block *types.Block) (common.Hash, error) {
+	if bc.stateRecoveringStatus.Load() {
+		log.Warn("recover is already in progress, skipping", "block", block.Hash())
+		return common.Hash{}, errors.New("state recover in progress")
+	}
+
+	bc.stateRecoveringStatus.Store(true)
+	defer func() {
+		bc.stateRecoveringStatus.Store(false)
+	}()
+
 	// Gather all the sidechain hashes (full blocks may be memory heavy)
 	var (
 		hashes  []common.Hash
@@ -2642,6 +2657,55 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header) (int, error) {
 	defer bc.chainmu.Unlock()
 	_, err := bc.hc.InsertHeaderChain(chain, start, bc.forker)
 	return 0, err
+}
+
+// recoverStateAndSetHead attempts to recover the state of the blockchain by re-importing
+// missing blocks and advancing the chain head. It ensures the state is available
+// for the given block and its ancestors before updating the head.
+func (bc *BlockChain) recoverStateAndSetHead(block *types.Block) (common.Hash, error) {
+	var (
+		hashes  []common.Hash
+		numbers []uint64
+		parent  = block
+	)
+	for parent != nil && !bc.HasState(parent.Root()) {
+		if bc.stateRecoverable(parent.Root()) {
+			if err := bc.triedb.Recover(parent.Root()); err != nil {
+				return common.Hash{}, err
+			}
+			break
+		}
+		hashes = append(hashes, parent.Hash())
+		numbers = append(numbers, parent.NumberU64())
+		parent = bc.GetBlock(parent.ParentHash(), parent.NumberU64()-1)
+
+		// If the chain is terminating, stop iteration
+		if bc.insertStopped() {
+			log.Debug("Abort during blocks iteration")
+			return common.Hash{}, errInsertionInterrupted
+		}
+	}
+	if parent == nil {
+		return common.Hash{}, errors.New("missing parent")
+	}
+	// Import all the pruned blocks to make the state available
+	for i := len(hashes) - 1; i >= 0; i-- {
+		// If the chain is terminating, stop processing blocks
+		if bc.insertStopped() {
+			log.Debug("Abort during blocks processing")
+			return common.Hash{}, errInsertionInterrupted
+		}
+		var b *types.Block
+		if i == 0 {
+			b = block
+		} else {
+			b = bc.GetBlock(hashes[i], numbers[i])
+		}
+		if _, err := bc.insertChain(types.Blocks{b}, true); err != nil {
+			return b.ParentHash(), err
+		}
+	}
+	return block.Hash(), nil
 }
 
 // SetBlockValidatorAndProcessorForTesting sets the current validator and processor.

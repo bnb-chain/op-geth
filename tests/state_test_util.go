@@ -450,6 +450,8 @@ func MakePreState(db ethdb.Database, accounts types.GenesisAlloc, snapshotter bo
 		tconf.HashDB = hashdb.Defaults
 	} else {
 		tconf.PathDB = pathdb.Defaults
+		tconf.PathDB.TrieNodeBufferType = pathdb.AsyncNodeBuffer
+		// tconf.PathDB.UseBase = true
 	}
 	triedb := triedb.NewDatabase(db, tconf)
 	sdb := state.NewDatabaseWithNodeDB(db, triedb)

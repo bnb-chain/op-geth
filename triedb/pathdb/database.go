@@ -180,6 +180,7 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 		diskdb:     diskdb,
 		useBase:    config.UseBase,
 	}
+	fmt.Println("useBase", db.useBase)
 
 	// Open the freezer for state history if the passed database contains an
 	// ancient store. Otherwise, all the relevant functionalities are disabled.

@@ -111,110 +111,90 @@ func newNodeBufferList(
 	if nodes == nil {
 		nodes = make(map[common.Hash]map[string]*trienode.Node)
 	}
-	var size uint64
-	for _, subset := range nodes {
-		for path, n := range subset {
-			size += uint64(len(n.Blob) + len(path))
-		}
-	}
-	base := newMultiDifflayer(limit, size, common.Hash{}, nodes, layers)
 
-	var (
-		nf  *nodebufferlist
-		err error
-	)
-	if !useBase && fastRecovery {
-		nf, err = recoverNodeBufferList(db, freezer, base, limit, wpBlocks, rsevMdNum, dlInMd)
-		if err != nil {
-			log.Error("Failed to recover node buffer list", "error", err)
-			return nil, err
-		}
-	} else {
-		ele := newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
-		nf = &nodebufferlist{
-			db:              db,
-			wpBlocks:        wpBlocks,
-			rsevMdNum:       rsevMdNum,
-			dlInMd:          dlInMd,
-			limit:           limit,
-			base:            base,
-			head:            ele,
-			tail:            ele,
-			count:           1,
-			persistID:       rawdb.ReadPersistentStateID(db),
-			stopCh:          make(chan struct{}),
-			waitStopCh:      make(chan struct{}),
-			forceKeepCh:     make(chan struct{}),
-			waitForceKeepCh: make(chan struct{}),
-			keepFunc:        keepFunc,
-		}
-		nf.useBase.Store(useBase)
-	}
-
-	go nf.loop()
-
-	log.Info("new node buffer list", "proposed block interval", nf.wpBlocks,
-		"reserve multi difflayers", nf.rsevMdNum, "difflayers in multidifflayer", nf.dlInMd,
-		"limit", common.StorageSize(limit), "layers", layers, "persist id", nf.persistID, "base_size", size)
-	return nf, nil
-}
-
-// recoverNodeBufferList recovers node buffer list
-func recoverNodeBufferList(db ethdb.Database, freezer *rawdb.ResettableFreezer, base *multiDifflayer,
-	limit, wpBlocks, rsevMdNum, dlInMd uint64) (*nodebufferlist, error) {
-	nbl := &nodebufferlist{
+	nf := &nodebufferlist{
 		db:              db,
 		wpBlocks:        wpBlocks,
 		rsevMdNum:       rsevMdNum,
 		dlInMd:          dlInMd,
 		limit:           limit,
-		base:            base,
+		base:            newMultiDifflayer(limit, 0, common.Hash{}, nodes, 0),
 		persistID:       rawdb.ReadPersistentStateID(db),
 		stopCh:          make(chan struct{}),
 		waitStopCh:      make(chan struct{}),
 		forceKeepCh:     make(chan struct{}),
 		waitForceKeepCh: make(chan struct{}),
+		keepFunc:        keepFunc,
 	}
+
+	if !useBase && fastRecovery {
+		if freezer == nil {
+			log.Crit("Use unopened freezer db to recover node buffer list")
+		}
+
+		if err := nf.recoverNodeBufferList(freezer); err != nil {
+			log.Error("Failed to recover node buffer list", "error", err)
+			return nil, err
+		}
+	} else {
+		ele := newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0)
+		nf.head = ele
+		nf.tail = ele
+		nf.count = 1
+	}
+	nf.useBase.Store(useBase)
+
+	go nf.loop()
+
+	log.Info("new node buffer list", "proposed block interval", nf.wpBlocks,
+		"reserve multi diff_layers", nf.rsevMdNum, "diff_layers in multi_diff_layer", nf.dlInMd,
+		"limit", common.StorageSize(limit), "layers", layers, "persist_id", nf.persistID, "base_size", nf.size)
+	return nf, nil
+}
+
+// recoverNodeBufferList recovers node buffer list
+func (nf *nodebufferlist) recoverNodeBufferList(freezer *rawdb.ResettableFreezer) error {
 	head, err := freezer.Ancients()
 	if err != nil {
 		log.Error("Failed to get freezer ancients", "error", err)
-		return nil, err
+		return err
 	}
 	tail, err := freezer.Tail()
 	if err != nil {
 		log.Error("Failed to get freezer tail", "error", err)
-		return nil, err
+		return err
 	}
-	log.Info("Ancient db meta info", "persistent_state_id", nbl.persistID, "head_state_id", head,
-		"tail_state_id", tail, "waiting_recover_num", head-nbl.persistID)
+	fmt.Println()
+	log.Info("Ancient db meta info", "persistent_state_id", nf.persistID, "head_state_id", head,
+		"tail_state_id", tail, "waiting_recover_num", head-nf.persistID)
 
-	startStateID := nbl.persistID + 1
+	startStateID := nf.persistID + 1
 	startBlock, err := readBlockNumber(freezer, startStateID)
 	if err != nil {
 		log.Error("Failed to read start block number", "error", err, "tail_state_id", startStateID)
-		return nil, err
+		return err
 	}
 	endBlock, err := readBlockNumber(freezer, head)
 	if err != nil {
 		log.Error("Failed to read end block number", "error", err, "head_state_id", head)
-		return nil, err
+		return err
 	}
-	blockIntervals := nbl.createBlockInterval(startBlock, endBlock)
-	stateIntervals, err := nbl.createStateInterval(freezer, startStateID, head, blockIntervals)
+	blockIntervals := nf.createBlockInterval(startBlock, endBlock)
+	stateIntervals, err := nf.createStateInterval(freezer, startStateID, head, blockIntervals)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	log.Info("block intervals info", "blockIntervals", blockIntervals, "stateIntervals", stateIntervals,
-		"startBlock", startBlock, "endBlock", endBlock)
+	log.Info("block intervals info", "block_intervals", blockIntervals, "state_intervals", stateIntervals,
+		"start_block", startBlock, "end_block", endBlock)
 
 	var eg errgroup.Group
-	nbl.linkMultiDiffLayers(len(blockIntervals))
-	for current, i := nbl.head, 0; current != nil; current, i = current.next, i+1 {
+	nf.linkMultiDiffLayers(len(blockIntervals))
+	for current, i := nf.head, 0; current != nil; current, i = current.next, i+1 {
 		index := i
 		mdl := current
 		eg.Go(func() error {
 			for j := stateIntervals[index][0]; j <= stateIntervals[index][1]; j++ {
-				h, err := nbl.readStateHistory(freezer, j)
+				h, err := nf.readStateHistory(freezer, j)
 				if err != nil {
 					log.Error("Failed to read state history", "error", err)
 					return err
@@ -228,18 +208,18 @@ func recoverNodeBufferList(db ethdb.Database, freezer *rawdb.ResettableFreezer, 
 		})
 	}
 	if err = eg.Wait(); err != nil {
-		return nil, err
+		return err
 	}
 
-	for current, i := nbl.head, 0; current != nil; current, i = current.next, i+1 {
-		nbl.size += current.size
-		nbl.layers += current.layers
+	for current, i := nf.head, 0; current != nil; current, i = current.next, i+1 {
+		nf.size += current.size
+		nf.layers += current.layers
 	}
-	nbl.diffToBase()
+	nf.diffToBase()
 
-	log.Info("Succeed to add diff layer", "base_size", nbl.base.size, "tail_state_id", nbl.tail.id,
-		"head_state_id", nbl.head.id, "nbl_layers", nbl.layers, "base_layers", nbl.base.layers)
-	return nbl, nil
+	log.Info("Succeed to add diff layer", "base_size", nf.base.size, "tail_state_id", nf.tail.id,
+		"head_state_id", nf.head.id, "nbl_layers", nf.layers, "base_layers", nf.base.layers)
+	return nil
 }
 
 // linkMultiDiffLayers links specified amount of multiDiffLayers for recovering

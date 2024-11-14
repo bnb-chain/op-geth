@@ -1978,10 +1978,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if bc.vmConfig.EnableParallelExec {
 				bc.parseTxDAG(block)
 			}
-			if !bc.vmConfig.EnableParallelExec || (bc.vmConfig.TxDAG == nil && bc.vmConfig.EnableParallelUnorderedMerge) {
-				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
-			} else {
+			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge {
 				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
+			} else {
+				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
 			}
 			if err != nil {
 				return it.index, err

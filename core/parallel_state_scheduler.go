@@ -144,6 +144,45 @@ func (cq *confirmQueue) confirmWithUnordered(level TxLevel, execute func(*PEVMTx
 	return nil, 0
 }
 
+func (cq *confirmQueue) confirmParallel(levels []TxLevel, confirm func(*PEVMTxResult) error) (error, int) {
+	var wg sync.WaitGroup
+	wg.Add(len(levels))
+	errs := make(chan []interface{}, len(levels))
+	for _, txs := range levels {
+		temp := txs
+		run := func() {
+			defer wg.Done()
+			for _, tx := range temp {
+				toConfirm := cq.queue[tx.txIndex]
+				if toConfirm.result == nil {
+					log.Warn("transaction should be executed, not result in queue", "index", tx.txIndex)
+					errs <- []interface{}{fmt.Errorf("transaction should be executed, not result in queue, index %d", tx.txIndex), tx.txIndex}
+					return
+				}
+				if toConfirm.executed != nil {
+					log.Error("transaction execute fail! we can not do parallel merge here", "err", toConfirm.executed, "index", tx.txIndex)
+					errs <- []interface{}{toConfirm.executed, tx.txIndex}
+					return
+				}
+				if err := confirm(toConfirm.result); err != nil {
+					log.Error("parallel merge fail!", "err", err, "index", tx.txIndex)
+					errs <- []interface{}{err, tx.txIndex}
+					return
+				}
+			}
+		}
+		runner <- run
+	}
+	go func() {
+		wg.Wait()
+		close(errs)
+	}()
+	for err := range errs {
+		return err[0].(error), err[1].(int)
+	}
+	return nil, 0
+}
+
 // try to confirm txs as much as possible, they will be confirmed in a sequencial order.
 func (cq *confirmQueue) confirm(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error) (error, int) {
 	// find all able-to-confirm transactions, and try to confirm them
@@ -200,7 +239,7 @@ var goMaxProcs = runtime.GOMAXPROCS(0)
 
 // run runs the transactions in parallel
 // execute must return a non-nil result, otherwise it panics.
-func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error, unorderedMerge bool) (error, int) {
+func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func(*PEVMTxResult) error, unorderedMerge bool, parallelMerge bool) (error, int) {
 	toConfirm := &confirmQueue{
 		queue:     make([]confirmation, tls.txCount()),
 		confirmed: -1,
@@ -238,7 +277,11 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 		totalExecutionTime += time.Since(start).Nanoseconds()
 		start = time.Now()
 		// all transactions of current level are executed, now try to confirm.
-		if unorderedMerge {
+		if parallelMerge {
+			if err, txIndex := toConfirm.confirmParallel(trunks, confirm); err != nil {
+				return err, txIndex
+			}
+		} else if unorderedMerge {
 			if err, txIndex := toConfirm.confirmWithUnordered(txLevel, execute, confirm); err != nil {
 				// something very wrong, stop the process
 				return err, txIndex

@@ -69,16 +69,19 @@ type UncommittedDB struct {
 
 	journal ujournal
 
-	maindb StateDBer
+	maindb               StateDBer
+	isMainDBIsParallelDB bool
 }
 
 func NewUncommittedDB(maindb StateDBer) *UncommittedDB {
+	_, ok := maindb.(*ParallelStateDB)
 	return &UncommittedDB{
-		accessList:       newAccessList(),
-		transientStorage: newTransientStorage(),
-		maindb:           maindb,
-		reads:            make(reads),
-		cache:            make(writes),
+		accessList:           newAccessList(),
+		transientStorage:     newTransientStorage(),
+		maindb:               maindb,
+		reads:                make(reads),
+		cache:                make(writes),
+		isMainDBIsParallelDB: ok,
 	}
 }
 
@@ -538,7 +541,11 @@ func (pst *UncommittedDB) Merge(deleteEmptyObjects bool) error {
 	}
 	// 4. merge object states
 	for _, log := range pst.logs {
-		pst.maindb.AddLog(log)
+		if pst.isMainDBIsParallelDB {
+			pst.maindb.(*ParallelStateDB).AddLogWithTx(log, pst.txHash, uint(pst.txIndex))
+		} else {
+			pst.maindb.AddLog(log)
+		}
 	}
 	// 5. merge refund
 	if pst.refund != 0 {
@@ -1290,7 +1297,7 @@ func (p *ParallelStateDB) RevertToSnapshot(revid int) {
 }
 
 func (p *ParallelStateDB) Snapshot() int {
-	panic("ParallelStateDB not support get snapshot")
+	return 0
 }
 
 func (p *ParallelStateDB) AddLog(log *types.Log) {
@@ -1710,7 +1717,11 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 					accountsOriginMap := make(map[common.Address][]byte)
 					storagesOriginMap := make(map[common.Address]map[common.Hash][]byte)
 					p.accountsOrigin.Range(func(key, value interface{}) bool {
-						accountsOriginMap[key.(common.Address)] = value.([]byte)
+						if value != nil {
+							accountsOriginMap[key.(common.Address)] = value.([]byte)
+						} else {
+							accountsOriginMap[key.(common.Address)] = nil
+						}
 						return true
 					})
 					p.storagesOrigin.Range(func(key, value interface{}) bool {
@@ -2271,7 +2282,7 @@ func (p *ParallelStateDB) updateStateObject(obj *stateObject) {
 
 func (p *ParallelStateDB) appendJournal(journalEntry journalEntry) {
 	if journalEntry.dirtied() != nil {
-		p.stateObjectsDirty.Store(journalEntry.dirtied(), struct{}{})
+		p.stateObjectsDirty.Store(*journalEntry.dirtied(), struct{}{})
 	}
 }
 

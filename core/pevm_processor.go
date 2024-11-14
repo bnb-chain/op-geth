@@ -27,12 +27,14 @@ type PEVMProcessor struct {
 	receipts             types.Receipts
 	debugConflictRedoNum uint64
 	unorderedMerge       bool
+	parallelMerge        bool
 }
 
 func newPEVMProcessor(config *params.ChainConfig, bc *BlockChain, engine consensus.Engine) *PEVMProcessor {
 	processor := &PEVMProcessor{
 		StateProcessor: *NewStateProcessor(config, bc, engine),
 		unorderedMerge: bc.vmConfig.EnableParallelUnorderedMerge,
+		parallelMerge:  bc.vmConfig.EnableTxParallelMerge,
 	}
 	initParallelRunner(bc.vmConfig.ParallelTxNum)
 	if bc.vmConfig.ParallelThreshold == 0 {
@@ -128,7 +130,7 @@ func (p *PEVMProcessor) executeInSlot(maindb state.StateDBer, txReq *PEVMTxReque
 // if it is in Stage 2 it is a likely result, not 100% sure
 func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult) error {
 	txReq := txResult.txReq
-	if !p.unorderedMerge {
+	if !txReq.useDAG || (!p.unorderedMerge && !p.parallelMerge) {
 		// If we do not use a DAG, then we need to check for conflicts to ensure correct execution.
 		// When we perform an unordered merge, we cannot conduct conflict checks
 		// and can only choose to trust that the DAG is correct and that conflicts do not exist.
@@ -284,7 +286,7 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 		}(time.Now())
 		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr)
-	}, p.unorderedMerge)
+	}, p.unorderedMerge, p.parallelMerge && txDAG != nil)
 	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
 		tx := allTxs[txIndex]

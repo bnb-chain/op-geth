@@ -1936,9 +1936,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			statedb.SetExpectedStateRoot(block.Root())
 
+			// Decide the enabling of parallelExec
+			invalidParallelConfig := bc.vmConfig.TxDAG == nil && bc.vmConfig.EnableParallelUnorderedMerge
+			lowTxsNum := bc.vmConfig.ParallelTxNum < block.Transactions().Len()
+			useSerialProcessor := invalidParallelConfig || lowTxsNum || !bc.vmConfig.EnableParallelExec
+
 			// Process block using the parent state as reference point
 			pstart = time.Now()
-			if bc.vmConfig.TxDAG == nil && bc.vmConfig.EnableParallelUnorderedMerge {
+
+			if useSerialProcessor {
 				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
 			} else {
 				receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)

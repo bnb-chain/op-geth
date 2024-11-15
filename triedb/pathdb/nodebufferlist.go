@@ -108,17 +108,13 @@ func newNodeBufferList(
 		dlInMd = wpBlocks
 	}
 
-	if nodes == nil {
-		nodes = make(map[common.Hash]map[string]*trienode.Node)
-	}
-
 	nf := &nodebufferlist{
 		db:              db,
 		wpBlocks:        wpBlocks,
 		rsevMdNum:       rsevMdNum,
 		dlInMd:          dlInMd,
 		limit:           limit,
-		base:            newMultiDifflayer(limit, 0, common.Hash{}, nodes, 0),
+		base:            newMultiDifflayer(limit, 0, common.Hash{}, make(map[common.Hash]map[string]*trienode.Node), 0),
 		persistID:       rawdb.ReadPersistentStateID(db),
 		stopCh:          make(chan struct{}),
 		waitStopCh:      make(chan struct{}),
@@ -127,6 +123,7 @@ func newNodeBufferList(
 		keepFunc:        keepFunc,
 	}
 
+	fmt.Println("useBase, fastRecovery", useBase, fastRecovery)
 	if !useBase && fastRecovery {
 		if freezer == nil {
 			log.Crit("Use unopened freezer db to recover node buffer list")
@@ -164,7 +161,6 @@ func (nf *nodebufferlist) recoverNodeBufferList(freezer *rawdb.ResettableFreezer
 		log.Error("Failed to get freezer tail", "error", err)
 		return err
 	}
-	fmt.Println()
 	log.Info("Ancient db meta info", "persistent_state_id", nf.persistID, "head_state_id", head,
 		"tail_state_id", tail, "waiting_recover_num", head-nf.persistID)
 
@@ -841,8 +837,8 @@ func (nf *nodebufferlist) proposedBlockReader(blockRoot common.Hash) (layer, err
 func (nf *nodebufferlist) report() {
 	context := []interface{}{
 		"number", nf.block, "count", nf.count, "layers", nf.layers,
-		"stateid", nf.stateId, "persist", nf.persistID, "size", common.StorageSize(nf.size),
-		"basesize", common.StorageSize(nf.base.size), "baselayers", nf.base.layers,
+		"state_id", nf.stateId, "persist", nf.persistID, "size", common.StorageSize(nf.size),
+		"base_size", common.StorageSize(nf.base.size), "base_layers", nf.base.layers,
 	}
 	log.Info("node buffer list info", context...)
 }

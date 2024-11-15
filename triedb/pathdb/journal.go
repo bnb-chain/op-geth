@@ -250,13 +250,12 @@ func (db *Database) loadLayers() layer {
 	_, root := rawdb.ReadAccountTrieNode(db.diskdb, nil)
 	root = types.TrieRootHash(root)
 
+	fmt.Println("1 useBase, fastRecovery", db.useBase, db.fastRecovery)
 	// Load the layers by resolving the journal
 	head, err := db.loadJournal(root)
 	if err == nil {
 		return head
 	}
-	fmt.Println("load layers error: ", err)
-	log.Error("print load journal error", "error", err)
 	// journal is not matched(or missing) with the persistent state, discard
 	// it. Display log for discarding journal, but try to avoid showing
 	// useless information when the db is created from scratch.
@@ -270,10 +269,9 @@ func (db *Database) loadLayers() layer {
 		stateID = rawdb.ReadPersistentStateID(db.diskdb)
 	)
 
-	fmt.Println("use base: ", db.useBase)
+	fmt.Println("2 useBase, fastRecovery", db.useBase, db.fastRecovery)
 	if (errors.Is(err, errMissJournal) || errors.Is(err, errUnmatchedJournal)) && db.fastRecovery &&
 		db.config.TrieNodeBufferType == NodeBufferList && !db.useBase {
-		fmt.Println("3j3erj321")
 		start := time.Now()
 		log.Info("Recover node buffer list from ancient db")
 
@@ -288,7 +286,6 @@ func (db *Database) loadLayers() layer {
 		}
 	}
 	if nb == nil || err != nil {
-		fmt.Println("r23k9321k9")
 		// Return single layer with persistent state.
 		nb, err = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
 			db.config.ProposeBlockInterval, db.config.NotifyKeep, nil, false, db.useBase)
@@ -365,6 +362,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 		}
 	}
 
+	fmt.Println("3 useBase, fastRecovery", db.useBase, db.fastRecovery)
 	// Calculate the internal state transitions by id difference.
 	nb, err := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval,
 		db.config.NotifyKeep, db.freezer, db.fastRecovery, db.useBase)
@@ -373,13 +371,10 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 		return nil, err
 	}
 
-	fmt.Println("111")
 	if db.config.TrieNodeBufferType == NodeBufferList && !db.useBase {
-		fmt.Println("222")
 		recoveredRoot, recoveredStateID, _ := nb.getLatestStatus()
 		if recoveredRoot != root && recoveredStateID != id {
 			log.Error("unequal state root and state id")
-			fmt.Println("recoveredRoot, root, recoveredStateID, id", recoveredRoot, root, recoveredStateID, id)
 			return nil, errors.New("Unmatched root and state id with recovered")
 		}
 

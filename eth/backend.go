@@ -40,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state/pruner"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/txpool/blobpool"
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"github.com/ethereum/go-ethereum/core/txpool/legacypool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -134,6 +135,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.Miner.GasPrice = new(big.Int).Set(ethconfig.Defaults.Miner.GasPrice)
 	}
 
+	// Assemble the Ethereum object
+	chainDb, err := stack.OpenAndMergeDatabase("chaindata", ChainDBNamespace, false, config.DatabaseCache, config.DatabaseHandles,
+		config.DatabaseFreezer)
+	if err != nil {
+		return nil, err
+	}
+	config.StateScheme, err = rawdb.ParseStateScheme(config.StateScheme, chainDb)
+	if err != nil {
+		return nil, err
+	}
+
 	if config.StateScheme == rawdb.HashScheme && config.NoPruning && config.TrieDirtyCache > 0 {
 		if config.SnapshotCache > 0 {
 			config.TrieCleanCache += config.TrieDirtyCache * 3 / 5
@@ -153,21 +165,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		config.TrieCleanCache += config.TrieDirtyCache - pathdb.MaxBufferSize/1024/1024
 		config.TrieDirtyCache = pathdb.MaxBufferSize / 1024 / 1024
 	}
-	log.Info("Allocated memory caches",
-		"state_scheme", config.StateScheme,
+	log.Info("Allocated memory caches", "state_scheme", config.StateScheme,
 		"trie_clean_cache", common.StorageSize(config.TrieCleanCache)*1024*1024,
 		"trie_dirty_cache", common.StorageSize(config.TrieDirtyCache)*1024*1024,
 		"snapshot_cache", common.StorageSize(config.SnapshotCache)*1024*1024)
-	// Assemble the Ethereum object
-	chainDb, err := stack.OpenAndMergeDatabase("chaindata", ChainDBNamespace, false, config.DatabaseCache, config.DatabaseHandles,
-		config.DatabaseFreezer)
-	if err != nil {
-		return nil, err
-	}
-	config.StateScheme, err = rawdb.ParseStateScheme(config.StateScheme, chainDb)
-	if err != nil {
-		return nil, err
-	}
+
 	// Try to recover offline state pruning only in hash-based.
 	if config.StateScheme == rawdb.HashScheme {
 		if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb); err != nil {

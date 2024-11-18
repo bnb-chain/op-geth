@@ -319,7 +319,6 @@ func (t *tester) verifyState(root common.Hash) error {
 	}
 	_, err = reader.Node(common.Hash{}, nil, root)
 	if err != nil {
-		fmt.Println("error: ", err)
 		return errors.New("root node is not available")
 	}
 	for addrHash, account := range t.snapAccounts[root] {
@@ -460,7 +459,6 @@ func TestDisable(t *testing.T) {
 		t.Fatalf("Invalid activation should be rejected")
 	}
 	if err := tester.db.Enable(stored); err != nil {
-		fmt.Println(err)
 		t.Fatal("Failed to activate database")
 	}
 

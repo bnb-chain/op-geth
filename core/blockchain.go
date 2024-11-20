@@ -539,6 +539,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		log.Info("Parallel V2 enabled", "parallelNum", ParallelNum())
 	} else {
 		bc.processor = NewStateProcessor(chainConfig, bc, engine)
+		bc.serialProcessor = bc.processor
 	}
 	// Start future block processor.
 	bc.wg.Add(1)

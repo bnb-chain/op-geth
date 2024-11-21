@@ -36,7 +36,7 @@ func newPEVMProcessor(config *params.ChainConfig, bc *BlockChain, engine consens
 	}
 	initParallelRunner(bc.vmConfig.ParallelTxNum)
 	if bc.vmConfig.ParallelThreshold == 0 {
-		bc.vmConfig.ParallelThreshold = bc.vmConfig.ParallelTxNum
+		bc.vmConfig.ParallelThreshold = ParallelNum()
 	}
 	log.Info("Parallel execution mode is enabled", "Parallel Num", ParallelNum(),
 		"CPUNum", runtime.GOMAXPROCS(0), "unorderedMerge", processor.unorderedMerge,

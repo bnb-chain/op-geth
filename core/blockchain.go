@@ -1939,7 +1939,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Decide the enabling of parallelExec
 			invalidParallelConfig := bc.vmConfig.TxDAG == nil && bc.vmConfig.EnableParallelUnorderedMerge
-			lowTxsNum := bc.vmConfig.ParallelTxNum < block.Transactions().Len()
+			lowTxsNum := bc.vmConfig.ParallelThreshold >= block.Transactions().Len()
 			useSerialProcessor := invalidParallelConfig || lowTxsNum || !bc.vmConfig.EnableParallelExec
 
 			// Process block using the parent state as reference point

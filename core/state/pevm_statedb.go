@@ -1059,13 +1059,14 @@ type ParallelStateDB struct {
 	StorageDeleted int
 
 	// Testing hooks
-	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
+	onCommit       func(states *triestate.Set) // Hook invoked when commit is performed
+	coinbase       common.Address
+	gasFeeAddrLock sync.Mutex
 }
 
 // NewParallel creates a new parallel statedb
-func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree) (*ParallelStateDB, error) {
+func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree, coinbase common.Address) (*ParallelStateDB, error) {
 	tr, err := db.OpenTrie(root)
-
 	if err != nil {
 		return nil, err
 	}
@@ -1077,6 +1078,7 @@ func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree) (*Parallel
 		accessList:   newAccessList(),
 		hasher:       crypto.NewKeccakState(),
 		stateObjects: &StateObjectSyncMap{},
+		coinbase:     coinbase,
 	}
 	if sdb.snaps != nil {
 		sdb.snap = sdb.snaps.Snapshot(root)
@@ -1119,6 +1121,10 @@ func (p *ParallelStateDB) SubBalance(addr common.Address, amount *uint256.Int) {
 }
 
 func (p *ParallelStateDB) AddBalance(addr common.Address, amount *uint256.Int) {
+	if addr == p.coinbase || addr == params.OptimismL1FeeRecipient || addr == params.OptimismBaseFeeRecipient {
+		p.gasFeeAddrLock.Lock()
+		defer p.gasFeeAddrLock.Unlock()
+	}
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.AddBalance(amount)
@@ -1339,20 +1345,24 @@ func (p *ParallelStateDB) FinaliseRWSet() error {
 }
 
 func (p *ParallelStateDB) getDeletedStateObject(addr common.Address) *stateObject {
-
-	// Prefer live objects if any is available
-	if obj, _ := p.getStateObjectFromStateObjects(addr); obj != nil {
-		return obj
+	for {
+		// Prefer live objects if any is available
+		if obj, _ := p.getStateObjectFromStateObjects(addr); obj != nil {
+			return obj
+		}
+		data, ok := p.getStateObjectFromSnapshotOrTrie(addr)
+		if !ok {
+			return nil
+		}
+		// Insert into the live set
+		obj := newObject(p, true, addr, data)
+		setSuccess := p.setStateObjectIfEmpty(obj)
+		if setSuccess {
+			return obj
+		} else {
+			continue
+		}
 	}
-
-	data, ok := p.getStateObjectFromSnapshotOrTrie(addr)
-	if !ok {
-		return nil
-	}
-	// Insert into the live set
-	obj := newObject(p, true, addr, data)
-	p.setStateObject(obj)
-	return obj
 }
 
 func (p *ParallelStateDB) getStateObjectFromStateObjects(addr common.Address) (*stateObject, bool) {
@@ -1869,6 +1879,7 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 		return true
 	})
 	p.stateObjectsDestructDirty = sync.Map{}
+
 	p.stateObjectsDirty.Range(func(key, value interface{}) bool {
 		addr := key.(common.Address)
 		obj, exist := p.getStateObjectFromStateObjects(addr)
@@ -1974,6 +1985,7 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 	// _untouched_. We can check with the prefetcher, if it can give us a trie
 	// which has the same root, but also has some content loaded into it.
 	// The parallel execution do the change incrementally, so can not check the prefetcher here
+	p.trieParallelLock.Lock()
 	if p.trie == nil {
 		tr, err := p.db.OpenTrie(p.originalRoot)
 		if err != nil {
@@ -1981,6 +1993,7 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 		}
 		p.trie = tr
 	}
+	p.trieParallelLock.Unlock()
 
 	usedAddrs := make([][]byte, 0)
 
@@ -1999,8 +2012,8 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 	// parallel slotDB trie will be updated to mainDB since intermediateRoot happens after conflict check.
 	// so it should be save to clear pending here.
 	// otherwise there can be a case that the deleted object get ignored and processes as live object in verify phase.
-
 	p.stateObjectsPending = sync.Map{}
+
 	// Track the amount of time wasted on hashing the account trie
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) { p.AccountHashes += time.Since(start) }(time.Now())
@@ -2376,4 +2389,9 @@ func (p *ParallelStateDB) timeAddStorageHashes(du time.Duration) {
 
 func (p *ParallelStateDB) timeAddStorageCommits(du time.Duration) {
 	p.StorageCommits += du
+}
+
+func (p *ParallelStateDB) setStateObjectIfEmpty(obj *stateObject) bool {
+	_, loaded := p.stateObjects.LoadOrStore(obj.address, obj)
+	return !loaded
 }

@@ -61,7 +61,7 @@ type PEVMTxRequest struct {
 	msg         *Message
 	block       *types.Block
 	vmConfig    vm.Config
-	usedGas     *uint64
+	usedGas     *atomic.Uint64
 	useDAG      bool
 	value       int // only for unit test
 }
@@ -124,9 +124,9 @@ func (p *PEVMProcessor) executeInSlot(maindb state.StateDBer, txReq *PEVMTxReque
 
 // to confirm one txResult, return true if the result is valid
 // if it is in Stage 2 it is a likely result, not 100% sure
-func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult) error {
+func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult, enableParallelMerge bool) error {
 	txReq := txResult.txReq
-	if !txReq.useDAG || (!p.unorderedMerge && !p.parallelMerge) {
+	if !txReq.useDAG || (!p.unorderedMerge && !enableParallelMerge) {
 		// If we do not use a DAG, then we need to check for conflicts to ensure correct execution.
 		// When we perform an unordered merge, we cannot conduct conflict checks
 		// and can only choose to trust that the DAG is correct and that conflicts do not exist.
@@ -152,8 +152,8 @@ func (p *PEVMProcessor) toConfirmTxIndexResult(txResult *PEVMTxResult) error {
 }
 
 // wait until the next Tx is executed and its result is merged to the main stateDB
-func (p *PEVMProcessor) confirmTxResult(statedb state.StateDBer, gp *ParallelGasPool, result *PEVMTxResult) error {
-	checkErr := p.toConfirmTxIndexResult(result)
+func (p *PEVMProcessor) confirmTxResult(statedb state.StateDBer, gp *ParallelGasPool, result *PEVMTxResult, enableParallelMerge bool) error {
+	checkErr := p.toConfirmTxIndexResult(result, enableParallelMerge)
 	// ok, the tx result is valid and can be merged
 	if checkErr != nil {
 		return checkErr
@@ -165,7 +165,6 @@ func (p *PEVMProcessor) confirmTxResult(statedb state.StateDBer, gp *ParallelGas
 		return fmt.Errorf("gas limit reached")
 	}
 
-	var root []byte
 	header := result.txReq.block.Header()
 
 	isByzantium := p.config.IsByzantium(header.Number)
@@ -189,13 +188,16 @@ func (p *PEVMProcessor) confirmTxResult(statedb state.StateDBer, gp *ParallelGas
 			statedb.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
 		}
 	}
-	result.slotDB.Finalise(isByzantium || isEIP158)
+	if !enableParallelMerge {
+		var root []byte
+		result.slotDB.Finalise(isByzantium || isEIP158)
 
-	// Do IntermediateRoot after mergeSlotDB.
-	if !isByzantium {
-		root = statedb.IntermediateRoot(isEIP158).Bytes()
+		// Do IntermediateRoot after mergeSlotDB.
+		if !isByzantium {
+			root = statedb.IntermediateRoot(isEIP158).Bytes()
+		}
+		result.receipt.PostState = root
 	}
-	result.receipt.PostState = root
 	p.receipts[result.txReq.txIndex] = result.receipt
 	p.commonTxs[result.txReq.txIndex] = result.txReq.tx
 	return nil
@@ -204,7 +206,7 @@ func (p *PEVMProcessor) confirmTxResult(statedb state.StateDBer, gp *ParallelGas
 // Process implements BEP-130 Parallel Transaction Execution
 func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
 	var (
-		usedGas = new(uint64)
+		usedGas = atomic.Uint64{}
 		header  = block.Header()
 		gp      = new(ParallelGasPool).AddGas(block.GasLimit())
 	)
@@ -250,7 +252,7 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 			gasLimit:    block.GasLimit(), // gp.Gas().
 			block:       block,
 			vmConfig:    cfg,
-			usedGas:     usedGas,
+			usedGas:     &usedGas,
 			useDAG:      txDAG != nil,
 		}
 		p.allTxReqs[i] = txReq
@@ -266,6 +268,9 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 	log.Debug("txLevels size", "txLevels size", len(txLevels))
 	parallelTxLevelsSizeMeter.Update(int64(len(txLevels)))
 	buildLevelsDuration := time.Since(start)
+
+	_, ok := statedb.(*state.ParallelStateDB)
+	enableParallelMerge := p.parallelMerge && ok && txDAG != nil
 	var executeDurations, confirmDurations int64 = 0, 0
 	err, txIndex := txLevels.Run(func(pr *PEVMTxRequest) (res *PEVMTxResult) {
 		defer func(t0 time.Time) {
@@ -281,8 +286,14 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 			atomic.AddInt64(&confirmDurations, time.Since(t0).Nanoseconds())
 		}(time.Now())
 		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
-		return p.confirmTxResult(statedb, gp, pr)
-	}, p.unorderedMerge, p.parallelMerge && txDAG != nil)
+		return p.confirmTxResult(statedb, gp, pr, enableParallelMerge)
+	}, func() (err error) {
+		defer func(t0 time.Time) {
+			atomic.AddInt64(&confirmDurations, time.Since(t0).Nanoseconds())
+		}(time.Now())
+		log.Debug("after parallel confirm")
+		return p.afterParallelConfirm(statedb, block.Header())
+	}, p.unorderedMerge, enableParallelMerge)
 	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
 		tx := allTxs[txIndex]
@@ -299,7 +310,7 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 	}
 	pevmBuildLevelsTimer.Update(buildLevelsDuration)
 	pevmRunTimer.Update(parallelRunDuration)
-	log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", *usedGas,
+	log.Info("ProcessParallel tx all done", "block", header.Number, "usedGas", usedGas.Load(),
 		"parallelNum", ParallelNum(),
 		"buildLevelsDuration", buildLevelsDuration,
 		"parallelRunDuration", parallelRunDuration,
@@ -337,7 +348,20 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 		receipt.CumulativeGasUsed = cumulativeGasUsed
 		allLogs = append(allLogs, receipt.Logs...)
 	}
-	return p.receipts, allLogs, *usedGas, nil
+	return p.receipts, allLogs, usedGas.Load(), nil
+}
+
+func (p *PEVMProcessor) afterParallelConfirm(statedb state.StateDBer, header *types.Header) error {
+
+	isByzantium := p.config.IsByzantium(header.Number)
+	if !isByzantium {
+		panic("afterParallelConfirm not support before Byzantium block")
+	}
+	isEIP158 := p.config.IsEIP158(header.Number)
+
+	statedb.Finalise(isByzantium || isEIP158)
+
+	return nil
 }
 
 func buildMessage(txReq *PEVMTxRequest, signer types.Signer, header *types.Header) error {
@@ -376,10 +400,10 @@ func pevmApplyTransactionStageExecution(msg *Message, gp *GasPool, statedb *stat
 	return evm, result, err
 }
 
-func pevmApplyTransactionStageFinalization(evm *vm.EVM, result *ExecutionResult, msg Message, config *params.ChainConfig, statedb *state.UncommittedDB, block *types.Block, tx *types.Transaction, usedGas *uint64, nonce *uint64) (*types.Receipt, error) {
-	*usedGas += result.UsedGas
+func pevmApplyTransactionStageFinalization(evm *vm.EVM, result *ExecutionResult, msg Message, config *params.ChainConfig, statedb *state.UncommittedDB, block *types.Block, tx *types.Transaction, usedGas *atomic.Uint64, nonce *uint64) (*types.Receipt, error) {
+	usedGas.Add(result.UsedGas)
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx.
-	receipt := &types.Receipt{Type: tx.Type(), PostState: nil, CumulativeGasUsed: *usedGas}
+	receipt := &types.Receipt{Type: tx.Type(), PostState: nil, CumulativeGasUsed: usedGas.Load()}
 	if result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
 	} else {

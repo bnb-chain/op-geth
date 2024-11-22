@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"os"
 	"reflect"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -163,6 +164,7 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 	defer chain.Stop()
 	if len(dagFile) > 0 {
 		chain.SetupTxDAGGeneration(dagFile, enableParallel)
+		time.Sleep(100 * time.Millisecond)
 	}
 	validBlocks, err := t.insertBlocks(chain)
 	if err != nil {

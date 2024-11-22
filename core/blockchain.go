@@ -1908,8 +1908,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if bc.vmConfig.EnableParallelExec {
 				bc.parseTxDAG(block)
 			}
-			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge {
-				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
+			isByzantium := bc.chainConfig.IsByzantium(block.Number())
+			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge && isByzantium {
+				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps, block.Coinbase())
 			} else {
 				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
 			}

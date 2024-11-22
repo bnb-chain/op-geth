@@ -1034,7 +1034,7 @@ type ParallelStateDB struct {
 	preimages sync.Map
 
 	// Per-transaction access list
-	accessList *accessList
+	accessList *parallelAccessList
 
 	// Measurements gathered during execution for debugging purposes
 	AccountReads         time.Duration
@@ -1075,7 +1075,7 @@ func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree, coinbase c
 		trie:         tr,
 		originalRoot: root,
 		snaps:        snaps,
-		accessList:   newAccessList(),
+		accessList:   newParallelAccessList(),
 		hasher:       crypto.NewKeccakState(),
 		stateObjects: &StateObjectSyncMap{},
 		coinbase:     coinbase,
@@ -1934,7 +1934,9 @@ func (p *ParallelStateDB) SetTxContext(hash common.Hash, index int) {
 }
 
 func (p *ParallelStateDB) SetAccessList(list *accessList) {
-	p.accessList = list
+	//Do nothing, because after the Berlin hardfork,
+	//the accessList will be cleared before the next transaction execution,
+	//so there is no need for us to set the accessList of the underlying statedb.
 }
 
 func (p *ParallelStateDB) AccountsIntermediateRoot() {

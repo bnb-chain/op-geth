@@ -167,8 +167,8 @@ type stateObject struct {
 
 	// isParallel indicates this state object is used in parallel mode, in which mode the
 	// storage would be sync.Map instead of map
-	isParallel         bool
-	storageRecordsLock sync.RWMutex // for pending/dirty/origin storage read (lightCopy) and write (Intermediate/FixupOrigin)
+	isParallel       bool
+	dirtyStorageLock sync.RWMutex // for pending/dirty/origin storage read (lightCopy) and write (Intermediate/FixupOrigin)
 
 	originStorage  Storage // Storage cache of original entries to dedup rewrites
 	pendingStorage Storage // Storage entries that need to be flushed to disk, at the end of an entire block
@@ -315,10 +315,13 @@ func (s *stateObject) getTrie() (Trie, error) {
 // GetState retrieves a value from the account storage trie.
 func (s *stateObject) GetState(key common.Hash) common.Hash {
 	// If we have a dirty value for this state entry, return it
+	s.dirtyStorageLock.RLock()
 	value, dirty := s.dirtyStorage.GetValue(key)
 	if dirty {
+		s.dirtyStorageLock.RUnlock()
 		return value
 	}
+	s.dirtyStorageLock.RUnlock()
 	// Otherwise return the entry's original value
 	result := s.GetCommittedState(key)
 	// Record first read for conflict verify
@@ -417,14 +420,16 @@ func (s *stateObject) SetState(key, value common.Hash) {
 }
 
 func (s *stateObject) setState(key, value common.Hash) {
+	s.dirtyStorageLock.RLock()
+	defer s.dirtyStorageLock.RUnlock()
 	s.dirtyStorage.StoreValue(key, value)
 }
 
 // finalise moves all dirty storage slots into the pending area to be hashed or
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise(prefetch bool) {
-	s.storageRecordsLock.Lock()
-	defer s.storageRecordsLock.Unlock()
+	s.dirtyStorageLock.Lock()
+	defer s.dirtyStorageLock.Unlock()
 	slotsToPrefetch := make([][]byte, 0, s.dirtyStorage.Length())
 	s.dirtyStorage.Range(func(key, value interface{}) bool {
 		s.pendingStorage.StoreValue(key.(common.Hash), value.(common.Hash))
@@ -458,6 +463,8 @@ func (s *stateObject) finalise(prefetch bool) {
 }
 
 func (s *stateObject) finaliseRWSet() {
+	s.dirtyStorageLock.RLock()
+	defer s.dirtyStorageLock.RUnlock()
 	s.dirtyStorage.Range(func(key, value interface{}) bool {
 		// three are some unclean dirtyStorage from previous reverted txs, it will skip finalise
 		// so add a new rule, if val has no change, then skip it
@@ -712,7 +719,9 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	}
 
 	object.code = s.code
+	s.dirtyStorageLock.RLock()
 	object.dirtyStorage = s.dirtyStorage.Copy()
+	s.dirtyStorageLock.RUnlock()
 	object.originStorage = s.originStorage.Copy()
 	object.pendingStorage = s.pendingStorage.Copy()
 	object.selfDestructed = s.selfDestructed

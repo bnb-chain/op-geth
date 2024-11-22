@@ -148,6 +148,7 @@ func (cq *confirmQueue) confirmParallel(levels []TxLevel, confirm func(*PEVMTxRe
 	var wg sync.WaitGroup
 	wg.Add(len(levels))
 	errs := make(chan []interface{}, len(levels))
+	start := time.Now()
 	for _, txs := range levels {
 		temp := txs
 		run := func() {
@@ -180,10 +181,13 @@ func (cq *confirmQueue) confirmParallel(levels []TxLevel, confirm func(*PEVMTxRe
 	for err := range errs {
 		return err[0].(error), err[1].(int)
 	}
+	parallelConfirmConcurrentTimer.UpdateSince(start)
+	start = time.Now()
 	if err := afterParallelConfirm(); err != nil {
 		log.Error("confirm after parallel merge fail", "err", err)
 		return err, 0
 	}
+	parallelConfirmAfterTimer.UpdateSince(start)
 	return nil, 0
 }
 

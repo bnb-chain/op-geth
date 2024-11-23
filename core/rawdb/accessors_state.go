@@ -224,43 +224,73 @@ func ReadStateStorageHistory(db ethdb.AncientReaderOp, id uint64) []byte {
 	return blob
 }
 
+// ReadStateTrieNodesHistory retrieves the trie nodes corresponding to the specified
+// state history. Compute the position of state history in freezer by minus one
+// since the id of first state history starts from one(zero for initial state).
+func ReadStateTrieNodesHistory(db ethdb.AncientReaderOp, id uint64) []byte {
+	blob, err := db.Ancient(stateHistoryTrieNodesData, id-1)
+	if err != nil {
+		return nil
+	}
+	return blob
+}
+
 // ReadStateHistory retrieves the state history from database with provided id.
 // Compute the position of state history in freezer by minus one since the id
 // of first state history starts from one(zero for initial state).
-func ReadStateHistory(db ethdb.AncientReaderOp, id uint64) ([]byte, []byte, []byte, []byte, []byte, error) {
+func ReadStateHistory(db ethdb.AncientReaderOp, id uint64) ([]byte, []byte, []byte, []byte, []byte, []byte, error) {
 	meta, err := db.Ancient(stateHistoryMeta, id-1)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	accountIndex, err := db.Ancient(stateHistoryAccountIndex, id-1)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	storageIndex, err := db.Ancient(stateHistoryStorageIndex, id-1)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	accountData, err := db.Ancient(stateHistoryAccountData, id-1)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	storageData, err := db.Ancient(stateHistoryStorageData, id-1)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
-	return meta, accountIndex, storageIndex, accountData, storageData, nil
+	trieNodesData, err := db.Ancient(stateHistoryStorageData, id-1)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, err
+	}
+	return meta, accountIndex, storageIndex, accountData, storageData, trieNodesData, nil
 }
 
 // WriteStateHistory writes the provided state history to database. Compute the
 // position of state history in freezer by minus one since the id of first state
 // history starts from one(zero for initial state).
-func WriteStateHistory(db ethdb.AncientWriter, id uint64, meta []byte, accountIndex []byte, storageIndex []byte, accounts []byte, storages []byte) {
+func WriteStateHistory(db ethdb.AncientWriter, id uint64, meta []byte, accountIndex []byte, storageIndex []byte,
+	accounts []byte, storages []byte) {
 	db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
 		op.AppendRaw(stateHistoryMeta, id-1, meta)
 		op.AppendRaw(stateHistoryAccountIndex, id-1, accountIndex)
 		op.AppendRaw(stateHistoryStorageIndex, id-1, storageIndex)
 		op.AppendRaw(stateHistoryAccountData, id-1, accounts)
 		op.AppendRaw(stateHistoryStorageData, id-1, storages)
+		return nil
+	})
+}
+
+// WriteStateHistoryWithTrieNodes writes the provided state history to database.
+func WriteStateHistoryWithTrieNodes(db ethdb.AncientWriter, id uint64, meta []byte, accountIndex []byte, storageIndex []byte,
+	accounts []byte, storages []byte, trieNodes []byte) {
+	db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
+		op.AppendRaw(stateHistoryMeta, id-1, meta)
+		op.AppendRaw(stateHistoryAccountIndex, id-1, accountIndex)
+		op.AppendRaw(stateHistoryStorageIndex, id-1, storageIndex)
+		op.AppendRaw(stateHistoryAccountData, id-1, accounts)
+		op.AppendRaw(stateHistoryStorageData, id-1, storages)
+		op.AppendRaw(stateHistoryTrieNodesData, id-1, trieNodes)
 		return nil
 	})
 }

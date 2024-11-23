@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/testutil"
+	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
 )
 
@@ -50,8 +51,24 @@ func randomStateSet(n int) *triestate.Set {
 	return triestate.New(accounts, storages, nil)
 }
 
+func randomTrieNodes(n int) map[common.Hash]map[string]*trienode.Node {
+	trieNodes := make(map[common.Hash]map[string]*trienode.Node)
+	addr := testutil.RandomHash()
+	next := make(map[string]*trienode.Node)
+	trieNodes[addr] = next
+	for i := 0; i < n; i++ {
+		nodes := &trienode.Node{
+			Hash: testutil.RandomHash(),
+			Blob: testutil.RandBytes(3),
+		}
+		path := testutil.RandomString()
+		trieNodes[addr][path] = nodes
+	}
+	return trieNodes
+}
+
 func makeHistory() *history {
-	return newHistory(testutil.RandomHash(), types.EmptyRootHash, 0, randomStateSet(3))
+	return newHistory(testutil.RandomHash(), types.EmptyRootHash, 0, randomStateSet(3), randomTrieNodes(3))
 }
 
 func makeHistories(n int) []*history {
@@ -61,7 +78,7 @@ func makeHistories(n int) []*history {
 	)
 	for i := 0; i < n; i++ {
 		root := testutil.RandomHash()
-		h := newHistory(root, parent, uint64(i), randomStateSet(3))
+		h := newHistory(root, parent, uint64(i), randomStateSet(3), randomTrieNodes(3))
 		parent = root
 		result = append(result, h)
 	}
@@ -84,8 +101,8 @@ func TestEncodeDecodeHistory(t *testing.T) {
 	}
 
 	// check if account/storage data can be correctly encode/decode
-	accountData, storageData, accountIndexes, storageIndexes := obj.encode()
-	if err := dec.decode(accountData, storageData, accountIndexes, storageIndexes); err != nil {
+	accountData, storageData, accountIndexes, storageIndexes, trieNodes := obj.encode()
+	if err := dec.decode(accountData, storageData, accountIndexes, storageIndexes, trieNodes); err != nil {
 		t.Fatalf("Failed to decode, err: %v", err)
 	}
 	if !compareSet(dec.accounts, obj.accounts) {
@@ -134,7 +151,7 @@ func TestTruncateHeadHistory(t *testing.T) {
 	defer freezer.Close()
 
 	for i := 0; i < len(hs); i++ {
-		accountData, storageData, accountIndex, storageIndex := hs[i].encode()
+		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
 		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 		roots = append(roots, hs[i].meta.root)
@@ -162,7 +179,7 @@ func TestTruncateTailHistory(t *testing.T) {
 	defer freezer.Close()
 
 	for i := 0; i < len(hs); i++ {
-		accountData, storageData, accountIndex, storageIndex := hs[i].encode()
+		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
 		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 		roots = append(roots, hs[i].meta.root)
@@ -205,7 +222,7 @@ func TestTruncateTailHistories(t *testing.T) {
 		defer freezer.Close()
 
 		for i := 0; i < len(hs); i++ {
-			accountData, storageData, accountIndex, storageIndex := hs[i].encode()
+			accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
 			rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
 			rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 			roots = append(roots, hs[i].meta.root)
@@ -233,7 +250,7 @@ func TestTruncateOutOfRange(t *testing.T) {
 	defer freezer.Close()
 
 	for i := 0; i < len(hs); i++ {
-		accountData, storageData, accountIndex, storageIndex := hs[i].encode()
+		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
 		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 	}
@@ -270,7 +287,7 @@ func TestTruncateOutOfRange(t *testing.T) {
 
 // openFreezer initializes the freezer instance for storing state histories.
 func openFreezer(datadir string, readOnly bool) (*rawdb.ResettableFreezer, error) {
-	return rawdb.NewStateFreezer(datadir, readOnly)
+	return rawdb.NewStateFreezer(datadir, readOnly, false)
 }
 
 func compareSet[k comparable](a, b map[k][]byte) bool {

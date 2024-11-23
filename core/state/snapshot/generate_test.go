@@ -165,7 +165,7 @@ func newHelper(scheme string) *testHelper {
 	diskdb := rawdb.NewMemoryDatabase()
 	config := &triedb.Config{}
 	if scheme == rawdb.PathScheme {
-		config.PathDB = &pathdb.Config{} // disable caching
+		config.PathDB = &pathdb.Config{UseBase: true} // disable caching
 	} else {
 		config.HashDB = &hashdb.Config{} // disable caching
 	}
@@ -757,7 +757,7 @@ func TestGenerateFromEmptySnap(t *testing.T) {
 }
 
 func testGenerateFromEmptySnap(t *testing.T, scheme string) {
-	//enableLogging()
+	// enableLogging()
 	accountCheckRange = 10
 	storageCheckRange = 20
 	helper := newHelper(scheme)

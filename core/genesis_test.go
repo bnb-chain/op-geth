@@ -311,7 +311,9 @@ func TestVerkleGenesisCommit(t *testing.T) {
 	}
 
 	db := rawdb.NewMemoryDatabase()
-	triedb := triedb.NewDatabase(db, &triedb.Config{IsVerkle: true, PathDB: pathdb.Defaults})
+	pathConfig := pathdb.Defaults
+	pathConfig.UseBase = true
+	triedb := triedb.NewDatabase(db, &triedb.Config{IsVerkle: true, PathDB: pathConfig})
 	block := genesis.MustCommit(db, triedb)
 	if !bytes.Equal(block.Root().Bytes(), expected) {
 		t.Fatalf("invalid genesis state root, expected %x, got %x", expected, got)

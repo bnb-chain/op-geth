@@ -1953,8 +1953,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				blockProcessedInParallel = true
 				if err != nil {
 					// parallel processing fail , fallback to serial with new statDB.
-					log.Warn("ParallelEVM fallback!!!", "error", err.Error())
+					log.Warn("ParallelEVM fallback to serial process", "error", err.Error())
+					execErr := err
 					statedb, err = bc.reGenerateStateForFallBack(parent.Root, block.Root(), statedb)
+					if err != nil {
+						// Can not get new statedb for serial run, report the process error.
+						bc.reportBlock(block, receipts, execErr)
+						followupInterrupt.Store(true)
+						return it.index, err
+					}
 					statedb.StartPrefetcher("chain")
 					activeState = statedb
 					receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
@@ -1973,19 +1980,32 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
 			if blockProcessedInParallel {
 				// invalid parallel execution, try serial
-				log.Warn("ParallelEVM fallback after ValidateState!!!", "error", err.Error())
+				log.Warn("ParallelEVM fallback to serial process after ValidateState", "error", err.Error())
 				parent := it.previous()
 				if parent == nil {
 					parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
 				}
 
+				validateErr := err
 				statedb, err = bc.reGenerateStateForFallBack(parent.Root, block.Root(), statedb)
+				if err != nil {
+					// can not get new statedb for serial run, report the validate error.
+					bc.reportBlock(block, receipts, validateErr)
+					followupInterrupt.Store(true)
+					return it.index, err
+				}
 				statedb.StartPrefetcher("chain")
 				activeState = statedb
-
 				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
+				if err != nil {
+					// serial process with process error.
+					bc.reportBlock(block, receipts, err)
+					followupInterrupt.Store(true)
+					return it.index, err
+				}
 				blockProcessedInParallel = false
 				if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
+					// serial process with validation error.
 					bc.reportBlock(block, receipts, err)
 					followupInterrupt.Store(true)
 					return it.index, err

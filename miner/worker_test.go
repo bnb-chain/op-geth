@@ -200,7 +200,7 @@ func TestGenerateAndImportBlock(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		b.txPool.Add([]*types.Transaction{b.newRandomTx(true)}, true, false)
 		b.txPool.Add([]*types.Transaction{b.newRandomTx(false)}, true, false)
-		time.Sleep(1 * time.Second) // Wait for txs to be promoted
+		time.Sleep(2 * time.Second) // Wait for txs to be promoted
 
 		select {
 		case ev := <-sub.Chan():

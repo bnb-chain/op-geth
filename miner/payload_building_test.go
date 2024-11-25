@@ -54,7 +54,7 @@ func testBuildPayload(t *testing.T, noTxPool, interrupt bool) {
 		txs := genTxs(1, numInterruptTxs)
 		b.txPool.Add(txs, true, false)
 		// we wait for the txs to be promoted
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 	}
 
 	timestamp := uint64(time.Now().Unix())

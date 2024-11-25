@@ -118,7 +118,7 @@ func TestEth2AssembleBlock(t *testing.T) {
 	}
 	ethservice.TxPool().Add([]*types.Transaction{tx}, true, false)
 	// we wait for the tx to be promoted into pending list in the txpool
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[9].Time() + 5,
 	}
@@ -157,7 +157,7 @@ func TestEth2AssembleBlockWithAnotherBlocksTxs(t *testing.T) {
 	txs := blocks[9].Transactions()
 	api.eth.TxPool().Add(txs, false, true)
 	// we wait for the tx to be promoted into pending list in the txpool
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[8].Time() + 5,
 	}
@@ -199,7 +199,7 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 	txs := blocks[9].Transactions()
 	ethservice.TxPool().Add(txs, true, false)
 	// we wait for the txs to be promoted into pending list in the txpool
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 	blockParams := engine.PayloadAttributes{
 		Timestamp: blocks[8].Time() + 5,
 	}
@@ -323,7 +323,7 @@ func TestEth2NewBlock(t *testing.T) {
 		ethservice.TxPool().Add([]*types.Transaction{tx}, true, false)
 
 		//we wait for the tx to be promoted into pending list in the txpool
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 
 		execData, err := assembleWithTransactions(api, parent.Hash(), &engine.PayloadAttributes{
 			Timestamp: parent.Time() + 5,
@@ -499,7 +499,7 @@ func TestFullAPI(t *testing.T) {
 		tx, _ := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 1000000, big.NewInt(2*params.InitialBaseFee), logCode), types.LatestSigner(ethservice.BlockChain().Config()), testKey)
 		ethservice.TxPool().Add([]*types.Transaction{tx}, true, false)
 		// we wait for the tx to be promoted into pending list in the txpool
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 	}
 
 	setupBlocks(t, ethservice, 10, parent, callback, nil)
@@ -627,7 +627,7 @@ func TestNewPayloadOnInvalidChain(t *testing.T) {
 		})
 		ethservice.TxPool().Add([]*types.Transaction{tx}, false, true)
 		// we wait for the tx to be promoted into pending list in the txpool
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 		var (
 			params = engine.PayloadAttributes{
 				Timestamp:             parent.Time + 1,
@@ -1333,7 +1333,7 @@ func setupBodies(t *testing.T) (*node.Node, *eth.Ethereum, []*types.Block) {
 		tx, _ := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 1000000, big.NewInt(2*params.InitialBaseFee), logCode), types.LatestSigner(ethservice.BlockChain().Config()), testKey)
 		ethservice.TxPool().Add([]*types.Transaction{tx}, false, false)
 		// we wait for the tx to be promoted into pending list in the txpool
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 	}
 
 	withdrawals := make([][]*types.Withdrawal, 10)

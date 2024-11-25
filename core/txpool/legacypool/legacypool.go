@@ -391,7 +391,7 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserve txpool.A
 }
 
 func (pool *LegacyPool) loopOfSync() {
-	ticker := time.NewTicker(200 * time.Second)
+	ticker := time.NewTicker(1500 * time.Millisecond)
 	for {
 		select {
 		case <-pool.reorgShutdownCh:

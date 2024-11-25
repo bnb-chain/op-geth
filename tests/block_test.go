@@ -74,7 +74,6 @@ func TestExecutionSpecBlocktests(t *testing.T) {
 }
 
 func TestBlockchainWithTxDAG(t *testing.T) {
-	//log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, log.LevelDebug, true)))
 	bt := new(testMatcher)
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
 	// For speedier CI-runs, the line below can be uncommented, so those are skipped.
@@ -108,21 +107,6 @@ func TestBlockchainWithTxDAG(t *testing.T) {
 			return
 		}
 	})
-
-	//bt := new(testMatcher)
-	//path := filepath.Join(blockTestDir, "ValidBlocks", "bcStatetests", "refundReset.json")
-	//_, name := filepath.Split(path)
-	//t.Run(name, func(t *testing.T) {
-	//	bt.runTestFile(t, path, name, func(t *testing.T, name string, test *BlockTest) {
-	//		if runtime.GOARCH == "386" && runtime.GOOS == "windows" && rand.Int63()%2 == 0 {
-	//			t.Skip("test (randomly) skipped on 32-bit windows")
-	//		}
-	//		if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, true, nil)); err != nil {
-	//			t.Errorf("test in path mode with snapshotter failed: %v", err)
-	//			return
-	//		}
-	//	})
-	//})
 }
 
 func execBlockTest(t *testing.T, bt *testMatcher, test *BlockTest) {

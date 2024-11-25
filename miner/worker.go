@@ -1076,7 +1076,6 @@ func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIn
 		return nil, fmt.Errorf("current signer is nil")
 	}
 
-	//privateKey, err := crypto.HexToECDSA(privateKeyHex)
 	sender := w.config.ParallelTxDAGSenderPriv
 	if sender == nil {
 		return nil, fmt.Errorf("missing sender private key")

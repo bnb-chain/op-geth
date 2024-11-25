@@ -30,7 +30,7 @@ type asyncnodebuffer struct {
 }
 
 // newAsyncNodeBuffer initializes the async node buffer with the provided nodes.
-func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *asyncnodebuffer {
+func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) (*asyncnodebuffer, error) {
 	if nodes == nil {
 		nodes = make(map[common.Hash]map[string]*trienode.Node)
 	}
@@ -41,11 +41,11 @@ func newAsyncNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.No
 		}
 	}
 
-	log.Info("new async node buffer", "limit", common.StorageSize(limit), "layers", layers)
+	log.Info("new async node buffer", "limit", common.StorageSize(limit), "layers", layers, "size", size)
 	return &asyncnodebuffer{
 		current:    newNodeCache(uint64(limit), size, nodes, layers),
 		background: newNodeCache(uint64(limit), 0, make(map[common.Hash]map[string]*trienode.Node), 0),
-	}
+	}, nil
 }
 
 // node retrieves the trie node with given node info.
@@ -211,6 +211,10 @@ func (a *asyncnodebuffer) setClean(clean *fastcache.Cache) {
 // proposedBlockReader return the world state Reader of block that is proposed to L1.
 func (a *asyncnodebuffer) proposedBlockReader(blockRoot common.Hash) (layer, error) {
 	return nil, errors.New("async node buffer not support to get proposed block reader")
+}
+
+func (a *asyncnodebuffer) getLatestStatus() (common.Hash, uint64, error) {
+	return common.Hash{}, 0, errors.New("unsupported method for async node buffer")
 }
 
 type nodecache struct {

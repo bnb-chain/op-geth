@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.5.2
+
+This is a minor release for opBNB Mainnet and Testnet.
+
+It includes several optimizations and improvements, including the introduction of a new feature to automatically recover from unexpected shutdowns, support for multi-database features, and fixes to various bugs.
+
+Upgrading is optional.
+
+### What's Changed
+* feat: add recover node buffer list for pathdb by @sysvm in https://github.com/bnb-chain/op-geth/pull/126
+* fix(op-geth): add new field in SimulateGaslessBundleResp by @redhdx in https://github.com/bnb-chain/op-geth/pull/205
+* feat: support multi database feature for op by @jingjunLi in https://github.com/bnb-chain/op-geth/pull/127
+* fix: Fix pbss snapshot inconsistency with engine-sync enabled when starting by @krish-nr in https://github.com/bnb-chain/op-geth/pull/189
+* fix: fix StateScheme overwrite bug by @jingjunLi in https://github.com/bnb-chain/op-geth/pull/220
+* fix(op-geth): fix gasless receipt l1fee by @redhdx in https://github.com/bnb-chain/op-geth/pull/219
+* feat: sequencer auto recover when meet an unexpected shutdown by @krish-nr in https://github.com/bnb-chain/op-geth/pull/166
+
+### New Contributors
+* @jingjunLi made their first contribution in https://github.com/bnb-chain/op-geth/pull/127
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.2
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.1...v0.5.2
+
 ## v0.5.1
 
 This release includes various optimizations and improvements to transaction processing, CI support, and network infrastructure.

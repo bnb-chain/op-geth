@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"math"
 	"math/big"
 	"net"
@@ -35,6 +34,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
 	"github.com/urfave/cli/v2"
@@ -93,6 +93,12 @@ var (
 		Name:     "datadir",
 		Usage:    "Data directory for the databases and keystore",
 		Value:    flags.DirectoryString(node.DefaultDataDir()),
+		Category: flags.EthCategory,
+	}
+	MultiDataBaseFlag = &cli.BoolFlag{
+		Name: "multidatabase",
+		Usage: "Enable a separated state and block database, it will be created within two subdirectory called state and block, " +
+			"Users can copy this state or block directory to another directory or disk, and then create a symbolic link to the state directory under the chaindata",
 		Category: flags.EthCategory,
 	}
 	RemoteDBFlag = &cli.StringFlag{
@@ -325,7 +331,7 @@ var (
 	PathDBNodeBufferTypeFlag = &cli.StringFlag{
 		Name:     "pathdb.nodebuffer",
 		Usage:    "Type of trienodebuffer to cache trie nodes in disklayer('list', 'sync', or 'async')",
-		Value:    "async",
+		Value:    "list",
 		Category: flags.StateCategory,
 	}
 	ProposeBlockIntervalFlag = &cli.Uint64Flag{
@@ -2319,12 +2325,41 @@ func MakeChainDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.
 	case ctx.String(SyncModeFlag.Name) == "light":
 		chainDb, err = stack.OpenDatabase("lightchaindata", cache, handles, "", readonly)
 	default:
-		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", cache, handles, ctx.String(AncientFlag.Name), "", readonly)
+		chainDb, err = stack.OpenDatabaseWithFreezer("chaindata", cache, handles, ctx.String(AncientFlag.Name), "", readonly, false)
+		// set the separate state database
+		if stack.CheckIfMultiDataBase() && err == nil {
+			stateDiskDb := MakeStateDataBase(ctx, stack, readonly)
+			chainDb.SetStateStore(stateDiskDb)
+			blockDb := MakeBlockDatabase(ctx, stack, readonly)
+			chainDb.SetBlockStore(blockDb)
+		}
 	}
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}
 	return chainDb
+}
+
+// MakeStateDataBase open a separate state database using the flags passed to the client and will hard crash if it fails.
+func MakeStateDataBase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.Database {
+	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
+	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) * 90 / 100
+	stateDiskDb, err := stack.OpenDatabaseWithFreezer("chaindata/state", cache, handles, "", "", readonly, true)
+	if err != nil {
+		Fatalf("Failed to open separate trie database: %v", err)
+	}
+	return stateDiskDb
+}
+
+// MakeBlockDatabase open a separate block database using the flags passed to the client and will hard crash if it fails.
+func MakeBlockDatabase(ctx *cli.Context, stack *node.Node, readonly bool) ethdb.Database {
+	cache := ctx.Int(CacheFlag.Name) * ctx.Int(CacheDatabaseFlag.Name) / 100
+	handles := MakeDatabaseHandles(ctx.Int(FDLimitFlag.Name)) / 10
+	blockDb, err := stack.OpenDatabaseWithFreezer("chaindata/block", cache, handles, "", "", readonly, true)
+	if err != nil {
+		Fatalf("Failed to open separate block database: %v", err)
+	}
+	return blockDb
 }
 
 func PathDBConfigAddJournalFilePath(stack *node.Node, config *pathdb.Config) *pathdb.Config {
@@ -2508,7 +2543,8 @@ func MakeConsolePreloads(ctx *cli.Context) []string {
 }
 
 // MakeTrieDatabase constructs a trie database based on the configured scheme.
-func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, preimage bool, readOnly bool, isVerkle bool) *triedb.Database {
+func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, preimage bool, readOnly bool, isVerkle bool,
+	useBase bool) *triedb.Database {
 	config := &triedb.Config{
 		Preimages: preimage,
 		IsVerkle:  isVerkle,
@@ -2529,6 +2565,7 @@ func MakeTrieDatabase(ctx *cli.Context, stack *node.Node, disk ethdb.Database, p
 	} else {
 		config.PathDB = pathdb.Defaults
 	}
+	config.PathDB.UseBase = useBase
 	config.PathDB.JournalFilePath = fmt.Sprintf("%s/%s", stack.ResolvePath("chaindata"), eth.JournalFileName)
 	return triedb.NewDatabase(disk, config)
 }

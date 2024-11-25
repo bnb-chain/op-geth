@@ -54,6 +54,7 @@ var (
 			utils.CachePreimagesFlag,
 			utils.OverrideCancun,
 			utils.OverrideVerkle,
+			utils.MultiDataBaseFlag,
 		}, utils.DatabaseFlags),
 		Description: `
 The init command initializes a new genesis block and definition for the network.
@@ -221,13 +222,28 @@ func initGenesis(ctx *cli.Context) error {
 		overrides.OverrideVerkle = &v
 	}
 	for _, name := range []string{"chaindata", "lightchaindata"} {
-		chaindb, err := stack.OpenDatabaseWithFreezer(name, 0, 0, ctx.String(utils.AncientFlag.Name), "", false)
+		chaindb, err := stack.OpenDatabaseWithFreezer(name, 0, 0, ctx.String(utils.AncientFlag.Name), "", false, false)
 		if err != nil {
 			utils.Fatalf("Failed to open database: %v", err)
 		}
 		defer chaindb.Close()
 
-		triedb := utils.MakeTrieDatabase(ctx, stack, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false, genesis.IsVerkle())
+		// if the trie data dir has been set, new trie db with a new state database
+		if ctx.IsSet(utils.MultiDataBaseFlag.Name) {
+			statediskdb, dbErr := stack.OpenDatabaseWithFreezer(name+"/state", 0, 0, "", "", false, true)
+			if dbErr != nil {
+				utils.Fatalf("Failed to open separate trie database: %v", dbErr)
+			}
+			chaindb.SetStateStore(statediskdb)
+			blockdb, err := stack.OpenDatabaseWithFreezer(name+"/block", 0, 0, "", "", false, true)
+			if err != nil {
+				utils.Fatalf("Failed to open separate block database: %v", err)
+			}
+			chaindb.SetBlockStore(blockdb)
+			log.Warn("Multi-database is an experimental feature")
+		}
+
+		triedb := utils.MakeTrieDatabase(ctx, stack, chaindb, ctx.Bool(utils.CachePreimagesFlag.Name), false, genesis.IsVerkle(), true)
 		defer triedb.Close()
 
 		_, hash, err := core.SetupGenesisBlockWithOverride(chaindb, triedb, genesis, &overrides)
@@ -264,6 +280,13 @@ func dumpGenesis(ctx *cli.Context) error {
 				return err
 			}
 			continue
+		}
+		// set the separate state & block database
+		if stack.CheckIfMultiDataBase() && err == nil {
+			stateDiskDb := utils.MakeStateDataBase(ctx, stack, true)
+			db.SetStateStore(stateDiskDb)
+			blockDb := utils.MakeBlockDatabase(ctx, stack, true)
+			db.SetBlockStore(blockDb)
 		}
 		genesis, err := core.ReadGenesis(db)
 		if err != nil {
@@ -582,7 +605,7 @@ func dump(ctx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	triedb := utils.MakeTrieDatabase(ctx, stack, db, true, true, false) // always enable preimage lookup
+	triedb := utils.MakeTrieDatabase(ctx, stack, db, true, true, false, false) // always enable preimage lookup
 	defer triedb.Close()
 
 	state, err := state.New(root, state.NewDatabaseWithNodeDB(db, triedb), nil)

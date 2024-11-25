@@ -20,6 +20,7 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	mrand "math/rand"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -58,4 +59,15 @@ func RandomAddress() common.Address {
 func RandomNode() *trienode.Node {
 	val := RandBytes(100)
 	return trienode.New(crypto.Keccak256Hash(val), val)
+}
+
+// RandomString generates specified length random string.
+func RandomString() string {
+	mrand.New(mrand.NewSource(time.Now().UnixNano()))
+	const chars = "0123456789abcdefghijklmnopqrstuvwxyz"
+	characters := make([]byte, 10)
+	for i := range characters {
+		characters[i] = chars[mrand.Intn(len(chars))]
+	}
+	return string(characters)
 }

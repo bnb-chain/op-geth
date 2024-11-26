@@ -89,8 +89,10 @@ func (tl TxLevel) Split(chunks int) []TxLevel {
 type TxLevels []TxLevel
 
 type confirmQueue struct {
-	queue     []confirmation
-	confirmed int // need to be set to -1 originally
+	queue                  []confirmation
+	confirmed              int // need to be set to -1 originally
+	parallelMergeTime      int64
+	parallelMergeAfterTime int64
 }
 
 type confirmation struct {
@@ -181,13 +183,13 @@ func (cq *confirmQueue) confirmParallel(levels []TxLevel, confirm func(*PEVMTxRe
 	for err := range errs {
 		return err[0].(error), err[1].(int)
 	}
-	parallelConfirmConcurrentTimer.UpdateSince(start)
+	cq.parallelMergeTime += time.Since(start).Nanoseconds()
 	start = time.Now()
 	if err := afterParallelConfirm(); err != nil {
 		log.Error("confirm after parallel merge fail", "err", err)
 		return err, 0
 	}
-	parallelConfirmAfterTimer.UpdateSince(start)
+	cq.parallelMergeAfterTime += time.Since(start).Nanoseconds()
 	return nil, 0
 }
 
@@ -305,6 +307,8 @@ func (tls TxLevels) Run(execute func(*PEVMTxRequest) *PEVMTxResult, confirm func
 	parallelTxLevelTxSizeMeter.Update(int64(maxLevelTxCount))
 	parallelExecutionTimer.Update(time.Duration(totalExecutionTime))
 	parallelConfirmTimer.Update(time.Duration(totalConfirmTime))
+	parallelConfirmConcurrentTimer.Update(time.Duration(toConfirm.parallelMergeTime))
+	parallelConfirmAfterTimer.Update(time.Duration(toConfirm.parallelMergeAfterTime))
 	return nil, 0
 }
 

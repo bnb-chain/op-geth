@@ -1007,6 +1007,7 @@ type ParallelStateDB struct {
 	stateObjects              *StateObjectSyncMap
 	stateObjectsPending       sync.Map // State objects finalized but not yet written to the trie
 	stateObjectsDirty         sync.Map // State objects modified in the current execution
+	journalDirty              sync.Map // State objects modified in the current execution
 	stateObjectsDestruct      sync.Map // State objects destructed in the block along with its previous value
 	stateObjectsDestructDirty sync.Map
 
@@ -1152,7 +1153,7 @@ func (p *ParallelStateDB) SetNonce(addr common.Address, nonce uint64) {
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetNonce(nonce)
-		p.stateObjectsDirty.Store(addr, struct{}{})
+		p.journalDirty.Store(addr, struct{}{})
 	}
 }
 
@@ -1176,7 +1177,7 @@ func (p *ParallelStateDB) SetCode(addr common.Address, code []byte) {
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
-		p.stateObjectsDirty.Store(addr, struct{}{})
+		p.journalDirty.Store(addr, struct{}{})
 	}
 }
 
@@ -1229,7 +1230,7 @@ func (p *ParallelStateDB) SetState(addr common.Address, key common.Hash, value c
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
-		p.stateObjectsDirty.Store(addr, struct{}{})
+		p.journalDirty.Store(addr, struct{}{})
 	}
 }
 
@@ -1246,7 +1247,7 @@ func (p *ParallelStateDB) SelfDestruct(addr common.Address) {
 	if stateObject == nil {
 		return
 	}
-	p.stateObjectsDirty.Store(addr, struct{}{})
+	p.journalDirty.Store(addr, struct{}{})
 	stateObject.markSelfdestructed()
 	stateObject.setBalance(new(uint256.Int))
 }
@@ -1446,7 +1447,7 @@ func (p *ParallelStateDB) createObject(addr common.Address) (newobj *stateObject
 	newobj = newObject(p, true, addr, nil)
 	if prev == nil {
 		//p.journal.append(createObjectChange{account: &addr})
-		p.stateObjectsDirty.Store(addr, struct{}{})
+		p.journalDirty.Store(addr, struct{}{})
 	} else {
 		// The original account should be marked as destructed and all cached
 		// account and storage data should be cleared as well. Note, it must
@@ -1472,7 +1473,7 @@ func (p *ParallelStateDB) createObject(addr common.Address) (newobj *stateObject
 		//	prevAccountOrigin:      prevAccount,
 		//	prevStorageOrigin:      s.storagesOrigin[prev.address],
 		//})
-		p.stateObjectsDirty.Store(addr, struct{}{})
+		p.journalDirty.Store(addr, struct{}{})
 		p.AccountMux.Lock()
 		p.accounts.Delete(prev.addrHash)
 		p.accountsOrigin.Delete(prev.address)
@@ -1862,7 +1863,7 @@ func (p *ParallelStateDB) SetBalance(addr common.Address, amount *uint256.Int) {
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetBalance(amount)
-		p.stateObjectsDirty.Store(addr, struct{}{})
+		p.journalDirty.Store(addr, struct{}{})
 	}
 }
 
@@ -1880,7 +1881,7 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 	})
 	p.stateObjectsDestructDirty = sync.Map{}
 
-	p.stateObjectsDirty.Range(func(key, value interface{}) bool {
+	p.journalDirty.Range(func(key, value interface{}) bool {
 		addr := key.(common.Address)
 		obj, exist := p.getStateObjectFromStateObjects(addr)
 		if !exist {
@@ -1915,6 +1916,7 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 
 		obj.created = false
 		p.stateObjectsPending.Store(addr, struct{}{})
+		p.stateObjectsDirty.Store(addr, struct{}{})
 		return true
 	})
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -2236,6 +2238,7 @@ func (p *ParallelStateDB) convertAccountSet(set *sync.Map) map[common.Hash]struc
 }
 
 func (p *ParallelStateDB) clearJournalAndRefund() {
+	p.journalDirty = sync.Map{}
 	p.refund.Store(0)
 }
 
@@ -2297,12 +2300,12 @@ func (p *ParallelStateDB) updateStateObject(obj *stateObject) {
 
 func (p *ParallelStateDB) appendJournal(journalEntry journalEntry) {
 	if journalEntry.dirtied() != nil {
-		p.stateObjectsDirty.Store(*journalEntry.dirtied(), struct{}{})
+		p.journalDirty.Store(*journalEntry.dirtied(), struct{}{})
 	}
 }
 
 func (p *ParallelStateDB) addJournalDirty(address common.Address) {
-	p.stateObjectsDirty.Store(address, struct{}{})
+	p.journalDirty.Store(address, struct{}{})
 }
 
 func (p *ParallelStateDB) getPrefetcher() *triePrefetcher {

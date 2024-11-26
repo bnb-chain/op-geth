@@ -4,9 +4,9 @@
 
 This is a minor release for opBNB Mainnet and Testnet.
 
-It fixed an txpool memory leak bug which may cause out-of-memory issues.
+It fixes a txpool memory leak bug that could cause out-of-memory issues.
 
-It's recommended to upgrade to this version for Mainnet and Testnet.
+It is recommended to upgrade to this version for both Mainnet and Testnet.
 
 ### What's Changed
 * fix: txpool reheap out-of-memory issues by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/211

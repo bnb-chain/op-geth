@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.5.3
+
+This is a minor release for opBNB Mainnet and Testnet.
+
+It fixed an txpool memory leak bug which may cause out-of-memory issues.
+
+It's recommended to upgrade to this version for Mainnet and Testnet.
+
+### What's Changed
+* fix: txpool reheap out-of-memory issues by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/211
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.3
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.2...v0.5.3
+
 ## v0.5.2
 
 This is a minor release for opBNB Mainnet and Testnet.

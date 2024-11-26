@@ -221,11 +221,11 @@ type Config struct {
 
 	ParallelTxMode           bool // Whether to execute transaction in parallel mode when do full sync
 	ParallelTxNum            int  // Number of slot for transaction execution
+	ParallelThreshold        int  // threshold to trigger parallel execution
 	EnableOpcodeOptimizing   bool
 	EnableParallelTxDAG      bool
 	ParallelTxDAGFile        string
 	ParallelTxUnorderedMerge bool // Whether to enable unordered merge in parallel mode
-
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.

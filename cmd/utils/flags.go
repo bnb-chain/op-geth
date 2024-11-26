@@ -1112,6 +1112,12 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.VMCategory,
 	}
 
+	ParallelThresholdFlag = &cli.IntFlag{
+		Name:     "parallel.threshold",
+		Usage:    "Threshold of transaction count to trigger parallel execution, only valid in parallel mode (runtime calculated, no fixed default value)",
+		Category: flags.VMCategory,
+	}
+
 	ParallelTxDAGFlag = &cli.BoolFlag{
 		Name:     "parallel.txdag",
 		Usage:    "Enable the experimental parallel TxDAG generation, only valid in full sync mode (default = false)",
@@ -2032,6 +2038,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(ParallelTxNumFlag.Name) {
 		cfg.ParallelTxNum = ctx.Int(ParallelTxNumFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelThresholdFlag.Name) {
+		cfg.ParallelThreshold = ctx.Int(ParallelThresholdFlag.Name)
 	}
 
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {

@@ -74,6 +74,16 @@ func TestInvalidGasUsed(t *testing.T) {
 		return nil
 	}
 
+	verifyMainDBs := func(c Checks, maindb *StateDB, shallow *StateDB) error {
+		if c.Verify(maindb) != nil {
+			return fmt.Errorf("maindb: %s", c.Verify(maindb).Error())
+		}
+		if c.Verify(shallow) != nil {
+			return fmt.Errorf("uncommited: %s", c.Verify(shallow).Error())
+		}
+		return nil
+	}
+
 	maindb := newStateDB()
 	shadow := newStateDB()
 	// firtst prepare for the account, to ensure the selfDestruct happens
@@ -93,7 +103,8 @@ func TestInvalidGasUsed(t *testing.T) {
 	maindb.Finalise(true)
 	shadow.Finalise(true)
 	// now check the state after finalize
-	if err := verifyDBs(checks[1], shadow, uncommitted); err != nil {
+	// No need to check the uncommitted database because its data will be useless after the merge.
+	if err := verifyMainDBs(checks[1], maindb, shadow); err != nil {
 		t.Fatalf("ut failed, err=%s", err.Error())
 	}
 	// now execute another tx
@@ -163,6 +174,16 @@ func TestStateAfterDestructWithBalance(t *testing.T) {
 		return nil
 	}
 
+	verifyMainDBs := func(c Checks, maindb *StateDB, shallow *StateDB) error {
+		if c.Verify(maindb) != nil {
+			return fmt.Errorf("maindb: %s", c.Verify(maindb).Error())
+		}
+		if c.Verify(shallow) != nil {
+			return fmt.Errorf("uncommited: %s", c.Verify(shallow).Error())
+		}
+		return nil
+	}
+
 	maindb := newStateDB()
 	shadow := newStateDB()
 	uncommitted := newUncommittedDB(maindb)
@@ -176,7 +197,8 @@ func TestStateAfterDestructWithBalance(t *testing.T) {
 	maindb.Finalise(true)
 	shadow.Finalise(true)
 	// now check the state after finalize
-	if err := verifyDBs(checks[1], shadow, uncommitted); err != nil {
+	// No need to check the uncommitted database because its data will be useless after the merge.
+	if err := verifyMainDBs(checks[1], maindb, shadow); err != nil {
 		t.Fatalf("ut failed, err=%s", err.Error())
 	}
 	// now execute another tx
@@ -190,7 +212,8 @@ func TestStateAfterDestructWithBalance(t *testing.T) {
 	maindb.Finalise(true)
 	shadow.Finalise(true)
 	// check the state again, to ensure the Finalize works
-	if err := verifyDBs(checks[2], shadow, uncommitted); err != nil {
+	// No need to check the uncommitted database because its data will be useless after the merge.
+	if err := verifyMainDBs(checks[2], maindb, shadow); err != nil {
 		t.Fatalf("ut failed, err=%s", err.Error())
 	}
 }
@@ -239,6 +262,16 @@ func TestStateAfterDestruct(t *testing.T) {
 		return nil
 	}
 
+	verifyMainDBs := func(c Check, maindb *StateDB, shallow *StateDB) error {
+		if c.Verify(maindb) != nil {
+			return fmt.Errorf("maindb: %s", c.Verify(maindb).Error())
+		}
+		if c.Verify(shallow) != nil {
+			return fmt.Errorf("uncommited: %s", c.Verify(shallow).Error())
+		}
+		return nil
+	}
+
 	maindb := newStateDB()
 	shadow := newStateDB()
 	uncommitted := newUncommittedDB(maindb)
@@ -259,7 +292,8 @@ func TestStateAfterDestruct(t *testing.T) {
 	maindb.Finalise(true)
 	shadow.Finalise(true)
 	// check the state again
-	if err := verifyDBs(checks[1], shadow, uncommitted); err != nil {
+	// No need to check the uncommitted database because its data will be useless after the merge.
+	if err := verifyMainDBs(checks[1], maindb, shadow); err != nil {
 		t.Fatalf("ut failed, err=%s", err.Error())
 	}
 	// now recreate the account
@@ -278,7 +312,8 @@ func TestStateAfterDestruct(t *testing.T) {
 	maindb.Finalise(true)
 	shadow.Finalise(true)
 	// check the state again, to ensure the Finalize works
-	if err := verifyDBs(checks[2], shadow, uncommitted); err != nil {
+	// No need to check the uncommitted database because its data will be useless after the merge.
+	if err := verifyMainDBs(checks[2], maindb, shadow); err != nil {
 		t.Fatalf("ut failed, err=%s", err.Error())
 	}
 	uncommitted = newUncommittedDB(maindb)
@@ -293,7 +328,8 @@ func TestStateAfterDestruct(t *testing.T) {
 	maindb.Finalise(true)
 	shadow.Finalise(true)
 	// check the state again, to ensure the Finalize works
-	if err := verifyDBs(checks[3], shadow, uncommitted); err != nil {
+	// No need to check the uncommitted database because its data will be useless after the merge.
+	if err := verifyMainDBs(checks[3], maindb, shadow); err != nil {
 		t.Fatalf("ut failed, err=%s", err.Error())
 	}
 

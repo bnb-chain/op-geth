@@ -548,9 +548,9 @@ func (pst *UncommittedDB) Merge(deleteEmptyObjects bool) error {
 		}
 	}
 	// 5. merge refund
-	//if pst.refund != 0 {
-	//	pst.maindb.AddRefund(pst.refund)
-	//}
+	if pst.refund != 0 {
+		pst.maindb.AddRefund(pst.refund)
+	}
 	//// clean empty objects if needed
 	//for _, obj := range pst.cache {
 	//	if obj.selfDestruct || (deleteEmptyObjects && obj.empty(pst)) {

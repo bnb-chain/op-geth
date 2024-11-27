@@ -72,6 +72,9 @@ type TransactionArgs struct {
 	Commitments []kzg4844.Commitment `json:"commitments"`
 	Proofs      []kzg4844.Proof      `json:"proofs"`
 
+	// For SetCodeTxType
+	AuthList *types.AuthorizationList `json:"authList"`
+
 	// This configures whether blobs are allowed to be passed.
 	blobSidecarAllowed bool
 }
@@ -484,7 +487,6 @@ func (args *TransactionArgs) toTransaction() *types.Transaction {
 				Proofs:      args.Proofs,
 			}
 		}
-
 	case args.MaxFeePerGas != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {

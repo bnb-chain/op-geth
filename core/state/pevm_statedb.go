@@ -1871,6 +1871,8 @@ func (p *ParallelStateDB) PrepareForParallel() {
 	//do nothing
 }
 
+var goMaxProcs = runtime.GOMAXPROCS(0)
+
 func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 
 	// finalise stateObjectsDestruct
@@ -1881,44 +1883,62 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 	})
 	p.stateObjectsDestructDirty = sync.Map{}
 
-	p.journalDirty.Range(func(key, value interface{}) bool {
-		addr := key.(common.Address)
-		obj, exist := p.getStateObjectFromStateObjects(addr)
-		if !exist {
-			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
-			// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
-			// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
-			// it will persist in the journal even though the journal is reverted. In this special circumstance,
-			// it may exist in `s.journal.dirties` but not in `s.stateObjects`.
-			// Thus, we can safely ignore it here
+	dirtyChan := make(chan common.Address, goMaxProcs)
+	go func() {
+		p.journalDirty.Range(func(key, value interface{}) bool {
+			dirtyChan <- key.(common.Address)
 			return true
-		}
-		if obj.selfDestructed || (deleteEmptyObjects && obj.empty()) {
-			obj.deleted = true
+		})
+		close(dirtyChan)
+	}()
+	var wg sync.WaitGroup
+	for i := 0; i < goMaxProcs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				addr, isOpen := <-dirtyChan
+				if !isOpen {
+					return
+				}
+				obj, exist := p.getStateObjectFromStateObjects(addr)
+				if !exist {
+					// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
+					// That tx goes out of gas, and although the notion of 'touched' does not exist there, the
+					// touch-event will still be recorded in the journal. Since ripeMD is a special snowflake,
+					// it will persist in the journal even though the journal is reverted. In this special circumstance,
+					// it may exist in `s.journal.dirties` but not in `s.stateObjects`.
+					// Thus, we can safely ignore it here
+					continue
+				}
+				if obj.selfDestructed || (deleteEmptyObjects && obj.empty()) {
+					obj.deleted = true
 
-			// We need to maintain account deletions explicitly (will remain
-			// set indefinitely). Note only the first occurred self-destruct
-			// event is tracked.
+					// We need to maintain account deletions explicitly (will remain
+					// set indefinitely). Note only the first occurred self-destruct
+					// event is tracked.
 
-			if _, ok := p.stateObjectsDestruct.Load(obj.address); !ok {
-				p.stateObjectsDestruct.Store(obj.address, obj.origin)
+					if _, ok := p.stateObjectsDestruct.Load(obj.address); !ok {
+						p.stateObjectsDestruct.Store(obj.address, obj.origin)
+					}
+					// Note, we can't do this only at the end of a block because multiple
+					// transactions within the same block might self destruct and then
+					// resurrect an account; but the snapshotter needs both events.
+					p.accounts.Delete(obj.addrHash)
+					p.storages.Delete(obj.addrHash)
+					p.accountsOrigin.Delete(obj.address)
+					p.storagesOrigin.Delete(obj.address)
+				} else {
+					obj.finalise(true) // Prefetch slots in the background
+				}
+
+				obj.created = false
+				p.stateObjectsPending.Store(addr, struct{}{})
+				p.stateObjectsDirty.Store(addr, struct{}{})
 			}
-			// Note, we can't do this only at the end of a block because multiple
-			// transactions within the same block might self destruct and then
-			// resurrect an account; but the snapshotter needs both events.
-			p.accounts.Delete(obj.addrHash)
-			p.storages.Delete(obj.addrHash)
-			p.accountsOrigin.Delete(obj.address)
-			p.storagesOrigin.Delete(obj.address)
-		} else {
-			obj.finalise(true) // Prefetch slots in the background
-		}
-
-		obj.created = false
-		p.stateObjectsPending.Store(addr, struct{}{})
-		p.stateObjectsDirty.Store(addr, struct{}{})
-		return true
-	})
+		}()
+	}
+	wg.Wait()
 	// Invalidate journal because reverting across transactions is not allowed.
 	p.clearJournalAndRefund()
 }

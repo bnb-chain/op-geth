@@ -1982,7 +1982,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 			isByzantium := bc.chainConfig.IsByzantium(block.Number())
 			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge && isByzantium {
-				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps, block.Coinbase())
+				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
 			} else {
 				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
 			}

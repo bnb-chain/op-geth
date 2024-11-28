@@ -1061,12 +1061,11 @@ type ParallelStateDB struct {
 
 	// Testing hooks
 	onCommit       func(states *triestate.Set) // Hook invoked when commit is performed
-	coinbase       common.Address
 	gasFeeAddrLock sync.Mutex
 }
 
 // NewParallel creates a new parallel statedb
-func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree, coinbase common.Address) (*ParallelStateDB, error) {
+func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree) (*ParallelStateDB, error) {
 	tr, err := db.OpenTrie(root)
 	if err != nil {
 		return nil, err
@@ -1079,7 +1078,6 @@ func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree, coinbase c
 		accessList:   newParallelAccessList(),
 		hasher:       crypto.NewKeccakState(),
 		stateObjects: &StateObjectSyncMap{},
-		coinbase:     coinbase,
 	}
 	if sdb.snaps != nil {
 		sdb.snap = sdb.snaps.Snapshot(root)
@@ -1122,10 +1120,6 @@ func (p *ParallelStateDB) SubBalance(addr common.Address, amount *uint256.Int) {
 }
 
 func (p *ParallelStateDB) AddBalance(addr common.Address, amount *uint256.Int) {
-	if addr == p.coinbase || addr == params.OptimismL1FeeRecipient || addr == params.OptimismBaseFeeRecipient {
-		p.gasFeeAddrLock.Lock()
-		defer p.gasFeeAddrLock.Unlock()
-	}
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.AddBalance(amount)

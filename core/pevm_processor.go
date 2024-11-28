@@ -179,20 +179,20 @@ func (p *PEVMProcessor) confirmTxResult(statedb state.StateDBer, gp *ParallelGas
 		return err
 	}
 
-	delayGasFee := result.result.delayFees
-	// add delayed gas fee
-	if delayGasFee != nil {
-		if delayGasFee.TipFee != nil {
-			statedb.AddBalance(delayGasFee.Coinbase, delayGasFee.TipFee)
-		}
-		if delayGasFee.BaseFee != nil {
-			statedb.AddBalance(params.OptimismBaseFeeRecipient, delayGasFee.BaseFee)
-		}
-		if delayGasFee.L1Fee != nil {
-			statedb.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
-		}
-	}
 	if !enableParallelMerge {
+		delayGasFee := result.result.delayFees
+		// add delayed gas fee
+		if delayGasFee != nil {
+			if delayGasFee.TipFee != nil {
+				statedb.AddBalance(delayGasFee.Coinbase, delayGasFee.TipFee)
+			}
+			if delayGasFee.BaseFee != nil {
+				statedb.AddBalance(params.OptimismBaseFeeRecipient, delayGasFee.BaseFee)
+			}
+			if delayGasFee.L1Fee != nil {
+				statedb.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
+			}
+		}
 		var root []byte
 		result.slotDB.Finalise(isByzantium || isEIP158)
 
@@ -291,12 +291,12 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 		}(time.Now())
 		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr, enableParallelMerge)
-	}, func() (err error) {
+	}, func(levels []TxLevel, cq *confirmQueue) (err error) {
 		defer func(t0 time.Time) {
 			atomic.AddInt64(&confirmDurations, time.Since(t0).Nanoseconds())
 		}(time.Now())
 		log.Debug("after parallel confirm")
-		return p.afterParallelConfirm(statedb, block.Header())
+		return p.afterParallelConfirm(statedb, block.Header(), levels, cq)
 	}, p.unorderedMerge, enableParallelMerge)
 	parallelRunDuration := time.Since(start) - buildLevelsDuration
 	if err != nil {
@@ -355,8 +355,28 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 	return p.receipts, allLogs, usedGas.Load(), nil
 }
 
-func (p *PEVMProcessor) afterParallelConfirm(statedb state.StateDBer, header *types.Header) error {
-
+func (p *PEVMProcessor) afterParallelConfirm(statedb state.StateDBer, header *types.Header, levels []TxLevel, cq *confirmQueue) error {
+	// Delay fees do not require concurrent processing; handling them serially at the end is actually more efficient.
+	// Because during concurrency, lock contention is intense
+	for _, txs := range levels {
+		for _, tx := range txs {
+			toConfirm := cq.queue[tx.txIndex]
+			result := toConfirm.result
+			delayGasFee := result.result.delayFees
+			// add delayed gas fee
+			if delayGasFee != nil {
+				if delayGasFee.TipFee != nil {
+					statedb.AddBalance(delayGasFee.Coinbase, delayGasFee.TipFee)
+				}
+				if delayGasFee.BaseFee != nil {
+					statedb.AddBalance(params.OptimismBaseFeeRecipient, delayGasFee.BaseFee)
+				}
+				if delayGasFee.L1Fee != nil {
+					statedb.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
+				}
+			}
+		}
+	}
 	isByzantium := p.config.IsByzantium(header.Number)
 	if !isByzantium {
 		panic("afterParallelConfirm not support before Byzantium block")

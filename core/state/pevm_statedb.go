@@ -1147,7 +1147,6 @@ func (p *ParallelStateDB) SetNonce(addr common.Address, nonce uint64) {
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetNonce(nonce)
-		p.journalDirty.Store(addr, struct{}{})
 	}
 }
 
@@ -1171,7 +1170,6 @@ func (p *ParallelStateDB) SetCode(addr common.Address, code []byte) {
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
-		p.journalDirty.Store(addr, struct{}{})
 	}
 }
 
@@ -1224,7 +1222,6 @@ func (p *ParallelStateDB) SetState(addr common.Address, key common.Hash, value c
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetState(key, value)
-		p.journalDirty.Store(addr, struct{}{})
 	}
 }
 
@@ -1857,7 +1854,6 @@ func (p *ParallelStateDB) SetBalance(addr common.Address, amount *uint256.Int) {
 	stateObject := p.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetBalance(amount)
-		p.journalDirty.Store(addr, struct{}{})
 	}
 }
 

@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/objs"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -307,6 +308,17 @@ func (tx *Transaction) GasFeeCap() *big.Int { return new(big.Int).Set(tx.inner.g
 // Value returns the ether amount of the transaction.
 func (tx *Transaction) Value() *big.Int { return new(big.Int).Set(tx.inner.value()) }
 
+// Value returns the ether amount of the transaction.
+func (tx *Transaction) ValueRef() *big.Int { return tx.inner.value() }
+
+// GasTipCap returns the gasTipCap per gas of the transaction.
+func (tx *Transaction) GasTipCapRef() *big.Int { return tx.inner.gasTipCap() }
+
+// GasFeeCap returns the fee cap per gas of the transaction.
+func (tx *Transaction) GasFeeCapRef() *big.Int { return tx.inner.gasFeeCap() }
+
+func (tx *Transaction) GasPriceRef() *big.Int { return tx.inner.gasPrice() }
+
 // Nonce returns the sender account nonce of the transaction.
 func (tx *Transaction) Nonce() uint64 { return tx.inner.nonce() }
 
@@ -362,11 +374,14 @@ func (tx *Transaction) IsSystemTx() bool {
 
 // Cost returns (gas * gasPrice) + (blobGas * blobGasPrice) + value.
 func (tx *Transaction) Cost() *big.Int {
-	total := new(big.Int).Mul(tx.GasPrice(), new(big.Int).SetUint64(tx.Gas()))
+	gasPrice := tx.inner.gasPrice()
+	gas := objs.BigIntPool.Get().(*big.Int).SetUint64(tx.Gas())
+	total := new(big.Int).Mul(gasPrice, gas)
 	if tx.Type() == BlobTxType {
 		total.Add(total, new(big.Int).Mul(tx.BlobGasFeeCap(), new(big.Int).SetUint64(tx.BlobGas())))
 	}
-	total.Add(total, tx.Value())
+	objs.BigIntPool.Put(gas)
+	total.Add(total, tx.inner.value())
 	return total
 }
 
@@ -446,18 +461,27 @@ func (tx *Transaction) EffectiveGasTipCmp(other *Transaction, baseFee *big.Int) 
 	}
 	// the EffectiveGasTipValue() always copies two big.Int, which cost almost 90% cpu resource of the whole function,
 	// so we define an alternative function to improve the performance.
-	return effectiveGasTipValue(tx, baseFee).Cmp(effectiveGasTipValue(other, baseFee))
+	effTx, recycleTx := effectiveGasTipValue(tx, baseFee)
+	effOther, recycleOther := effectiveGasTipValue(other, baseFee)
+	defer func() {
+		recycleTx()
+		recycleOther()
+	}()
+	return effTx.Cmp(effOther)
 }
 
-func effectiveGasTipValue(tx *Transaction, baseFee *big.Int) *big.Int {
+func effectiveGasTipValue(tx *Transaction, baseFee *big.Int) (*big.Int, func()) {
 	if tx.Type() == DepositTxType {
-		return new(big.Int)
+		newInt := objs.BigIntPool.Get().(*big.Int)
+		newInt.SetUint64(0)
+		return newInt, func() { objs.BigIntPool.Put(newInt) }
 	}
 	if baseFee == nil {
-		return tx.inner.gasTipCap()
+		return tx.inner.gasTipCap(), func() {}
 	}
 	gasFeeCap := tx.inner.gasFeeCap()
-	return math.BigMin(tx.inner.gasTipCap(), new(big.Int).Sub(gasFeeCap, baseFee))
+	temp := objs.BigIntPool.Get().(*big.Int).Sub(gasFeeCap, baseFee)
+	return math.BigMin(tx.inner.gasTipCap(), temp), func() { objs.BigIntPool.Put(temp) }
 }
 
 // EffectiveGasTipIntCmp compares the effective gasTipCap of a transaction to the given gasTipCap.

@@ -1304,7 +1304,6 @@ func (s *StateDB) Commit(block uint64, deleteEmptyObjects bool) (common.Hash, er
 
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) {
-			s.AccountCommits += time.Since(start)
 			accountUpdatedMeter.Mark(int64(s.AccountUpdated))
 			storageUpdatedMeter.Mark(int64(s.StorageUpdated))
 			accountDeletedMeter.Mark(int64(s.AccountDeleted))

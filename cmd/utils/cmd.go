@@ -524,13 +524,13 @@ func ImportPreimages(db ethdb.Database, fn string) error {
 		// Accumulate the preimages and flush when enough ws gathered
 		preimages[crypto.Keccak256Hash(blob)] = common.CopyBytes(blob)
 		if len(preimages) > 1024 {
-			rawdb.WritePreimages(db, preimages)
+			rawdb.WritePreimages(db.StateStore(), preimages)
 			preimages = make(map[common.Hash][]byte)
 		}
 	}
 	// Flush the last batch preimage data
 	if len(preimages) > 0 {
-		rawdb.WritePreimages(db, preimages)
+		rawdb.WritePreimages(db.StateStore(), preimages)
 	}
 	return nil
 }
@@ -642,7 +642,7 @@ func ExportSnapshotPreimages(chaindb ethdb.Database, snaptree *snapshot.Tree, fn
 	}()
 
 	for item := range hashCh {
-		preimage := rawdb.ReadPreimage(chaindb, item.Hash)
+		preimage := rawdb.ReadPreimage(chaindb.StateStore(), item.Hash)
 		if len(preimage) == 0 {
 			return fmt.Errorf("missing preimage for %v", item.Hash)
 		}

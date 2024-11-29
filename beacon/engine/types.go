@@ -30,6 +30,12 @@ import (
 // building of the payload to commence.
 type PayloadVersion byte
 
+const (
+	GetPayloadStage  = "getPayload"
+	NewPayloadStage  = "newPayload"
+	ForkchoiceUpdatedStage = "forkchoiceUpdated"
+)
+
 var (
 	PayloadV1 PayloadVersion = 0x1
 	PayloadV2 PayloadVersion = 0x2
@@ -179,6 +185,12 @@ type ForkchoiceStateV1 struct {
 	HeadBlockHash      common.Hash `json:"headBlockHash"`
 	SafeBlockHash      common.Hash `json:"safeBlockHash"`
 	FinalizedBlockHash common.Hash `json:"finalizedBlockHash"`
+}
+
+type OpSealPayloadResponse struct {
+	ErrStage      string                    `json:"errStage"`
+	PayloadStatus PayloadStatusV1           `json:"payloadStatus"`
+	Payload       *ExecutionPayloadEnvelope `json:"payload"`
 }
 
 func encodeTransactions(txs []*types.Transaction) [][]byte {

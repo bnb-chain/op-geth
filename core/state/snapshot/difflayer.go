@@ -51,7 +51,7 @@ var (
 	aggregatorItemLimit = aggregatorMemoryLimit / 42
 
 	// bloomItemLimit is an approximate number of all difflayer items (128 difflayers + 1 aggregatorlayer)
-	bloomItemLimit = 128*10000*2 + aggregatorItemLimit
+	bloomItemLimit = 25*10000*5 + aggregatorItemLimit
 
 	// bloomTargetError is the target false positive rate when the aggregator
 	// layer is at its fullest. The actual value will probably move around up

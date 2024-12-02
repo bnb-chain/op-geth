@@ -73,7 +73,7 @@ type TransactionArgs struct {
 	Proofs      []kzg4844.Proof      `json:"proofs"`
 
 	// For SetCodeTxType
-	AuthList *types.AuthorizationList `json:"authList"`
+	AuthList []types.Authorization `json:"authList"`
 
 	// This configures whether blobs are allowed to be passed.
 	blobSidecarAllowed bool

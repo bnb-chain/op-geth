@@ -127,6 +127,7 @@ var (
 	ErrSystemTxNotSupported = errors.New("system tx not supported")
 
 	// EIP-7702 state transition errors:
+	// Note these are just informational, and do not cause tx execution abort.
 	ErrAuthorizationWrongChainID       = errors.New("EIP-7702 authorization chain ID mismatch")
 	ErrAuthorizationNonceOverflow      = errors.New("EIP-7702 authorization nonce > 64 bit")
 	ErrAuthorizationInvalidSignature   = errors.New("EIP-7702 authorization has invalid signature")

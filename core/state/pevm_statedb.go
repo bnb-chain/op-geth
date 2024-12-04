@@ -981,9 +981,9 @@ type ParallelStateDB struct {
 	snaps      *snapshot.Tree    // Nil if snapshot is not available
 	snap       snapshot.Snapshot // Nil if snapshot is not available
 
-	snapParallelLock        sync.RWMutex // for parallel mode, for main StateDB, slot will read snapshot, while processor will write.
 	trieParallelLock        sync.Mutex   // for parallel mode of trie, mostly for get states/objects from trie, lock required to handle trie tracer.
 	stateObjectDestructLock sync.RWMutex // for parallel mode, used in mainDB for mergeSlot and conflict check.
+	pendingDirtyLock        sync.Mutex
 
 	// originalRoot is the pre-state root, before any changes were made.
 	// It will be updated when the Commit is called.
@@ -995,20 +995,20 @@ type ParallelStateDB struct {
 
 	// These maps hold the state changes (including the corresponding
 	// original value) that occurred in this **block**.
-	AccountMux     sync.Mutex // Mutex for accounts access
-	StorageMux     sync.Mutex // Mutex for storages access
-	accounts       sync.Map   // The mutated accounts in 'slim RLP' encoding
-	storages       sync.Map   // The mutated slots in prefix-zero trimmed rlp format
-	accountsOrigin sync.Map   // The original value of mutated accounts in 'slim RLP' encoding
-	storagesOrigin sync.Map   // The original value of mutated slots in prefix-zero trimmed rlp format
+	AccountMux     sync.Mutex                                // Mutex for accounts access
+	StorageMux     sync.Mutex                                // Mutex for storages access
+	accounts       map[common.Hash][]byte                    // The mutated accounts in 'slim RLP' encoding
+	storages       map[common.Hash]map[common.Hash][]byte    // The mutated slots in prefix-zero trimmed rlp format
+	accountsOrigin map[common.Address][]byte                 // The original value of mutated accounts in 'slim RLP' encoding
+	storagesOrigin map[common.Address]map[common.Hash][]byte // The original value of mutated slots in prefix-zero trimmed rlp format
 
 	// This map holds 'live' objects, which will get modified while processing
 	// a state transition.
 	stateObjects              *StateObjectSyncMap
-	stateObjectsPending       sync.Map // State objects finalized but not yet written to the trie
-	stateObjectsDirty         sync.Map // State objects modified in the current execution
-	journalDirty              sync.Map // State objects modified in the current execution
-	stateObjectsDestruct      sync.Map // State objects destructed in the block along with its previous value
+	stateObjectsPending       map[common.Address]struct{} // State objects finalized but not yet written to the trie
+	stateObjectsDirty         map[common.Address]struct{} // State objects modified in the current execution
+	journalDirty              sync.Map                    // State objects modified in the current execution
+	stateObjectsDestruct      sync.Map                    // State objects destructed in the block along with its previous value
 	stateObjectsDestructDirty sync.Map
 
 	// DB error.
@@ -1071,13 +1071,19 @@ func NewParallel(root common.Hash, db Database, snaps *snapshot.Tree) (*Parallel
 		return nil, err
 	}
 	sdb := &ParallelStateDB{
-		db:           db,
-		trie:         tr,
-		originalRoot: root,
-		snaps:        snaps,
-		accessList:   newParallelAccessList(),
-		hasher:       crypto.NewKeccakState(),
-		stateObjects: &StateObjectSyncMap{},
+		db:                  db,
+		trie:                tr,
+		originalRoot:        root,
+		snaps:               snaps,
+		accessList:          newParallelAccessList(),
+		hasher:              crypto.NewKeccakState(),
+		accounts:            make(map[common.Hash][]byte),
+		storages:            make(map[common.Hash]map[common.Hash][]byte),
+		accountsOrigin:      make(map[common.Address][]byte),
+		storagesOrigin:      make(map[common.Address]map[common.Hash][]byte),
+		stateObjectsPending: make(map[common.Address]struct{}),
+		stateObjectsDirty:   make(map[common.Address]struct{}),
+		stateObjects:        &StateObjectSyncMap{},
 	}
 	if sdb.snaps != nil {
 		sdb.snap = sdb.snaps.Snapshot(root)
@@ -1466,12 +1472,12 @@ func (p *ParallelStateDB) createObject(addr common.Address) (newobj *stateObject
 		//})
 		p.journalDirty.Store(addr, struct{}{})
 		p.AccountMux.Lock()
-		p.accounts.Delete(prev.addrHash)
-		p.accountsOrigin.Delete(prev.address)
+		delete(p.accounts, prev.addrHash)
+		delete(p.accountsOrigin, prev.address)
 		p.AccountMux.Unlock()
 		p.StorageMux.Lock()
-		p.storages.Delete(prev.addrHash)
-		p.storagesOrigin.Delete(prev.address)
+		delete(p.storages, prev.addrHash)
+		delete(p.storagesOrigin, prev.address)
 		p.StorageMux.Unlock()
 	}
 
@@ -1629,13 +1635,11 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 				err     error
 				nodeSet *trienode.NodeSet
 			}
-			dirtySize := 0
-			p.stateObjectsDirty.Range(func(key, value interface{}) bool { dirtySize++; return true })
-			taskResults := make(chan taskResult, dirtySize)
+			taskResults := make(chan taskResult, len(p.stateObjectsDirty))
 			tasksNum := 0
 			finishCh := make(chan struct{})
 
-			threads := gopool.Threads(dirtySize)
+			threads := gopool.Threads(len(p.stateObjectsDirty))
 			wg := sync.WaitGroup{}
 			for i := 0; i < threads; i++ {
 				wg.Add(1)
@@ -1651,8 +1655,7 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 					}
 				}()
 			}
-			p.stateObjectsDirty.Range(func(key, value interface{}) bool {
-				addr := key.(common.Address)
+			for addr := range p.stateObjectsDirty {
 				if obj, _ := p.getStateObjectFromStateObjects(addr); !obj.deleted {
 					tasks <- func() {
 						// Write any storage changes in the state object to its storage trie
@@ -1669,8 +1672,7 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 					}
 					tasksNum++
 				}
-				return true
-			})
+			}
 
 			for i := 0; i < tasksNum; i++ {
 				res := <-taskResults
@@ -1716,21 +1718,7 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 
 				if root != origin {
 					start := time.Now()
-					accountsOriginMap := make(map[common.Address][]byte)
-					storagesOriginMap := make(map[common.Address]map[common.Hash][]byte)
-					p.accountsOrigin.Range(func(key, value interface{}) bool {
-						if value != nil {
-							accountsOriginMap[key.(common.Address)] = value.([]byte)
-						} else {
-							accountsOriginMap[key.(common.Address)] = nil
-						}
-						return true
-					})
-					p.storagesOrigin.Range(func(key, value interface{}) bool {
-						storagesOriginMap[key.(common.Address)] = value.(map[common.Hash][]byte)
-						return true
-					})
-					set := triestate.New(accountsOriginMap, storagesOriginMap, incomplete)
+					set := triestate.New(p.accountsOrigin, p.storagesOrigin, incomplete)
 					if err := p.db.TrieDB().Update(root, origin, block, nodes, set); err != nil {
 						return err
 					}
@@ -1750,10 +1738,8 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 			if metrics.EnabledExpensive {
 				defer func(start time.Time) { p.CodeCommits += time.Since(start) }(time.Now())
 			}
-			var resultErr error
 			codeWriter := p.db.DiskDB().NewBatch()
-			p.stateObjectsDirty.Range(func(key, value interface{}) bool {
-				addr := key.(common.Address)
+			for addr := range p.stateObjectsDirty {
 				if obj, _ := p.getStateObjectFromStateObjects(addr); !obj.deleted {
 					// Write any contract code associated with the state object
 					if obj.code != nil && obj.dirtyCode {
@@ -1761,17 +1747,12 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 						obj.dirtyCode = false
 						if codeWriter.ValueSize() > ethdb.IdealBatchSize {
 							if err := codeWriter.Write(); err != nil {
-								resultErr = err
-								return false
+								return err
 							}
 							codeWriter.Reset()
 						}
 					}
 				}
-				return true
-			})
-			if resultErr != nil {
-				return resultErr
 			}
 			if codeWriter.ValueSize() > 0 {
 				if err := codeWriter.Write(); err != nil {
@@ -1789,17 +1770,7 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 				}
 				// Only update if there's a state transition (skip empty Clique blocks)
 				if parent := p.snap.Root(); parent != p.expectedRoot {
-					accounts := make(map[common.Hash][]byte)
-					storages := make(map[common.Hash]map[common.Hash][]byte)
-					p.accounts.Range(func(key, value interface{}) bool {
-						accounts[key.(common.Hash)] = value.([]byte)
-						return true
-					})
-					p.storages.Range(func(key, value interface{}) bool {
-						storages[key.(common.Hash)] = value.(map[common.Hash][]byte)
-						return true
-					})
-					err := p.snaps.Update(p.expectedRoot, parent, p.convertAccountSet(&p.stateObjectsDestruct), accounts, storages)
+					err := p.snaps.Update(p.expectedRoot, parent, p.convertAccountSet(&p.stateObjectsDestruct), p.accounts, p.storages)
 
 					if err != nil {
 						log.Warn("Failed to update snapshot tree", "from", parent, "to", p.expectedRoot, "err", err)
@@ -1841,11 +1812,11 @@ func (p *ParallelStateDB) Commit(block uint64, deleteEmptyObjects bool) (common.
 		root = types.EmptyRootHash
 	}
 	// Clear all internal flags at the end of commit operation.
-	p.accounts = sync.Map{}
-	p.storages = sync.Map{}
-	p.accountsOrigin = sync.Map{}
-	p.storagesOrigin = sync.Map{}
-	p.stateObjectsDirty = sync.Map{}
+	p.accounts = make(map[common.Hash][]byte)
+	p.storages = make(map[common.Hash]map[common.Hash][]byte)
+	p.accountsOrigin = make(map[common.Address][]byte)
+	p.storagesOrigin = make(map[common.Address]map[common.Hash][]byte)
+	p.stateObjectsDirty = make(map[common.Address]struct{})
 	p.stateObjectsDestruct = sync.Map{}
 	return root, nil
 }
@@ -1914,17 +1885,23 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 					// Note, we can't do this only at the end of a block because multiple
 					// transactions within the same block might self destruct and then
 					// resurrect an account; but the snapshotter needs both events.
-					p.accounts.Delete(obj.addrHash)
-					p.storages.Delete(obj.addrHash)
-					p.accountsOrigin.Delete(obj.address)
-					p.storagesOrigin.Delete(obj.address)
+					p.AccountMux.Lock()
+					delete(p.accounts, obj.addrHash)
+					delete(p.accountsOrigin, obj.address)
+					p.AccountMux.Unlock()
+					p.StorageMux.Lock()
+					delete(p.storages, obj.addrHash)
+					delete(p.storagesOrigin, obj.address)
+					p.StorageMux.Unlock()
 				} else {
 					obj.finalise(true) // Prefetch slots in the background
 				}
 
 				obj.created = false
-				p.stateObjectsPending.Store(addr, struct{}{})
-				p.stateObjectsDirty.Store(addr, struct{}{})
+				p.pendingDirtyLock.Lock()
+				p.stateObjectsPending[addr] = struct{}{}
+				p.stateObjectsDirty[addr] = struct{}{}
+				p.pendingDirtyLock.Unlock()
 			}
 		}()
 	}
@@ -1974,8 +1951,7 @@ func (p *ParallelStateDB) AccountsIntermediateRoot() {
 	// the account prefetcher. Instead, let's process all the storage updates
 	// first, giving the account prefetches just a few more milliseconds of time
 	// to pull useful data from disk.
-	p.stateObjectsPending.Range(func(key, value interface{}) bool {
-		addr := key.(common.Address)
+	for addr := range p.stateObjectsPending {
 		if obj, _ := p.getStateObjectFromStateObjects(addr); !obj.deleted {
 			wg.Add(1)
 			tasks <- func() {
@@ -1986,11 +1962,12 @@ func (p *ParallelStateDB) AccountsIntermediateRoot() {
 				// to the deletion, because whereas it is enough to track account updates
 				// at commit time, deletions need tracking at transaction boundary level to
 				// ensure we capture state clearing.
-				p.accounts.Store(obj.addrHash, types.SlimAccountRLP(obj.data))
+				p.AccountMux.Lock()
+				p.accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
+				p.AccountMux.Unlock()
 			}
 		}
-		return true
-	})
+	}
 	wg.Wait()
 }
 
@@ -2011,8 +1988,7 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 
 	usedAddrs := make([][]byte, 0)
 
-	p.stateObjectsPending.Range(func(key, value interface{}) bool {
-		addr := key.(common.Address)
+	for addr := range p.stateObjectsPending {
 		if obj, _ := p.getStateObjectFromStateObjects(addr); obj.deleted {
 			p.deleteStateObject(obj)
 			p.AccountDeleted += 1
@@ -2021,12 +1997,13 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 			p.AccountUpdated += 1
 		}
 		usedAddrs = append(usedAddrs, common.CopyBytes(addr[:])) // Copy needed for closure
-		return true
-	})
+	}
 	// parallel slotDB trie will be updated to mainDB since intermediateRoot happens after conflict check.
 	// so it should be save to clear pending here.
 	// otherwise there can be a case that the deleted object get ignored and processes as live object in verify phase.
-	p.stateObjectsPending = sync.Map{}
+	if len(p.stateObjectsPending) > 0 {
+		p.stateObjectsPending = make(map[common.Address]struct{})
+	}
 
 	// Track the amount of time wasted on hashing the account trie
 	if metrics.EnabledExpensive {
@@ -2070,13 +2047,13 @@ func (p *ParallelStateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[
 		//   the data cached in s.accountsOrigin set by 'updateStateObject'.
 		addrHash := crypto.Keccak256Hash(addr[:])
 		if prev == nil {
-			if _, ok := p.accounts.Load(addrHash); ok {
-				p.accountsOrigin.Store(addr, nil) // case (b)
+			if _, ok := p.accounts[addrHash]; ok {
+				p.accountsOrigin[addr] = nil // case (b)
 			}
 			return true
 		}
 		// It can overwrite the data in s.accountsOrigin set by 'updateStateObject'.
-		p.accountsOrigin.Store(addr, types.SlimAccountRLP(*prev)) // case (c) or (d)
+		p.accountsOrigin[addr] = types.SlimAccountRLP(*prev) // case (c) or (d)
 
 		// Short circuit if the storage was empty.
 		if prev.Root == types.EmptyRootHash {
@@ -2095,17 +2072,16 @@ func (p *ParallelStateDB) handleDestruction(nodes *trienode.MergedNodeSet) (map[
 		// of aborted deletion.
 		if aborted {
 			incomplete[addr] = struct{}{}
-			p.storagesOrigin.Delete(addr)
+			delete(p.storagesOrigin, addr)
 			return true
 		}
-		if storages, ok := p.storagesOrigin.Load(addr); !ok || storages == nil {
-			p.storagesOrigin.Store(addr, slots)
+		if storages, ok := p.storagesOrigin[addr]; !ok || storages == nil {
+			p.storagesOrigin[addr] = slots
 		} else {
 			// It can overwrite the data in s.storagesOrigin[addrHash] set by
 			// 'object.updateTrie'.
 			for key, val := range slots {
-				storagesMap := storages.(map[common.Hash][]byte)
-				storagesMap[key] = val
+				p.storagesOrigin[addr][key] = val
 			}
 		}
 		if err := nodes.Merge(set); err != nil {
@@ -2294,16 +2270,16 @@ func (p *ParallelStateDB) updateStateObject(obj *stateObject) {
 	// to the deletion, because whereas it is enough to track account updates
 	// at commit time, deletions need tracking at transaction boundary level to
 	// ensure we capture state clearing.
-	p.accounts.Store(obj.addrHash, types.SlimAccountRLP(obj.data))
+	p.accounts[obj.addrHash] = types.SlimAccountRLP(obj.data)
 
 	// Track the original value of mutated account, nil means it was not present.
 	// Skip if it has been tracked (because updateStateObject may be called
 	// multiple times in a block).
-	if _, ok := p.accountsOrigin.Load(obj.address); !ok {
+	if _, ok := p.accountsOrigin[obj.address]; !ok {
 		if obj.origin == nil {
-			p.accountsOrigin.Store(obj.address, nil)
+			p.accountsOrigin[obj.address] = nil
 		} else {
-			p.accountsOrigin.Store(obj.address, types.SlimAccountRLP(*obj.origin))
+			p.accountsOrigin[obj.address] = types.SlimAccountRLP(*obj.origin)
 		}
 	}
 }
@@ -2375,27 +2351,19 @@ func (p *ParallelStateDB) getStorageMux() *sync.Mutex {
 }
 
 func (p *ParallelStateDB) getStorages(hash common.Hash) map[common.Hash][]byte {
-	value, ok := p.storages.Load(hash)
-	if ok {
-		return value.(map[common.Hash][]byte)
-	}
-	return nil
+	return p.storages[hash]
 }
 
 func (p *ParallelStateDB) setStorages(hash common.Hash, storage map[common.Hash][]byte) {
-	p.storages.Store(hash, storage)
+	p.storages[hash] = storage
 }
 
 func (p *ParallelStateDB) getStoragesOrigin(address common.Address) map[common.Hash][]byte {
-	value, ok := p.storagesOrigin.Load(address)
-	if ok {
-		return value.(map[common.Hash][]byte)
-	}
-	return nil
+	return p.storagesOrigin[address]
 }
 
 func (p *ParallelStateDB) setStoragesOrigin(address common.Address, origin map[common.Hash][]byte) {
-	p.storagesOrigin.Store(address, origin)
+	p.storagesOrigin[address] = origin
 }
 
 func (p *ParallelStateDB) timeAddStorageHashes(du time.Duration) {

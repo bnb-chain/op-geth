@@ -4,10 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/ethereum/go-ethereum/metrics"
 
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -16,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -291,7 +291,7 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 		}(time.Now())
 		log.Debug("pevm confirm", "txIndex", pr.txReq.txIndex)
 		return p.confirmTxResult(statedb, gp, pr, enableParallelMerge)
-	}, func(levels []TxLevel, cq *confirmQueue) (err error) {
+	}, func(levels TxLevels, cq *confirmQueue) (err error) {
 		defer func(t0 time.Time) {
 			atomic.AddInt64(&confirmDurations, time.Since(t0).Nanoseconds())
 		}(time.Now())
@@ -355,28 +355,66 @@ func (p *PEVMProcessor) Process(block *types.Block, statedb state.StateDBer, cfg
 	return p.receipts, allLogs, usedGas.Load(), nil
 }
 
-func (p *PEVMProcessor) afterParallelConfirm(statedb state.StateDBer, header *types.Header, levels []TxLevel, cq *confirmQueue) error {
-	// Delay fees do not require concurrent processing; handling them serially at the end is actually more efficient.
-	// Because during concurrency, lock contention is intense
+func (p *PEVMProcessor) afterParallelConfirm(statedb state.StateDBer, header *types.Header, levels TxLevels, cq *confirmQueue) error {
+	txCount := levels.txCount()
+	tipChan := make(chan *state.DelayedGasFee, txCount)
+	baseChan := make(chan *state.DelayedGasFee, txCount)
+	l1Chan := make(chan *state.DelayedGasFee, txCount)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		for {
+			gasFee, ok := <-tipChan
+			if !ok {
+				return
+			}
+			statedb.AddBalance(gasFee.Coinbase, gasFee.TipFee)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for {
+			gasFee, ok := <-baseChan
+			if !ok {
+				return
+			}
+			statedb.AddBalance(params.OptimismBaseFeeRecipient, gasFee.BaseFee)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for {
+			gasFee, ok := <-l1Chan
+			if !ok {
+				return
+			}
+			statedb.AddBalance(params.OptimismL1FeeRecipient, gasFee.L1Fee)
+		}
+	}()
 	for _, txs := range levels {
 		for _, tx := range txs {
 			toConfirm := cq.queue[tx.txIndex]
 			result := toConfirm.result
 			delayGasFee := result.result.delayFees
-			// add delayed gas fee
 			if delayGasFee != nil {
 				if delayGasFee.TipFee != nil {
-					statedb.AddBalance(delayGasFee.Coinbase, delayGasFee.TipFee)
+					tipChan <- delayGasFee
 				}
 				if delayGasFee.BaseFee != nil {
-					statedb.AddBalance(params.OptimismBaseFeeRecipient, delayGasFee.BaseFee)
+					baseChan <- delayGasFee
 				}
 				if delayGasFee.L1Fee != nil {
-					statedb.AddBalance(params.OptimismL1FeeRecipient, delayGasFee.L1Fee)
+					l1Chan <- delayGasFee
 				}
 			}
 		}
 	}
+	close(tipChan)
+	close(baseChan)
+	close(l1Chan)
+	wg.Wait()
+
 	isByzantium := p.config.IsByzantium(header.Number)
 	if !isByzantium {
 		panic("afterParallelConfirm not support before Byzantium block")

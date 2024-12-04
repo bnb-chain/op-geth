@@ -987,7 +987,7 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, reads []RWEventItem, w
 
 	for _, addr := range s.gasFeeReceivers {
 		if _, ok := addrMap[addr]; ok {
-			rwSet.cannotGasFeeDelay = true
+			s.rwSets[index].cannotGasFeeDelay = true
 			break
 		}
 	}

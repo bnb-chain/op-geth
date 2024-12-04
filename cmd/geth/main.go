@@ -170,6 +170,8 @@ var (
 		utils.RollupComputePendingBlock,
 		utils.RollupHaltOnIncompatibleProtocolVersionFlag,
 		utils.RollupSuperchainUpgradesFlag,
+		utils.ParallelTxDAGFlag,
+		utils.ParallelTxDAGSenderPrivFlag,
 		configFileFlag,
 		utils.LogDebugFlag,
 		utils.LogBacktraceAtFlag,

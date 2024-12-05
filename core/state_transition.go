@@ -527,81 +527,34 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	// - reset transient storage(eip 1153)
 	st.state.Prepare(rules, msg.From, st.evm.Context.Coinbase, msg.To, vm.ActivePrecompiles(rules), msg.AccessList)
 
-	if !contractCreation {
-		// Increment the nonce for the next transaction
-		st.state.SetNonce(msg.From, st.state.GetNonce(sender.Address())+1)
-	}
-
-	// Check authorizations list validity.
-	if msg.AuthList != nil {
-		for _, auth := range msg.AuthList {
-			// Verify chain ID is 0 or equal to current chain ID.
-			if auth.ChainID != 0 && st.evm.ChainConfig().ChainID.Uint64() != auth.ChainID {
-				continue
-			}
-			// Limit nonce to 2^64-1 per EIP-2681.
-			if auth.Nonce+1 < auth.Nonce {
-				continue
-			}
-			// Validate signature values and recover authority.
-			authority, err := auth.Authority()
-			if err != nil {
-				continue
-			}
-			// Check the authority account 1) doesn't have code or has exisiting
-			// delegation 2) matches the auth's nonce
-			st.state.AddAddressToAccessList(authority)
-			code := st.state.GetCode(authority)
-			if _, ok := types.ParseDelegation(code); len(code) != 0 && !ok {
-				continue
-			}
-			if have := st.state.GetNonce(authority); have != auth.Nonce {
-				continue
-			}
-			// If the account already exists in state, refund the new account cost
-			// charged in the intrinsic calculation.
-			if exists := st.state.Exist(authority); exists {
-				st.state.AddRefund(params.CallNewAccountGas - params.TxAuthTupleGas)
-			}
-			st.state.SetNonce(authority, auth.Nonce+1)
-			delegation := types.AddressToDelegation(auth.Address)
-			if auth.Address == (common.Address{}) {
-				// If the delegation is for the zero address, completely clear all
-				// delegations from the account.
-				delegation = []byte{}
-			}
-			st.state.SetCode(authority, delegation)
-
-			// Usually the transaction destination and delegation target are added to
-			// the access list in statedb.Prepare(..), however if the delegation is in
-			// the same transaction we need add here as Prepare already happened.
-			if *msg.To == authority {
-				st.state.AddAddressToAccessList(auth.Address)
-			}
-		}
-	}
-
-	if !contractCreation {
-		if addr, ok := types.ParseDelegation(st.state.GetCode(*msg.To)); ok {
-			// Perform convenience warming of sender's delegation target. Although the
-			// sender is already warmed in Prepare(..), it's possible a delegation to
-			// the account was deployed during this transaction. To handle correctly,
-			// wait until the final state of delegations is determined before
-			// performing the resolution and warming.
-			st.state.AddAddressToAccessList(addr)
-		}
-	}
-
 	var (
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
 	)
-	start := time.Now()
 	if contractCreation {
 		ret, _, st.gasRemaining, vmerr = st.evm.Create(sender, msg.Data, st.gasRemaining, value)
 	} else {
-		// Increment the nonce for the next transaction
-		st.state.SetNonce(msg.From, st.state.GetNonce(sender.Address())+1)
+		// Increment the nonce for the next transaction.
+		st.state.SetNonce(msg.From, st.state.GetNonce(msg.From)+1)
+
+		// Apply EIP-7702 authorizations.
+		if msg.AuthList != nil {
+			for _, auth := range msg.AuthList {
+				// Note errors are ignored, we simply skip invalid authorizations here.
+				st.applyAuthorization(msg, &auth)
+			}
+		}
+
+		// Perform convenience warming of sender's delegation target. Although the
+		// sender is already warmed in Prepare(..), it's possible a delegation to
+		// the account was deployed during this transaction. To handle correctly,
+		// simply wait until the final state of delegations is determined before
+		// performing the resolution and warming.
+		if addr, ok := types.ParseDelegation(st.state.GetCode(*msg.To)); ok {
+			st.state.AddAddressToAccessList(addr)
+		}
+
+		// Execute the transaction's call.
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), msg.Data, st.gasRemaining, value)
 	}
 	DebugInnerExecutionDuration += time.Since(start)

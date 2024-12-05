@@ -60,7 +60,7 @@ func (o *OpLegacy) Prepare(chain consensus.ChainHeaderReader, header *types.Head
 	return fmt.Errorf("cannot prepare for legacy block header: %s (num %d)", header.Hash(), header.Number)
 }
 
-func (o *OpLegacy) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header, withdrawals []*types.Withdrawal) {
+func (o *OpLegacy) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state state.StateDBer, txs []*types.Transaction, uncles []*types.Header, withdrawals []*types.Withdrawal) {
 	panic(fmt.Errorf("cannot finalize legacy block header: %s (num %d)", header.Hash(), header.Number))
 }
 

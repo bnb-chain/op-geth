@@ -17,7 +17,11 @@
 package state
 
 import (
+	"sync"
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 )
@@ -76,6 +80,47 @@ type StateDBer interface {
 
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
-
-	GetStateObjectFromUnconfirmedDB(addr common.Address) (*stateObject, bool)
+	GetPreimage(common.Hash) ([]byte, bool)
+	StopPrefetcher()
+	StartPrefetcher(namespace string)
+	SetExpectedStateRoot(root common.Hash)
+	ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (types.TxDAG, error)
+	ResolveStats() map[int]*types.ExeStat
+	IntermediateRoot(deleteEmptyObjects bool) common.Hash
+	Error() error
+	Timers() *Timers
+	Preimages() map[common.Hash][]byte
+	Commit(block uint64, deleteEmptyObjects bool) (common.Hash, error)
+	SetBalance(addr common.Address, amount *uint256.Int)
+	PrepareForParallel()
+	Finalise(deleteEmptyObjects bool)
+	MarkFullProcessed()
+	AccessListCopy() *accessList
+	SetTxContext(hash common.Hash, index int)
+	SetAccessList(list *accessList)
+	getDeletedStateObject(addr common.Address) *stateObject
+	appendJournal(journalEntry journalEntry)
+	addJournalDirty(address common.Address)
+	getPrefetcher() *triePrefetcher
+	getDB() Database
+	getOriginalRoot() common.Hash
+	getTrie() Trie
+	getStateObjectDestructLock() *sync.RWMutex
+	getStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool)
+	getSnap() snapshot.Snapshot
+	timeAddSnapshotStorageReads(du time.Duration)
+	setError(err error)
+	getTrieParallelLock() *sync.Mutex
+	timeAddStorageReads(du time.Duration)
+	RecordWrite(key types.RWKey, value interface{})
+	timeAddStorageUpdates(du time.Duration)
+	countAddStorageDeleted(diff int)
+	countAddStorageUpdated(diff int)
+	getStorageMux() *sync.Mutex
+	getStorages(hash common.Hash) map[common.Hash][]byte
+	setStorages(hash common.Hash, storage map[common.Hash][]byte)
+	getStoragesOrigin(address common.Address) map[common.Hash][]byte
+	setStoragesOrigin(address common.Address, origin map[common.Hash][]byte)
+	timeAddStorageHashes(du time.Duration)
+	timeAddStorageCommits(du time.Duration)
 }

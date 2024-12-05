@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"os"
 	"reflect"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -109,7 +110,7 @@ type btHeaderMarshaling struct {
 	ExcessBlobGas *math.HexOrDecimal64
 }
 
-func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, postCheck func(error, *core.BlockChain), dagFile string, enableParallel bool) (result error) {
+func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, postCheck func(error, *core.BlockChain), dagFile string, enableParallel bool, enableUnorderedMerge bool, enableParallelMerge bool) (result error) {
 	config, ok := Forks[t.json.Network]
 	if !ok {
 		return UnsupportedForkError{t.json.Network}
@@ -151,9 +152,12 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 		cache.SnapshotWait = true
 	}
 	chain, err := core.NewBlockChain(db, cache, gspec, nil, engine, vm.Config{
-		EnableParallelExec: enableParallel,
-		ParallelTxNum:      4,
-		Tracer:             tracer,
+		EnableParallelExec:           enableParallel,
+		ParallelTxNum:                4,
+		EnableParallelUnorderedMerge: enableUnorderedMerge,
+		EnableTxParallelMerge:        enableParallelMerge,
+		Tracer:                       tracer,
+		ParallelThreshold:            1,
 	}, nil, nil)
 	if err != nil {
 		return err
@@ -161,6 +165,7 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 	defer chain.Stop()
 	if len(dagFile) > 0 {
 		chain.SetupTxDAGGeneration(dagFile, enableParallel)
+		time.Sleep(100 * time.Millisecond)
 	}
 	validBlocks, err := t.insertBlocks(chain)
 	if err != nil {

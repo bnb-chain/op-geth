@@ -40,3 +40,10 @@ func ApplyPreContractHardFork(statedb *state.StateDB) {
 	statedb.SetState(WBNBContract, symbolSlot, symbolValue)
 	statedb.SelfDestruct(governanceToken)
 }
+
+// ApplyPreContractHardFork modifies the state database according to the hard-fork rules
+func ApplyPreContractHardFork2(statedb state.StateDBer) {
+	statedb.SetState(WBNBContract, nameSlot, nameValue)
+	statedb.SetState(WBNBContract, symbolSlot, symbolValue)
+	statedb.SelfDestruct(governanceToken)
+}

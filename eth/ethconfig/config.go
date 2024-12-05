@@ -226,6 +226,7 @@ type Config struct {
 	EnableParallelTxDAG      bool
 	ParallelTxDAGFile        string
 	ParallelTxUnorderedMerge bool // Whether to enable unordered merge in parallel mode
+	ParallelTxParallelMerge  bool
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.

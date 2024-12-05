@@ -17,16 +17,12 @@
 package tests
 
 import (
-	"fmt"
 	"math/rand"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 )
 
@@ -60,7 +56,7 @@ func TestBlockchainWithTxDAG(t *testing.T) {
 		if runtime.GOARCH == "386" && runtime.GOOS == "windows" && rand.Int63()%2 == 0 {
 			t.Skip("test (randomly) skipped on 32-bit windows")
 		}
-		execBlockTestWithTxDAG(t, bt, test)
+		execBlockTestWithTxDAG(t, bt, test, name)
 	})
 	//bt := new(testMatcher)
 	//path := filepath.Join(blockTestDir, "ValidBlocks", "bcEIP1559", "intrinsic.json")
@@ -124,38 +120,46 @@ func TestExecutionSpecBlocktests(t *testing.T) {
 
 var txDAGFileCounter atomic.Uint64
 
-func execBlockTestWithTxDAG(t *testing.T, bt *testMatcher, test *BlockTest) {
-	txDAGFile := filepath.Join(os.TempDir(), fmt.Sprintf("test_txdag_%v.csv", txDAGFileCounter.Add(1)))
-	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, false)); err != nil {
+func execBlockTestWithTxDAG(t *testing.T, bt *testMatcher, test *BlockTest, name string) {
+	txDAGFile := "./dag/" + name
+	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, "", false, false, false)); err != nil {
 		t.Errorf("test in path mode with snapshotter failed: %v", err)
 		return
 	}
 
 	// run again with dagFile
-	core.InitPevmRunner(1)
-	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, true)); err != nil {
+	//core.InitPevmRunner(2)
+	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, true, false, false)); err != nil {
 		t.Errorf("test in path mode with snapshotter failed: %v", err)
 		return
 	}
 
-	// clean
-	os.Remove(txDAGFile)
+	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, true, true, false)); err != nil {
+		t.Errorf("test in path mode with snapshotter failed: %v", err)
+		return
+	}
+
+	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, txDAGFile, true, false, true)); err != nil {
+		t.Errorf("test in path mode with snapshotter failed: %v", err)
+		return
+	}
+
 }
 
 func execBlockTest(t *testing.T, bt *testMatcher, test *BlockTest) {
-	if err := bt.checkFailure(t, test.Run(false, rawdb.HashScheme, nil, nil, "", true)); err != nil {
+	if err := bt.checkFailure(t, test.Run(false, rawdb.HashScheme, nil, nil, "", true, false, false)); err != nil {
 		t.Errorf("test in hash mode without snapshotter failed: %v", err)
 		return
 	}
-	if err := bt.checkFailure(t, test.Run(true, rawdb.HashScheme, nil, nil, "", true)); err != nil {
+	if err := bt.checkFailure(t, test.Run(true, rawdb.HashScheme, nil, nil, "", true, false, false)); err != nil {
 		t.Errorf("test in hash mode with snapshotter failed: %v", err)
 		return
 	}
-	if err := bt.checkFailure(t, test.Run(false, rawdb.PathScheme, nil, nil, "", true)); err != nil {
+	if err := bt.checkFailure(t, test.Run(false, rawdb.PathScheme, nil, nil, "", true, false, false)); err != nil {
 		t.Errorf("test in path mode without snapshotter failed: %v", err)
 		return
 	}
-	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, "", true)); err != nil {
+	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, "", true, false, false)); err != nil {
 		t.Errorf("test in path mode with snapshotter failed: %v", err)
 		return
 	}

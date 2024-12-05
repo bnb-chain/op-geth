@@ -231,8 +231,23 @@ type StateDB struct {
 	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
 }
 
-func (s *StateDB) GetStateObjectFromUnconfirmedDB(addr common.Address) (*stateObject, bool) {
-	return nil, false
+type Timers struct {
+	// Measurements gathered during execution for debugging purposes
+	AccountReads         time.Duration
+	AccountHashes        time.Duration
+	AccountUpdates       time.Duration
+	AccountCommits       time.Duration
+	StorageReads         time.Duration
+	StorageHashes        time.Duration
+	StorageUpdates       time.Duration
+	StorageCommits       time.Duration
+	SnapshotAccountReads time.Duration
+	SnapshotStorageReads time.Duration
+	SnapshotCommits      time.Duration
+	TrieDBCommits        time.Duration
+	TrieCommits          time.Duration
+	CodeCommits          time.Duration
+	TxDAGGenerate        time.Duration
 }
 
 // New creates a new state from a given trie.
@@ -748,15 +763,6 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 		return obj
 	}
 	return nil
-}
-
-// GetStateNoUpdate retrieves a value from the given account's storage trie, but do not update the db.stateObjects cache.
-func (s *StateDB) GetStateNoUpdate(addr common.Address, hash common.Hash) (ret common.Hash) {
-	object := s.getStateObjectNoUpdate(addr)
-	if object != nil {
-		return object.GetStateNoUpdate(hash)
-	}
-	return common.Hash{}
 }
 
 // getStateObjectNoUpdate is similar with getStateObject except that it does not
@@ -2161,4 +2167,121 @@ func (s *StateDB) PrepareForParallel() {
 			s.parallel.stateObjects.StoreStateObject(addr, newObj)
 		}
 	}
+}
+
+func (s *StateDB) Timers() *Timers {
+	return &Timers{
+		AccountReads:         s.AccountReads,
+		AccountHashes:        s.AccountHashes,
+		AccountUpdates:       s.AccountUpdates,
+		AccountCommits:       s.AccountCommits,
+		StorageReads:         s.StorageReads,
+		StorageHashes:        s.StorageHashes,
+		StorageUpdates:       s.StorageUpdates,
+		StorageCommits:       s.StorageCommits,
+		SnapshotAccountReads: s.SnapshotAccountReads,
+		SnapshotStorageReads: s.SnapshotStorageReads,
+		SnapshotCommits:      s.SnapshotCommits,
+		TrieDBCommits:        s.TrieDBCommits,
+		TrieCommits:          s.TrieCommits,
+		CodeCommits:          s.CodeCommits,
+		TxDAGGenerate:        s.TxDAGGenerate,
+	}
+}
+
+func (s *StateDB) AccessListCopy() *accessList {
+	return s.accessList.Copy()
+}
+
+func (s *StateDB) SetAccessList(list *accessList) {
+	s.accessList = list
+}
+
+func (s *StateDB) GetPreimage(hash common.Hash) ([]byte, bool) {
+	bytes, ok := s.preimages[hash]
+	return bytes, ok
+}
+
+func (s *StateDB) appendJournal(journalEntry journalEntry) {
+	s.journal.append(journalEntry)
+}
+
+func (s *StateDB) addJournalDirty(address common.Address) {
+	s.journal.dirty(address)
+}
+
+func (s *StateDB) getPrefetcher() *triePrefetcher {
+	return s.prefetcher
+}
+
+func (s *StateDB) getDB() Database {
+	return s.db
+}
+
+func (s *StateDB) getOriginalRoot() common.Hash {
+	return s.originalRoot
+}
+
+func (s *StateDB) getTrie() Trie {
+	return s.trie
+}
+
+func (s *StateDB) getStateObjectDestructLock() *sync.RWMutex {
+	return &s.stateObjectDestructLock
+}
+
+func (s *StateDB) getSnap() snapshot.Snapshot {
+	return s.snap
+}
+
+func (s *StateDB) timeAddSnapshotStorageReads(du time.Duration) {
+	s.SnapshotStorageReads += du
+}
+
+func (s *StateDB) getTrieParallelLock() *sync.Mutex {
+	return &s.trieParallelLock
+}
+
+func (s *StateDB) timeAddStorageReads(du time.Duration) {
+	s.StorageReads += du
+}
+
+func (s *StateDB) timeAddStorageUpdates(du time.Duration) {
+	s.StorageUpdates += du
+}
+
+func (s *StateDB) countAddStorageDeleted(diff int) {
+	s.StorageDeleted += diff
+}
+
+func (s *StateDB) countAddStorageUpdated(diff int) {
+	s.StorageUpdated += diff
+}
+
+func (s *StateDB) getStorageMux() *sync.Mutex {
+	return &s.StorageMux
+}
+
+func (s *StateDB) getStorages(hash common.Hash) map[common.Hash][]byte {
+	return s.storages[hash]
+}
+
+func (s *StateDB) setStorages(hash common.Hash, storage map[common.Hash][]byte) {
+	s.storages[hash] = storage
+}
+
+func (s *StateDB) getStoragesOrigin(address common.Address) map[common.Hash][]byte {
+	return s.storagesOrigin[address]
+}
+
+func (s *StateDB) setStoragesOrigin(address common.Address, origin map[common.Hash][]byte) {
+	s.storagesOrigin[address] = origin
+}
+
+func (s *StateDB) timeAddStorageHashes(du time.Duration) {
+	s.StorageHashes += du
+}
+
+func (s *StateDB) timeAddStorageCommits(du time.Duration) {
+	s.StorageCommits += du
 }

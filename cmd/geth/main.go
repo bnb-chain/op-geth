@@ -173,6 +173,7 @@ var (
 		utils.ParallelTxUnorderedMergeFlag,
 		utils.ParallelTxParallelMergeFlag,
 		utils.ParallelTxNumFlag,
+		utils.ParallelThresholdFlag,
 		utils.ParallelTxDAGFlag,
 		utils.ParallelTxDAGFileFlag,
 		utils.ParallelTxDAGSenderPrivFlag,

@@ -228,6 +228,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			EnableParallelUnorderedMerge: config.ParallelTxUnorderedMerge,
 			EnableTxParallelMerge:        config.ParallelTxParallelMerge,
 			ParallelTxNum:                config.ParallelTxNum,
+			ParallelThreshold:            config.ParallelThreshold,
 			EnableOpcodeOptimizations:    config.EnableOpcodeOptimizing,
 		}
 		cacheConfig = &core.CacheConfig{

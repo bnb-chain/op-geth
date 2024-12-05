@@ -535,6 +535,7 @@ func (pst *UncommittedDB) Merge(deleteEmptyObjects bool) error {
 		// after Berlin hardfork, all the accessList should be reset before a transaction was executed
 		pst.maindb.SetAccessList(pst.accessList)
 	}
+	log.Info("pst.cache size", "idx", pst.txIndex, "size", len(pst.cache))
 	// 3. merge logs writes
 	for _, st := range pst.cache {
 		st.merge(pst.maindb)

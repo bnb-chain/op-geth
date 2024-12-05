@@ -1918,7 +1918,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				bc.parseTxDAG(block)
 			}
 			isByzantium := bc.chainConfig.IsByzantium(block.Number())
-			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge && isByzantium {
+			lowTxsNum := bc.vmConfig.ParallelThreshold >= block.Transactions().Len()
+
+			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge && isByzantium && !lowTxsNum {
 				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
 			} else {
 				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
@@ -1951,8 +1953,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			statedb.SetExpectedStateRoot(block.Root())
 
 			// Decide the enabling of parallelExec
-			invalidParallelConfig := bc.vmConfig.TxDAG == nil && bc.vmConfig.EnableParallelUnorderedMerge
-			lowTxsNum := bc.vmConfig.ParallelThreshold >= block.Transactions().Len()
+			invalidParallelConfig := bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)
 			useSerialProcessor := invalidParallelConfig || lowTxsNum || !bc.vmConfig.EnableParallelExec
 
 			// Process block using the parent state as reference point
@@ -2871,7 +2872,7 @@ func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
 
 }
 
-func (bc *BlockChain) reGenerateStateForFallBack(parentRoot common.Hash, blockRoot common.Hash, oldDB *state.StateDB) (*state.StateDB, error) {
+func (bc *BlockChain) reGenerateStateForFallBack(parentRoot common.Hash, blockRoot common.Hash, oldDB state.StateDBer) (state.StateDBer, error) {
 	oldDB.StopPrefetcher()
 	statedb, err := state.New(parentRoot, bc.stateCache, bc.snaps)
 	if err != nil {

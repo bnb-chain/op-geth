@@ -1844,7 +1844,8 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 	})
 	p.stateObjectsDestructDirty = sync.Map{}
 
-	dirtyChan := make(chan common.Address, goMaxProcs)
+	runnerCount := goMaxProcs / 2
+	dirtyChan := make(chan common.Address, runnerCount)
 	go func() {
 		p.journalDirty.Range(func(key, value interface{}) bool {
 			dirtyChan <- key.(common.Address)
@@ -1853,7 +1854,7 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 		close(dirtyChan)
 	}()
 	var wg sync.WaitGroup
-	for i := 0; i < goMaxProcs; i++ {
+	for i := 0; i < runnerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -1976,7 +1977,6 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 	// _untouched_. We can check with the prefetcher, if it can give us a trie
 	// which has the same root, but also has some content loaded into it.
 	// The parallel execution do the change incrementally, so can not check the prefetcher here
-	p.trieParallelLock.Lock()
 	if p.trie == nil {
 		tr, err := p.db.OpenTrie(p.originalRoot)
 		if err != nil {
@@ -1984,7 +1984,6 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 		}
 		p.trie = tr
 	}
-	p.trieParallelLock.Unlock()
 
 	usedAddrs := make([][]byte, 0)
 
@@ -2013,8 +2012,6 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 	if p.noTrie {
 		return p.expectedRoot
 	} else {
-		p.trieParallelLock.Lock()
-		defer p.trieParallelLock.Unlock()
 		return p.trie.Hash()
 	}
 }

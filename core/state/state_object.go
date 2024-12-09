@@ -315,13 +315,10 @@ func (s *stateObject) getTrie() (Trie, error) {
 // GetState retrieves a value from the account storage trie.
 func (s *stateObject) GetState(key common.Hash) common.Hash {
 	// If we have a dirty value for this state entry, return it
-	s.dirtyStorageLock.RLock()
 	value, dirty := s.dirtyStorage.GetValue(key)
 	if dirty {
-		s.dirtyStorageLock.RUnlock()
 		return value
 	}
-	s.dirtyStorageLock.RUnlock()
 	// Otherwise return the entry's original value
 	result := s.GetCommittedState(key)
 	// Record first read for conflict verify
@@ -420,8 +417,6 @@ func (s *stateObject) SetState(key, value common.Hash) {
 }
 
 func (s *stateObject) setState(key, value common.Hash) {
-	s.dirtyStorageLock.RLock()
-	defer s.dirtyStorageLock.RUnlock()
 	s.dirtyStorage.StoreValue(key, value)
 }
 
@@ -463,8 +458,6 @@ func (s *stateObject) finalise(prefetch bool) {
 }
 
 func (s *stateObject) finaliseRWSet() {
-	s.dirtyStorageLock.RLock()
-	defer s.dirtyStorageLock.RUnlock()
 	s.dirtyStorage.Range(func(key, value interface{}) bool {
 		// three are some unclean dirtyStorage from previous reverted txs, it will skip finalise
 		// so add a new rule, if val has no change, then skip it
@@ -719,9 +712,7 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	}
 
 	object.code = s.code
-	s.dirtyStorageLock.RLock()
 	object.dirtyStorage = s.dirtyStorage.Copy()
-	s.dirtyStorageLock.RUnlock()
 	object.originStorage = s.originStorage.Copy()
 	object.pendingStorage = s.pendingStorage.Copy()
 	object.selfDestructed = s.selfDestructed

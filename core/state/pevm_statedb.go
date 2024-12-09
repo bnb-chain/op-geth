@@ -1844,7 +1844,7 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 	})
 	p.stateObjectsDestructDirty = sync.Map{}
 
-	runnerCount := goMaxProcs / 2
+	runnerCount := goMaxProcs * 3 / 4
 	dirtyChan := make(chan common.Address, runnerCount)
 	go func() {
 		p.journalDirty.Range(func(key, value interface{}) bool {

@@ -179,8 +179,27 @@ func (t *prestateTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 	}
 }
 
-func (t *prestateTracer) CaptureTxStart(gasLimit uint64) {
-	t.gasLimit = gasLimit
+func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx *types.Transaction, from common.Address) {
+	t.env = env
+	if tx.To() == nil {
+		t.to = crypto.CreateAddress(from, env.StateDB.GetNonce(from))
+		t.created[t.to] = true
+	} else {
+		t.to = *tx.To()
+	}
+
+	t.lookupAccount(from)
+	t.lookupAccount(t.to)
+	t.lookupAccount(env.Coinbase)
+
+	// Add accounts with authorizations to the prestate before they get applied.
+	for _, auth := range tx.AuthList() {
+		addr, err := auth.Authority()
+		if err != nil {
+			continue
+		}
+		t.lookupAccount(addr)
+	}
 }
 
 func (t *prestateTracer) CaptureTxEnd(restGas uint64) {

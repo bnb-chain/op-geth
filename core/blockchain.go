@@ -1980,9 +1980,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				bc.parseTxDAG(block)
 			}
 			isByzantium := bc.chainConfig.IsByzantium(block.Number())
-			lowTxsNum := bc.vmConfig.ParallelThreshold >= block.Transactions().Len()
 
-			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge && isByzantium && !lowTxsNum {
+			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge && isByzantium {
 				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
 			} else {
 				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)

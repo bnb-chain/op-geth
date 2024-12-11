@@ -159,7 +159,6 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, po
 		EnableParallelUnorderedMerge: enableUnorderedMerge,
 		EnableTxParallelMerge:        enableParallelMerge,
 		Tracer:                       tracer,
-		ParallelThreshold:            1,
 	}, nil, nil)
 	if err != nil {
 		return err

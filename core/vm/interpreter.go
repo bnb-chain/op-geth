@@ -36,7 +36,6 @@ type Config struct {
 	ExtraEips                    []int               // Additional EIPS that are to be enabled
 	EnableParallelExec           bool                // Whether to execute transaction in parallel mode when do full sync
 	ParallelTxNum                int                 // Number of slot for transaction execution
-	ParallelThreshold            int                 // Threshold of transactions number to trigger parallel process
 	OptimismPrecompileOverrides  PrecompileOverrides // Precompile overrides for Optimism
 	EnableOpcodeOptimizations    bool                // Enable opcode optimization
 	TxDAG                        types.TxDAG

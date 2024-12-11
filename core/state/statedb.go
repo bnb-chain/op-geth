@@ -393,7 +393,7 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	return common.Hash{}
 }
 
-// GetState retrieves a value from the given account's storage trie.
+// GetState retrieves the value associated with the specific key.
 func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
@@ -458,11 +458,12 @@ func (s *StateDB) SetNonce(addr common.Address, nonce uint64) {
 	}
 }
 
-func (s *StateDB) SetCode(addr common.Address, code []byte) {
+func (s *StateDB) SetCode(addr common.Address, code []byte) (prev []byte) {
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
-		stateObject.SetCode(crypto.Keccak256Hash(code), code)
+		return stateObject.SetCode(crypto.Keccak256Hash(code), code)
 	}
+	return nil
 }
 
 func (s *StateDB) SetState(addr common.Address, key, value common.Hash) {

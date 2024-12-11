@@ -67,6 +67,11 @@ var (
 	// than init code size limit.
 	ErrMaxInitCodeSizeExceeded = errors.New("max initcode size exceeded")
 
+	// ErrInsufficientBalanceWitness is returned if the transaction sender has enough
+	// funds to cover the transfer, but not enough to pay for witness access/modification
+	// costs for the transaction
+	ErrInsufficientBalanceWitness = errors.New("insufficient funds to cover witness access costs for transaction")
+
 	// ErrInsufficientFunds is returned if the total cost of executing a transaction
 	// is higher than the balance of the user's account.
 	ErrInsufficientFunds = errors.New("insufficient funds for gas * price + value")
@@ -111,6 +116,21 @@ var (
 	// ErrBlobTxCreate is returned if a blob transaction has no explicit to field.
 	ErrBlobTxCreate = errors.New("blob transaction of type create")
 
+	// -- EIP-7702 errors --
+
+	// Message validation errors:
+	ErrEmptyAuthList         = errors.New("EIP-7702 transaction with empty auth list")
+	ErrSetCodeTxCreate       = errors.New("EIP-7702 transaction cannot be used to create contract")
+	ErrAuthSignatureVeryHigh = errors.New("EIP-7702 authorization with R or S value greater than 2^256 - 1")
+
 	// ErrSystemTxNotSupported is returned for any deposit tx with IsSystemTx=true after the Regolith fork
 	ErrSystemTxNotSupported = errors.New("system tx not supported")
+
+	// EIP-7702 state transition errors:
+	// Note these are just informational, and do not cause tx execution abort.
+	ErrAuthorizationWrongChainID       = errors.New("EIP-7702 authorization chain ID mismatch")
+	ErrAuthorizationNonceOverflow      = errors.New("EIP-7702 authorization nonce > 64 bit")
+	ErrAuthorizationInvalidSignature   = errors.New("EIP-7702 authorization has invalid signature")
+	ErrAuthorizationDestinationHasCode = errors.New("EIP-7702 authorization destination is a contract")
+	ErrAuthorizationNonceMismatch      = errors.New("EIP-7702 authorization nonce does not match current account nonce")
 )

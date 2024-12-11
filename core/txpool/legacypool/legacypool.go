@@ -153,6 +153,8 @@ type BlockChain interface {
 
 // Config are the configuration parameters of the transaction pool.
 type Config struct {
+	EnableCache bool // enable pending cache for mining. Set as true only --mine option is enabled
+
 	Locals    []common.Address // Addresses that should be treated by default as local
 	NoLocals  bool             // Whether local transaction handling should be disabled
 	Journal   string           // Journal of local transactions to survive node restarts
@@ -236,6 +238,12 @@ func (config *Config) sanitize() Config {
 		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", time.Minute)
 		conf.ReannounceTime = time.Minute
 	}
+	// log to inform user if the cache is enabled or not
+	if conf.EnableCache {
+		log.Info("legacytxpool Pending Cache is enabled")
+	} else {
+		log.Info("legacytxpool Pending Cache is disabled")
+	}
 	return conf
 }
 
@@ -270,7 +278,7 @@ type LegacyPool struct {
 	all     *lookup                      // All transactions to allow lookups
 	priced  *pricedList                  // All transactions sorted by price
 
-	pendingCache *cacheForMiner //pending list cache for miner
+	pendingCache pendingCache //pending list cache for miner
 
 	reqResetCh      chan *txpoolResetRequest
 	reqPromoteCh    chan *accountSet
@@ -312,6 +320,9 @@ func New(config Config, chain BlockChain) *LegacyPool {
 		reorgShutdownCh: make(chan struct{}),
 		initDoneCh:      make(chan struct{}),
 		pendingCache:    newCacheForMiner(),
+	}
+	if !config.EnableCache {
+		pool.pendingCache = newNoneCacheForMiner(pool)
 	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range config.Locals {

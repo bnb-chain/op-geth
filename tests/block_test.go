@@ -121,7 +121,7 @@ func TestExecutionSpecBlocktests(t *testing.T) {
 var txDAGFileCounter atomic.Uint64
 
 func execBlockTestWithTxDAG(t *testing.T, bt *testMatcher, test *BlockTest, name string) {
-	txDAGFile := "./dag/" + name
+	txDAGFile := "../tests-dag/dag/" + name
 	if err := bt.checkFailure(t, test.Run(true, rawdb.PathScheme, nil, nil, "", false, false, false)); err != nil {
 		t.Errorf("test in path mode with snapshotter failed: %v", err)
 		return

@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.5.4
+
+This is a minor release for opBNB Mainnet and Testnet.
+
+It enables the TxDAG generation feature.
+When it's enabled in the sequencer, it will generate TxDAG of the block and append it to the last transaction calldata.
+The TxDAG can be used for acceleration of the block execution along with the parallel evm feature released in [v0.5.1-pevm.alpha](https://github.com/bnb-chain/op-geth/releases/tag/v0.5.1-pevm.alpha).
+
+It's optional to upgrade to this version since the new feature only works in the sequencer node.
+
+### What's Changed
+* feat: TxDAG generation v0.1 version by @welkin22 in https://github.com/bnb-chain/op-geth/pull/187
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.4
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.3...v0.5.4
+
 ## v0.5.3
 
 This is a minor release for opBNB Mainnet and Testnet.

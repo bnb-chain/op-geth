@@ -43,6 +43,10 @@ import (
 	"github.com/holiman/uint256"
 )
 
+var (
+	testAddress = common.HexToAddress("0xffffFFFfFFffffffffffffffFfFFFfffFFFfFFfE")
+)
+
 // Tests that updating a state trie does not leak any database writes prior to
 // actually committing the state.
 func TestUpdateLeaks(t *testing.T) {
@@ -180,6 +184,7 @@ func TestCopy(t *testing.T) {
 
 	// modify all in memory
 	for i := byte(0); i < 255; i++ {
+
 		origObj := orig.getOrNewStateObject(common.BytesToAddress([]byte{i}))
 		copyObj := copy.getOrNewStateObject(common.BytesToAddress([]byte{i}))
 		ccopyObj := ccopy.getOrNewStateObject(common.BytesToAddress([]byte{i}))
@@ -465,7 +470,7 @@ func forEachStorage(s *StateDB, addr common.Address, cb func(key, value common.H
 
 	for it.Next() {
 		key := common.BytesToHash(s.trie.GetKey(it.Key))
-		if value, dirty := so.dirtyStorage[key]; dirty {
+		if value, dirty := so.dirtyStorage.GetValue(key); dirty {
 			if !cb(key, value) {
 				return nil
 			}

@@ -18,6 +18,7 @@ package miner
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"math/big"
@@ -40,6 +41,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
@@ -100,6 +102,10 @@ var (
 	txErrNotenoughblobgasMeter = metrics.NewRegisteredMeter("miner/tx/err/notenoughblobgas", nil)
 	txErrEvitedMeter           = metrics.NewRegisteredMeter("miner/tx/evited", nil)
 	txErrReplayMeter           = metrics.NewRegisteredMeter("miner/tx/replay", nil)
+)
+
+var (
+	DefaultTxDAGAddress = common.HexToAddress("0xda90000000000000000000000000000000000000")
 )
 
 // environment is the worker's current environment and holds all
@@ -1036,6 +1042,60 @@ func (w *worker) commitTransactions(env *environment, plainTxs, blobTxs *transac
 	return nil
 }
 
+// generateDAGTx generates a DAG transaction for the block
+func (w *worker) generateDAGTx(env *environment) error {
+	// get txDAG data from the stateDB
+	txDAG, err := env.state.ResolveTxDAG(env.tcount, []common.Address{env.coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
+	if txDAG == nil || err != nil {
+		return err
+	}
+	// txIndex is the index of this txDAG transaction
+	txDAG.SetTxDep(env.tcount, types.TxDep{Flags: &types.NonDependentRelFlag})
+
+	if env.signer == nil {
+		return fmt.Errorf("current signer is nil")
+	}
+
+	//privateKey, err := crypto.HexToECDSA(privateKeyHex)
+	sender := w.config.ParallelTxDAGSenderPriv
+	receiver := DefaultTxDAGAddress
+	if sender == nil {
+		return fmt.Errorf("missing sender private key")
+	}
+
+	publicKey := sender.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return fmt.Errorf("error casting public key to ECDSA")
+	}
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	// get nonce from the
+	nonce := env.state.GetNonce(fromAddress)
+
+	data, err := types.EncodeTxDAGCalldata(txDAG)
+	if err != nil {
+		return fmt.Errorf("failed to encode txDAG, err: %v", err)
+	}
+
+	// Create the transaction
+	tx := types.NewTransaction(nonce, receiver, big.NewInt(0), 21100, big.NewInt(0), data)
+
+	// Sign the transaction with the private key
+	signedTx, err := types.SignTx(tx, env.signer, sender)
+	if err != nil {
+		return fmt.Errorf("failed to sign transaction, err: %v", err)
+	}
+
+	_, err = w.commitTransaction(env, signedTx)
+	if err != nil {
+		log.Warn("failed to commit DAG tx", "err", err)
+		return err
+	}
+	env.tcount++
+	return nil
+}
+
 // generateParams wraps various of settings for generating sealing task.
 type generateParams struct {
 	timestamp   uint64            // The timestamp for sealing task
@@ -1190,6 +1250,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	w.mu.RUnlock()
 
 	start := time.Now()
+
 	// Retrieve the pending transactions pre-filtered by the 1559/4844 dynamic fees
 	filter := txpool.PendingFilter{
 		MinTip: tip,
@@ -1274,12 +1335,18 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
 
 	start := time.Now()
+	if w.chain.TxDAGEnabledWhenMine() {
+		work.state.ResetMVStates(0)
+	}
 	for _, tx := range genParams.txs {
 		from, _ := types.Sender(work.signer, tx)
 		work.state.SetTxContext(tx.Hash(), work.tcount)
 		_, err := w.commitTransaction(work, tx)
 		if err != nil {
 			return &newPayloadResult{err: fmt.Errorf("failed to force-include tx: %s type: %d sender: %s nonce: %d, err: %w", tx.Hash(), tx.Type(), from, tx.Nonce(), err)}
+		}
+		if tx.IsSystemTx() || tx.IsDepositTx() {
+			work.state.RecordSystemTxRWSet(work.tcount)
 		}
 		work.tcount++
 	}
@@ -1334,6 +1401,12 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
 		return &newPayloadResult{err: errInterruptedUpdate}
 	}
+	//append the tx DAG transaction to the block
+	if w.chain.TxDAGEnabledWhenMine() {
+		if err := w.generateDAGTx(work); err != nil {
+			log.Warn("failed to generate DAG tx", "err", err)
+		}
+	}
 
 	start = time.Now()
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)
@@ -1355,6 +1428,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	storageUpdateTimer.Update(work.state.StorageUpdates)             // Storage updates are complete(in FinalizeAndAssemble)
 	accountHashTimer.Update(work.state.AccountHashes)                // Account hashes are complete(in FinalizeAndAssemble)
 	storageHashTimer.Update(work.state.StorageHashes)                // Storage hashes are complete(in FinalizeAndAssemble)
+	txDAGGenerateTimer.Update(work.state.TxDAGGenerate)
 
 	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
 

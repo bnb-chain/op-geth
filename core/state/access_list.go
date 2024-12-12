@@ -134,3 +134,36 @@ func (al *accessList) DeleteSlot(address common.Address, slot common.Hash) {
 func (al *accessList) DeleteAddress(address common.Address) {
 	delete(al.addresses, address)
 }
+
+// Copy creates an independent copy of an accessList.
+func (dest *accessList) Append(src *accessList) *accessList {
+	for addr, sIdx := range src.addresses {
+		if i, present := dest.addresses[addr]; present {
+			// dest already has addr.
+			if sIdx >= 0 {
+				// has slot in list
+				if i == -1 {
+					dest.addresses[addr] = len(dest.slots)
+					slotmap := src.slots[sIdx]
+					dest.slots = append(dest.slots, slotmap)
+				} else {
+					slotmap := src.slots[sIdx]
+					for hash := range slotmap {
+						if _, ok := dest.slots[i][hash]; !ok {
+							dest.slots[i][hash] = struct{}{}
+						}
+					}
+				}
+			}
+		} else {
+			// dest doesn't have the address
+			dest.addresses[addr] = -1
+			if sIdx >= 0 {
+				dest.addresses[addr] = len(dest.slots)
+				slotmap := src.slots[sIdx]
+				dest.slots = append(dest.slots, slotmap)
+			}
+		}
+	}
+	return dest
+}

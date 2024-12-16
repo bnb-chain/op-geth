@@ -195,6 +195,7 @@ func (c *CacheConfig) triedbConfig(keepFunc pathdb.NotifyKeepFunc) *triedb.Confi
 			NotifyKeep:           keepFunc,
 			JournalFilePath:      c.JournalFilePath,
 			JournalFile:          c.JournalFile,
+			UseBase:              c.UseBase,
 		}
 	}
 	return config

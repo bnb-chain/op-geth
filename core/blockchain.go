@@ -1190,6 +1190,13 @@ func (bc *BlockChain) procFutureBlocks() {
 	}
 }
 
+// CacheBlock cache block in memory
+func (bc *BlockChain) CacheBlock(hash common.Hash, block *types.Block) {
+	bc.hc.numberCache.Add(hash, block.NumberU64())
+	bc.hc.headerCache.Add(hash, block.Header())
+	bc.blockCache.Add(hash, block)
+}
+
 // CacheMiningReceipts cache receipts in memory
 func (bc *BlockChain) CacheMiningReceipts(hash common.Hash, receipts types.Receipts) {
 	bc.miningReceiptsCache.Add(hash, receipts)
@@ -1736,6 +1743,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		return 0, nil
 	}
 
+	minerMode := false
+	if len(chain) == 1 {
+		block := chain[0]
+		_, receiptExist := bc.miningReceiptsCache.Get(block.Hash())
+		_, logExist := bc.miningTxLogsCache.Get(block.Hash())
+		_, stateExist := bc.miningStateCache.Get(block.Hash())
+		minerMode = receiptExist && logExist && stateExist
+	}
+
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	SenderCacher.RecoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number(), chain[0].Time()), chain)
 
@@ -1759,7 +1775,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 	// Peek the error for the first block to decide the directing import logic
 	it := newInsertIterator(chain, results, bc.validator)
-	block, err := it.next()
+	var block *types.Block
+	var err error
+	if minerMode {
+		block = chain[0]
+		it.index = 0
+	} else {
+		block, err = it.next()
+	}
 
 	// Left-trim all the known blocks that don't need to build snapshot
 	if bc.skipBlock(err, it) {
@@ -1975,11 +1998,28 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		ptime := time.Since(pstart)
 
 		vstart := time.Now()
-		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
-			bc.reportBlock(block, receipts, err)
-			followupInterrupt.Store(true)
-			return it.index, err
+		// Async validate if minerMode
+		asyncValidateStateCh := make(chan error, 1)
+		if minerMode {
+			header := block.Header()
+			// Can not validate root concurrently
+			if root := statedb.IntermediateRoot(bc.chainConfig.IsEIP158(header.Number)); header.Root != root {
+				err := fmt.Errorf("self mined block(hash: %x number %v) verify root err(mined: %x expected: %x) dberr: %w", block.Hash(), block.NumberU64(), header.Root, root, statedb.Error())
+				bc.reportBlock(block, receipts, err)
+				followupInterrupt.Store(true)
+				return it.index, err
+			}
+			go func() {
+				asyncValidateStateCh <- bc.validator.ValidateState(block, statedb, receipts, usedGas, true)
+			}()
+		} else {
+			if err := bc.validator.ValidateState(block, statedb, receipts, usedGas, false); err != nil {
+				bc.reportBlock(block, receipts, err)
+				followupInterrupt.Store(true)
+				return it.index, err
+			}
 		}
+
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
@@ -2015,6 +2055,13 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if err != nil {
 			return it.index, err
 		}
+		if minerMode {
+			if err := <-asyncValidateStateCh; err != nil {
+				panic(fmt.Errorf("self mined block(hash: %x number %v) async verify state err: %w", block.Hash(), block.NumberU64(), err))
+			}
+		}
+		bc.CacheBlock(block.Hash(), block)
+
 		// Update the metrics touched during block commit
 		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
 		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
@@ -2033,10 +2080,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		stats.usedGas += usedGas
 
 		var snapDiffItems, snapBufItems common.StorageSize
-		if bc.snaps != nil {
+		if bc.snaps != nil && !minerMode {
 			snapDiffItems, snapBufItems = bc.snaps.Size()
 		}
-		trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
+		
+		var trieDiffNodes, trieBufNodes, trieImmutableBufNodes common.StorageSize
+		if !minerMode {
+			trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ = bc.triedb.Size()
+		}
 		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, setHead)
 		blockGasUsedGauge.Update(int64(block.GasUsed()) / 1000000)
 
@@ -2536,10 +2587,17 @@ func (bc *BlockChain) SetCanonical(head *types.Block) (common.Hash, error) {
 			return common.Hash{}, err
 		}
 	}
-	bc.writeHeadBlock(head)
 
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		bc.writeHeadBlock(head)
+	}()
 	// Emit events
 	logs := bc.collectLogs(head, false)
+	wg.Wait()
+
 	bc.chainFeed.Send(ChainEvent{Block: head, Hash: head.Hash(), Logs: logs})
 	if len(logs) > 0 {
 		bc.logsFeed.Send(logs)

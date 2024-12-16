@@ -24,6 +24,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/exp/slices"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -90,10 +92,11 @@ type StateDB struct {
 
 	// This map holds 'live' objects, which will get modified while processing
 	// a state transition.
-	stateObjects         map[common.Address]*stateObject
-	stateObjectsPending  map[common.Address]struct{}            // State objects finalized but not yet written to the trie
-	stateObjectsDirty    map[common.Address]struct{}            // State objects modified in the current execution
-	stateObjectsDestruct map[common.Address]*types.StateAccount // State objects destructed in the block along with its previous value
+	stateObjects              map[common.Address]*stateObject
+	stateObjectsPending       map[common.Address]struct{}            // State objects finalized but not yet written to the trie
+	stateObjectsDirty         map[common.Address]struct{}            // State objects modified in the current execution
+	stateObjectsDestruct      map[common.Address]*types.StateAccount // State objects destructed in the block along with its previous value
+	stateObjectsDestructDirty map[common.Address]*types.StateAccount
 
 	// DB error.
 	// State objects are used by the consensus core and VM which are
@@ -112,6 +115,9 @@ type StateDB struct {
 	txIndex int
 	logs    map[common.Hash][]*types.Log
 	logSize uint
+
+	// parallel EVM related
+	mvStates *types.MVStates
 
 	// Preimages occurred seen by VM in the scope of block.
 	preimages map[common.Hash][]byte
@@ -143,6 +149,7 @@ type StateDB struct {
 	TrieDBCommits        time.Duration
 	TrieCommits          time.Duration
 	CodeCommits          time.Duration
+	TxDAGGenerate        time.Duration
 
 	AccountUpdated int
 	StorageUpdated int
@@ -160,24 +167,25 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		return nil, err
 	}
 	sdb := &StateDB{
-		db:                   db,
-		trie:                 tr,
-		originalRoot:         root,
-		snaps:                snaps,
-		accounts:             make(map[common.Hash][]byte),
-		storages:             make(map[common.Hash]map[common.Hash][]byte),
-		accountsOrigin:       make(map[common.Address][]byte),
-		storagesOrigin:       make(map[common.Address]map[common.Hash][]byte),
-		stateObjects:         make(map[common.Address]*stateObject),
-		stateObjectsPending:  make(map[common.Address]struct{}),
-		stateObjectsDirty:    make(map[common.Address]struct{}),
-		stateObjectsDestruct: make(map[common.Address]*types.StateAccount),
-		logs:                 make(map[common.Hash][]*types.Log),
-		preimages:            make(map[common.Hash][]byte),
-		journal:              newJournal(),
-		accessList:           newAccessList(),
-		transientStorage:     newTransientStorage(),
-		hasher:               crypto.NewKeccakState(),
+		db:                        db,
+		trie:                      tr,
+		originalRoot:              root,
+		snaps:                     snaps,
+		accounts:                  make(map[common.Hash][]byte),
+		storages:                  make(map[common.Hash]map[common.Hash][]byte),
+		accountsOrigin:            make(map[common.Address][]byte),
+		storagesOrigin:            make(map[common.Address]map[common.Hash][]byte),
+		stateObjects:              make(map[common.Address]*stateObject),
+		stateObjectsPending:       make(map[common.Address]struct{}),
+		stateObjectsDirty:         make(map[common.Address]struct{}),
+		stateObjectsDestruct:      make(map[common.Address]*types.StateAccount),
+		stateObjectsDestructDirty: make(map[common.Address]*types.StateAccount),
+		logs:                      make(map[common.Hash][]*types.Log),
+		preimages:                 make(map[common.Hash][]byte),
+		journal:                   newJournal(),
+		accessList:                newAccessList(),
+		transientStorage:          newTransientStorage(),
+		hasher:                    crypto.NewKeccakState(),
 	}
 	if sdb.snaps != nil {
 		sdb.snap = sdb.snaps.Snapshot(root)
@@ -189,24 +197,25 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 // NewStateDBByTrie creates a new state db by a given trie.
 func NewStateDBByTrie(tr Trie, db Database, snaps *snapshot.Tree) (*StateDB, error) {
 	sdb := &StateDB{
-		db:                   db,
-		trie:                 tr,
-		originalRoot:         tr.Hash(),
-		snaps:                snaps,
-		accounts:             make(map[common.Hash][]byte),
-		storages:             make(map[common.Hash]map[common.Hash][]byte),
-		accountsOrigin:       make(map[common.Address][]byte),
-		storagesOrigin:       make(map[common.Address]map[common.Hash][]byte),
-		stateObjects:         make(map[common.Address]*stateObject),
-		stateObjectsPending:  make(map[common.Address]struct{}),
-		stateObjectsDirty:    make(map[common.Address]struct{}),
-		stateObjectsDestruct: make(map[common.Address]*types.StateAccount),
-		logs:                 make(map[common.Hash][]*types.Log),
-		preimages:            make(map[common.Hash][]byte),
-		journal:              newJournal(),
-		accessList:           newAccessList(),
-		transientStorage:     newTransientStorage(),
-		hasher:               crypto.NewKeccakState(),
+		db:                        db,
+		trie:                      tr,
+		originalRoot:              tr.Hash(),
+		snaps:                     snaps,
+		accounts:                  make(map[common.Hash][]byte),
+		storages:                  make(map[common.Hash]map[common.Hash][]byte),
+		accountsOrigin:            make(map[common.Address][]byte),
+		storagesOrigin:            make(map[common.Address]map[common.Hash][]byte),
+		stateObjects:              make(map[common.Address]*stateObject),
+		stateObjectsPending:       make(map[common.Address]struct{}),
+		stateObjectsDirty:         make(map[common.Address]struct{}),
+		stateObjectsDestruct:      make(map[common.Address]*types.StateAccount),
+		stateObjectsDestructDirty: make(map[common.Address]*types.StateAccount),
+		logs:                      make(map[common.Hash][]*types.Log),
+		preimages:                 make(map[common.Hash][]byte),
+		journal:                   newJournal(),
+		accessList:                newAccessList(),
+		transientStorage:          newTransientStorage(),
+		hasher:                    crypto.NewKeccakState(),
 	}
 	if sdb.snaps != nil {
 		sdb.snap = sdb.snaps.Snapshot(tr.Hash())
@@ -337,6 +346,10 @@ func (s *StateDB) Empty(addr common.Address) bool {
 
 // GetBalance retrieves the balance from the given address or 0 if object not found
 func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+	}
+
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Balance()
@@ -346,6 +359,9 @@ func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
 
 // GetNonce retrieves the nonce from the given address or 0 if object not found
 func (s *StateDB) GetNonce(addr common.Address) uint64 {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountNonce)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Nonce()
@@ -370,6 +386,9 @@ func (s *StateDB) TxIndex() int {
 }
 
 func (s *StateDB) GetCode(addr common.Address) []byte {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Code()
@@ -378,6 +397,9 @@ func (s *StateDB) GetCode(addr common.Address) []byte {
 }
 
 func (s *StateDB) GetCodeSize(addr common.Address) int {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.CodeSize()
@@ -386,6 +408,9 @@ func (s *StateDB) GetCodeSize(addr common.Address) int {
 }
 
 func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return common.BytesToHash(stateObject.CodeHash())
@@ -395,6 +420,9 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 
 // GetState retrieves a value from the given account's storage trie.
 func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
+	if s.mvStates != nil {
+		s.mvStates.RecordStorageRead(addr, hash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.GetState(hash)
@@ -404,6 +432,9 @@ func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 func (s *StateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
+	if s.mvStates != nil {
+		s.mvStates.RecordStorageRead(addr, hash)
+	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.GetCommittedState(hash)
@@ -430,17 +461,25 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+	}
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.AddBalance(amount)
+		return
 	}
 }
 
 // SubBalance subtracts amount from the account associated with addr.
 func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int) {
+	if s.mvStates != nil {
+		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+	}
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SubBalance(amount)
+		return
 	}
 }
 
@@ -484,8 +523,8 @@ func (s *StateDB) SetStorage(addr common.Address, storage map[common.Hash]common
 	//
 	// TODO(rjl493456442) this function should only be supported by 'unwritable'
 	// state and all mutations made should all be discarded afterwards.
-	if _, ok := s.stateObjectsDestruct[addr]; !ok {
-		s.stateObjectsDestruct[addr] = nil
+	if _, ok := s.getStateObjectsDestruct(addr); !ok {
+		s.setStateObjectsDestruct(addr, nil)
 	}
 	stateObject := s.getOrNewStateObject(addr)
 	for k, v := range storage {
@@ -509,7 +548,7 @@ func (s *StateDB) SelfDestruct(addr common.Address) {
 		prevbalance: new(uint256.Int).Set(stateObject.Balance()),
 	})
 	stateObject.markSelfdestructed()
-	stateObject.data.Balance = new(uint256.Int)
+	stateObject.setBalance(new(uint256.Int))
 }
 
 func (s *StateDB) Selfdestruct6780(addr common.Address) {
@@ -698,9 +737,9 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 		// account and storage data should be cleared as well. Note, it must
 		// be done here, otherwise the destruction event of "original account"
 		// will be lost.
-		_, prevdestruct := s.stateObjectsDestruct[prev.address]
+		_, prevdestruct := s.getStateObjectsDestruct(prev.address)
 		if !prevdestruct {
-			s.stateObjectsDestruct[prev.address] = prev.origin
+			s.setStateObjectsDestruct(prev.address, prev.origin)
 		}
 		// There may be some cached account/storage data already since IntermediateRoot
 		// will be called for each transaction before byzantium fork which will always
@@ -741,8 +780,17 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 func (s *StateDB) CreateAccount(addr common.Address) {
 	newObj, prev := s.createObject(addr)
 	if prev != nil {
-		newObj.setBalance(prev.data.Balance)
+		newObj.setBalance(prev.Balance())
 	}
+}
+
+// CopyWithMvStates will copy state with MVStates
+func (s *StateDB) CopyWithMvStates() *StateDB {
+	state := s.Copy()
+	if s.mvStates != nil {
+		state.mvStates = s.mvStates.Copy()
+	}
+	return state
 }
 
 // Copy creates a deep, independent copy of the state.
@@ -750,23 +798,24 @@ func (s *StateDB) CreateAccount(addr common.Address) {
 func (s *StateDB) Copy() *StateDB {
 	// Copy all the basic fields, initialize the memory ones
 	state := &StateDB{
-		db:                   s.db,
-		trie:                 s.db.CopyTrie(s.trie),
-		originalRoot:         s.originalRoot,
-		accounts:             make(map[common.Hash][]byte),
-		storages:             make(map[common.Hash]map[common.Hash][]byte),
-		accountsOrigin:       make(map[common.Address][]byte),
-		storagesOrigin:       make(map[common.Address]map[common.Hash][]byte),
-		stateObjects:         make(map[common.Address]*stateObject, len(s.journal.dirties)),
-		stateObjectsPending:  make(map[common.Address]struct{}, len(s.stateObjectsPending)),
-		stateObjectsDirty:    make(map[common.Address]struct{}, len(s.journal.dirties)),
-		stateObjectsDestruct: make(map[common.Address]*types.StateAccount, len(s.stateObjectsDestruct)),
-		refund:               s.refund,
-		logs:                 make(map[common.Hash][]*types.Log, len(s.logs)),
-		logSize:              s.logSize,
-		preimages:            make(map[common.Hash][]byte, len(s.preimages)),
-		journal:              newJournal(),
-		hasher:               crypto.NewKeccakState(),
+		db:                        s.db,
+		trie:                      s.db.CopyTrie(s.trie),
+		originalRoot:              s.originalRoot,
+		accounts:                  make(map[common.Hash][]byte),
+		storages:                  make(map[common.Hash]map[common.Hash][]byte),
+		accountsOrigin:            make(map[common.Address][]byte),
+		storagesOrigin:            make(map[common.Address]map[common.Hash][]byte),
+		stateObjects:              make(map[common.Address]*stateObject, len(s.journal.dirties)),
+		stateObjectsPending:       make(map[common.Address]struct{}, len(s.stateObjectsPending)),
+		stateObjectsDirty:         make(map[common.Address]struct{}, len(s.journal.dirties)),
+		stateObjectsDestruct:      make(map[common.Address]*types.StateAccount, len(s.stateObjectsDestruct)),
+		stateObjectsDestructDirty: make(map[common.Address]*types.StateAccount, len(s.stateObjectsDestructDirty)),
+		refund:                    s.refund,
+		logs:                      make(map[common.Hash][]*types.Log, len(s.logs)),
+		logSize:                   s.logSize,
+		preimages:                 make(map[common.Hash][]byte, len(s.preimages)),
+		journal:                   newJournal(),
+		hasher:                    crypto.NewKeccakState(),
 
 		// In order for the block producer to be able to use and make additions
 		// to the snapshot tree, we need to copy that as well. Otherwise, any
@@ -810,6 +859,9 @@ func (s *StateDB) Copy() *StateDB {
 	// Deep copy the destruction markers.
 	for addr, value := range s.stateObjectsDestruct {
 		state.stateObjectsDestruct[addr] = value
+	}
+	for addr, value := range s.stateObjectsDestructDirty {
+		state.stateObjectsDestructDirty[addr] = value
 	}
 	// Deep copy the state changes made in the scope of block
 	// along with their original values.
@@ -882,7 +934,20 @@ func (s *StateDB) GetRefund() uint64 {
 // the journal as well as the refunds. Finalise, however, will not push any updates
 // into the tries just yet. Only IntermediateRoot or Commit will do that.
 func (s *StateDB) Finalise(deleteEmptyObjects bool) {
+	var feeReceivers []common.Address
+	if s.mvStates != nil {
+		feeReceivers = s.mvStates.FeeReceivers()
+	}
 	addressesToPrefetch := make([][]byte, 0, len(s.journal.dirties))
+
+	// finalise stateObjectsDestruct
+	for addr, acc := range s.stateObjectsDestructDirty {
+		s.stateObjectsDestruct[addr] = acc
+		if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
+			s.mvStates.RecordAccountWrite(addr, types.AccountSuicide)
+		}
+	}
+	s.stateObjectsDestructDirty = make(map[common.Address]*types.StateAccount)
 	for addr := range s.journal.dirties {
 		obj, exist := s.stateObjects[addr]
 		if !exist {
@@ -902,6 +967,9 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			// event is tracked.
 			if _, ok := s.stateObjectsDestruct[obj.address]; !ok {
 				s.stateObjectsDestruct[obj.address] = obj.origin
+				if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
+					s.mvStates.RecordAccountWrite(addr, types.AccountSuicide)
+				}
 			}
 			// Note, we can't do this only at the end of a block because multiple
 			// transactions within the same block might self destruct and then
@@ -911,6 +979,9 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			delete(s.accountsOrigin, obj.address) // Clear out any previously updated account data (may be recreated via a resurrect)
 			delete(s.storagesOrigin, obj.address) // Clear out any previously updated storage data (may be recreated via a resurrect)
 		} else {
+			if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
+				obj.finaliseRWSet()
+			}
 			obj.finalise(true) // Prefetch slots in the background
 		}
 		obj.created = false
@@ -1630,6 +1701,96 @@ func (s *StateDB) NoTrie() bool {
 
 func (s *StateDB) GetSnap() snapshot.Snapshot {
 	return s.snap
+}
+
+func (s *StateDB) StartTxRecorder(isExcludeTx bool) {
+	if s.mvStates == nil {
+		return
+	}
+	if isExcludeTx {
+		rwSet := types.NewEmptyRWSet(s.txIndex).WithExcludedTxFlag()
+		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {
+			log.Error("MVStates SystemTx Finalise err", "err", err)
+		}
+		s.mvStates.RecordReadDone()
+		s.mvStates.RecordWriteDone()
+		return
+	}
+	s.mvStates.RecordNewTx(s.txIndex)
+}
+
+func (s *StateDB) StopTxRecorder() {
+	if s.mvStates == nil {
+		return
+	}
+	s.mvStates.RecordReadDone()
+	s.mvStates.RecordWriteDone()
+}
+
+func (s *StateDB) ResetMVStates(txCount int, feeReceivers []common.Address) *types.MVStates {
+	s.mvStates = types.NewMVStates(txCount, feeReceivers)
+	return s.mvStates
+}
+
+func (s *StateDB) CheckFeeReceiversRWSet() {
+	if s.mvStates == nil {
+		return
+	}
+	if metrics.EnabledExpensive {
+		defer func(start time.Time) {
+			s.TxDAGGenerate += time.Since(start)
+		}(time.Now())
+	}
+	s.mvStates.RecordReadDone()
+	feeReceivers := s.mvStates.FeeReceivers()
+	for _, addr := range feeReceivers {
+		if _, ok := s.stateObjectsDestructDirty[addr]; !ok {
+			continue
+		}
+		s.mvStates.RecordCannotDelayGasFee()
+		return
+	}
+
+	for _, addr := range feeReceivers {
+		if _, ok := s.journal.dirties[addr]; !ok {
+			continue
+		}
+		s.mvStates.RecordCannotDelayGasFee()
+		return
+	}
+}
+
+func (s *StateDB) getStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool) {
+	if acc, ok := s.stateObjectsDestructDirty[addr]; ok {
+		return acc, ok
+	}
+	acc, ok := s.stateObjectsDestruct[addr]
+	return acc, ok
+}
+
+func (s *StateDB) setStateObjectsDestruct(addr common.Address, acc *types.StateAccount) {
+	s.stateObjectsDestructDirty[addr] = acc
+}
+
+func (s *StateDB) removeStateObjectsDestruct(addr common.Address) {
+	delete(s.stateObjectsDestructDirty, addr)
+}
+
+func (s *StateDB) ResolveTxDAG(txCnt int, extraTxDeps ...types.TxDep) (types.TxDAG, error) {
+	if s.mvStates == nil {
+		return types.NewEmptyTxDAG(), nil
+	}
+	if metrics.EnabledExpensive {
+		defer func(start time.Time) {
+			s.TxDAGGenerate += time.Since(start)
+		}(time.Now())
+	}
+
+	return s.mvStates.ResolveTxDAG(txCnt, extraTxDeps...)
+}
+
+func (s *StateDB) MVStates() *types.MVStates {
+	return s.mvStates
 }
 
 // copySet returns a deep-copied set.

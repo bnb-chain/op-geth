@@ -22,6 +22,8 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ethereum/go-ethereum/log"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -90,6 +92,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
 	}
 	statedb.MarkFullProcessed()
+	if p.bc.enableTxDAG {
+		feeReceivers := []common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient}
+		statedb.ResetMVStates(len(block.Transactions()), feeReceivers).EnableAsyncGen()
+	}
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		start := time.Now()
@@ -102,12 +108,14 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
-
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 		if metrics.EnabledExpensive {
 			processTxTimer.UpdateSince(start)
 		}
+	}
+	if statedb.MVStates() != nil {
+		statedb.MVStates().BatchRecordHandle()
 	}
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.
 	withdrawals := block.Withdrawals()
@@ -116,7 +124,22 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), withdrawals)
-
+	if p.bc.enableTxDAG {
+		defer func() {
+			statedb.MVStates().Stop()
+		}()
+		// compare input TxDAG when it enable in consensus
+		dag, err := statedb.ResolveTxDAG(len(block.Transactions()))
+		if err == nil {
+			// TODO(galaio): check TxDAG correctness?
+			log.Debug("Process TxDAG result", "block", block.NumberU64(), "tx", len(block.Transactions()), "txDAG", dag.TxCount())
+			if metrics.EnabledExpensive {
+				go types.EvaluateTxDAGPerformance(dag)
+			}
+		} else {
+			log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
+		}
+	}
 	return receipts, allLogs, *usedGas, nil
 }
 
@@ -124,6 +147,8 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	// Create a new context to be used in the EVM environment.
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
+	statedb.StartTxRecorder(tx.IsSystemTx() || tx.IsDepositTx())
+	defer statedb.StopTxRecorder()
 
 	nonce := tx.Nonce()
 	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.Time) {

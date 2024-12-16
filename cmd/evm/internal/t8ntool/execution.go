@@ -20,7 +20,11 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
+
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -37,8 +41,6 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
-	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 )
 
 type Prestate struct {
@@ -62,6 +64,12 @@ type ExecutionResult struct {
 	WithdrawalsRoot      *common.Hash          `json:"withdrawalsRoot,omitempty"`
 	CurrentExcessBlobGas *math.HexOrDecimal64  `json:"currentExcessBlobGas,omitempty"`
 	CurrentBlobGasUsed   *math.HexOrDecimal64  `json:"blobGasUsed,omitempty"`
+	RequestsHash         *common.Hash          `json:"requestsHash,omitempty"`
+	Requests             [][]byte              `json:"requests"`
+}
+
+type executionResultMarshaling struct {
+	Requests []hexutil.Bytes `json:"requests"`
 }
 
 type ommer struct {

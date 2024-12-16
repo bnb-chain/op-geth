@@ -17,8 +17,10 @@
 package state
 
 import (
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // journalEntry is a modification entry in the state change journal that can be
@@ -119,8 +121,8 @@ type (
 		key, prevalue common.Hash
 	}
 	codeChange struct {
-		account            *common.Address
-		prevcode, prevhash []byte
+		account  common.Address
+		prevCode []byte
 	}
 
 	// Changes to other state values.
@@ -221,11 +223,18 @@ func (ch nonceChange) dirtied() *common.Address {
 }
 
 func (ch codeChange) revert(s *StateDB) {
-	s.getStateObject(*ch.account).setCode(common.BytesToHash(ch.prevhash), ch.prevcode)
+	s.getStateObject(ch.account).setCode(crypto.Keccak256Hash(ch.prevCode), ch.prevCode)
 }
 
 func (ch codeChange) dirtied() *common.Address {
-	return ch.account
+	return &ch.account
+}
+
+func (ch codeChange) copy() journalEntry {
+	return codeChange{
+		account:  ch.account,
+		prevCode: ch.prevCode,
+	}
 }
 
 func (ch storageChange) revert(s *StateDB) {
@@ -297,4 +306,11 @@ func (ch accessListAddSlotChange) revert(s *StateDB) {
 
 func (ch accessListAddSlotChange) dirtied() *common.Address {
 	return nil
+}
+
+func (j *journal) setCode(address common.Address, prevCode []byte) {
+	j.append(codeChange{
+		account:  address,
+		prevCode: prevCode,
+	})
 }

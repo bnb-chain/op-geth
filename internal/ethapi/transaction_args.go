@@ -72,6 +72,9 @@ type TransactionArgs struct {
 	Commitments []kzg4844.Commitment `json:"commitments"`
 	Proofs      []kzg4844.Proof      `json:"proofs"`
 
+	// For SetCodeTxType
+	AuthorizationList []types.Authorization `json:"authorizationList"`
+
 	// This configures whether blobs are allowed to be passed.
 	blobSidecarAllowed bool
 }
@@ -483,6 +486,27 @@ func (args *TransactionArgs) toTransaction() *types.Transaction {
 				Commitments: args.Commitments,
 				Proofs:      args.Proofs,
 			}
+		}
+	case args.AuthorizationList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		authList := []types.Authorization{}
+		if args.AuthorizationList != nil {
+			authList = args.AuthorizationList
+		}
+		data = &types.SetCodeTx{
+			To:         *args.To,
+			ChainID:    args.ChainID.ToInt().Uint64(),
+			Nonce:      uint64(*args.Nonce),
+			Gas:        uint64(*args.Gas),
+			GasFeeCap:  uint256.MustFromBig((*big.Int)(args.MaxFeePerGas)),
+			GasTipCap:  uint256.MustFromBig((*big.Int)(args.MaxPriorityFeePerGas)),
+			Value:      uint256.MustFromBig((*big.Int)(args.Value)),
+			Data:       args.data(),
+			AccessList: al,
+			AuthList:   authList,
 		}
 
 	case args.MaxFeePerGas != nil:

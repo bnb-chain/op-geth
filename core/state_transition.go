@@ -534,6 +534,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			ReturnData: ret,
 		}, nil
 	}
+
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
 	// changing the sender's balance
@@ -554,6 +555,10 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			ReturnData:  ret,
 		}, nil
 	}
+
+	// check fee receiver rwSet here
+	st.state.CheckFeeReceiversRWSet()
+
 	effectiveTip := msg.GasPrice
 	if rules.IsLondon {
 		effectiveTip = cmath.BigMin(msg.GasTipCap, new(big.Int).Sub(msg.GasFeeCap, st.evm.Context.BaseFee))

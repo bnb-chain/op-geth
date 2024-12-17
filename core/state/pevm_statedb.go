@@ -975,6 +975,7 @@ func (wst writes) merge(maindb *StateDB) {
 type ParallelStateDB struct {
 	db         Database
 	trie       Trie
+	prefetcher *triePrefetcher
 	noTrie     bool
 	hasher     crypto.KeccakState
 	hasherLock sync.Mutex
@@ -1023,13 +1024,7 @@ type ParallelStateDB struct {
 	// The refund counter, also used by state transitioning.
 	refund atomic.Uint64
 
-	logs    sync.Map
 	logSize atomic.Int32
-
-	// parallel EVM related
-	rwSet    *types.RWSet
-	mvStates *types.MVStates
-	stat     *types.ExeStat
 
 	// Preimages occurred seen by VM in the scope of block.
 	preimages sync.Map
@@ -1060,8 +1055,7 @@ type ParallelStateDB struct {
 	StorageDeleted int
 
 	// Testing hooks
-	onCommit       func(states *triestate.Set) // Hook invoked when commit is performed
-	gasFeeAddrLock sync.Mutex
+	onCommit func(states *triestate.Set) // Hook invoked when commit is performed
 }
 
 // NewParallel creates a new parallel statedb
@@ -1517,11 +1511,28 @@ func (p *ParallelStateDB) getOrNewStateObject(addr common.Address) *stateObject 
 }
 
 func (p *ParallelStateDB) StopPrefetcher() {
-	//do nothing
+	if p.noTrie {
+		return
+	}
+
+	if p.prefetcher != nil {
+		p.prefetcher.close()
+		p.prefetcher = nil
+	}
 }
 
 func (p *ParallelStateDB) StartPrefetcher(namespace string) {
-	//do nothing
+	if p.noTrie {
+		return
+	}
+
+	if p.prefetcher != nil {
+		p.prefetcher.close()
+		p.prefetcher = nil
+	}
+	if p.snap != nil {
+		p.prefetcher = newTriePrefetcher(p.db, p.originalRoot, namespace)
+	}
 }
 
 func (p *ParallelStateDB) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (types.TxDAG, error) {
@@ -1846,9 +1857,12 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 
 	runnerCount := goMaxProcs * 3 / 4
 	dirtyChan := make(chan common.Address, runnerCount)
+	addressesToPrefetch := make([][]byte, 0, 16)
 	go func() {
 		p.journalDirty.Range(func(key, value interface{}) bool {
-			dirtyChan <- key.(common.Address)
+			address := key.(common.Address)
+			dirtyChan <- address
+			addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(address[:]))
 			return true
 		})
 		close(dirtyChan)
@@ -1907,6 +1921,11 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 		}()
 	}
 	wg.Wait()
+	if p.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		p.trieParallelLock.Lock()
+		p.prefetcher.prefetch(common.Hash{}, p.originalRoot, common.Address{}, addressesToPrefetch)
+		p.trieParallelLock.Unlock()
+	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	p.clearJournalAndRefund()
 }
@@ -1976,7 +1995,22 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 	// Now we're about to start to write changes to the trie. The trie is so far
 	// _untouched_. We can check with the prefetcher, if it can give us a trie
 	// which has the same root, but also has some content loaded into it.
-	// The parallel execution do the change incrementally, so can not check the prefetcher here
+	prefetcher := p.prefetcher
+	r := p.originalRoot
+	if p.prefetcher != nil {
+		defer func() {
+			p.prefetcher.close()
+			p.prefetcher = nil
+		}()
+		r = p.trie.Hash()
+	}
+
+	if prefetcher != nil {
+		if prefetchTrie := prefetcher.trie(common.Hash{}, r); prefetchTrie != nil {
+			p.trie = prefetchTrie
+		}
+	}
+
 	if p.trie == nil {
 		tr, err := p.db.OpenTrie(p.originalRoot)
 		if err != nil {
@@ -1996,6 +2030,10 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 			p.AccountUpdated += 1
 		}
 		usedAddrs = append(usedAddrs, common.CopyBytes(addr[:])) // Copy needed for closure
+	}
+
+	if prefetcher != nil {
+		prefetcher.used(common.Hash{}, p.originalRoot, usedAddrs)
 	}
 	// parallel slotDB trie will be updated to mainDB since intermediateRoot happens after conflict check.
 	// so it should be save to clear pending here.
@@ -2292,7 +2330,7 @@ func (p *ParallelStateDB) addJournalDirty(address common.Address) {
 }
 
 func (p *ParallelStateDB) getPrefetcher() *triePrefetcher {
-	return nil
+	return p.prefetcher
 }
 
 func (p *ParallelStateDB) getDB() Database {

@@ -1996,7 +1996,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
 			// parallel mode has a pipeline, similar to this prefetch, to save CPU we disable this prefetch for parallel
-			if !bc.cacheConfig.TrieCleanNoPrefetch && !bc.vmConfig.EnableParallelExec {
+			if !bc.cacheConfig.TrieCleanNoPrefetch {
 				if followup, err := it.peek(); followup != nil && err == nil {
 					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
 

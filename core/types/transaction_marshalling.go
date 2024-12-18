@@ -33,23 +33,23 @@ import (
 type txJSON struct {
 	Type hexutil.Uint64 `json:"type"`
 
-	ChainID              *hexutil.Big    `json:"chainId,omitempty"`
-	Nonce                *hexutil.Uint64 `json:"nonce"`
-	To                   *common.Address `json:"to"`
-	Gas                  *hexutil.Uint64 `json:"gas"`
-	GasPrice             *hexutil.Big    `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big    `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big    `json:"maxFeePerGas"`
-	MaxFeePerBlobGas     *hexutil.Big    `json:"maxFeePerBlobGas,omitempty"`
-	Value                *hexutil.Big    `json:"value"`
-	Input                *hexutil.Bytes  `json:"input"`
-	AccessList           *AccessList     `json:"accessList,omitempty"`
-	BlobVersionedHashes  []common.Hash   `json:"blobVersionedHashes,omitempty"`
-	AuthorizationList    []Authorization `json:"authorizationList,omitempty"`
-	V                    *hexutil.Big    `json:"v"`
-	R                    *hexutil.Big    `json:"r"`
-	S                    *hexutil.Big    `json:"s"`
-	YParity              *hexutil.Uint64 `json:"yParity,omitempty"`
+	ChainID              *hexutil.Big           `json:"chainId,omitempty"`
+	Nonce                *hexutil.Uint64        `json:"nonce"`
+	To                   *common.Address        `json:"to"`
+	Gas                  *hexutil.Uint64        `json:"gas"`
+	GasPrice             *hexutil.Big           `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.Big           `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.Big           `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.Big           `json:"maxFeePerBlobGas,omitempty"`
+	Value                *hexutil.Big           `json:"value"`
+	Input                *hexutil.Bytes         `json:"input"`
+	AccessList           *AccessList            `json:"accessList,omitempty"`
+	BlobVersionedHashes  []common.Hash          `json:"blobVersionedHashes,omitempty"`
+	AuthorizationList    []SetCodeAuthorization `json:"authorizationList,omitempty"`
+	V                    *hexutil.Big           `json:"v"`
+	R                    *hexutil.Big           `json:"r"`
+	S                    *hexutil.Big           `json:"s"`
+	YParity              *hexutil.Uint64        `json:"yParity,omitempty"`
 
 	// Deposit transaction fields
 	SourceHash *common.Hash    `json:"sourceHash,omitempty"`

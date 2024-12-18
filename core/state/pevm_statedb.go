@@ -1869,9 +1869,9 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 		close(dirtyChan)
 	}()
 	var wg sync.WaitGroup
+	wg.Add(runnerCount)
 	for i := 0; i < runnerCount; i++ {
-		wg.Add(1)
-		go func() {
+		err := gopool.Submit(func() {
 			defer wg.Done()
 			for {
 				addr, isOpen := <-dirtyChan
@@ -1919,7 +1919,10 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 				p.stateObjectsDirty[addr] = struct{}{}
 				p.pendingDirtyLock.Unlock()
 			}
-		}()
+		})
+		if err != nil {
+			panic(fmt.Errorf("parallel stateDB Finalise submit err:%w", err))
+		}
 	}
 	wg.Wait()
 	if p.prefetcher != nil && len(addressesToPrefetch) > 0 {

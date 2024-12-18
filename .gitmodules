@@ -6,3 +6,7 @@
 	path = tests/evm-benchmarks
 	url = https://github.com/ipsilon/evm-benchmarks
 	shallow = true
+[submodule "tests-dag"]
+	path = tests-dag
+	url = https://github.com/welkin22/txdag-test-file.git
+	shallow = true

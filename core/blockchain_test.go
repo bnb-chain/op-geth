@@ -4646,7 +4646,6 @@ func testPEVMFallBackToSerialProcess(t *testing.T, scheme string) {
 	chain, err := NewBlockChain(rawdb.NewMemoryDatabase(), DefaultCacheConfigWithScheme(scheme), gspec, nil, engine, vm.Config{
 		EnableParallelExec:           true,
 		ParallelTxNum:                4,
-		ParallelThreshold:            1,
 		EnableParallelUnorderedMerge: true,
 	}, nil, nil)
 	if err != nil {

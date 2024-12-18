@@ -123,4 +123,5 @@ type StateDBer interface {
 	setStoragesOrigin(address common.Address, origin map[common.Hash][]byte)
 	timeAddStorageHashes(du time.Duration)
 	timeAddStorageCommits(du time.Duration)
+	getOrNewStateObject(addr common.Address) *stateObject
 }

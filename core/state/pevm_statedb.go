@@ -802,18 +802,19 @@ func (s state) merge(maindb StateDBer) {
 		maindb.SelfDestruct(s.addr)
 		return
 	}
+	obj := maindb.getOrNewStateObject(s.addr)
 	if s.modified&ModifyBalance != 0 {
-		maindb.SetBalance(s.addr, s.balance)
+		obj.SetBalance(s.balance)
 	}
 	if s.modified&ModifyNonce != 0 {
-		maindb.SetNonce(s.addr, s.nonce)
+		obj.SetNonce(s.nonce)
 	}
 	if s.modified&ModifyCode != 0 {
-		maindb.SetCode(s.addr, s.code)
+		obj.SetCode(common.BytesToHash(s.codeHash), s.code)
 	}
 	if s.modified&ModifyState != 0 {
 		for key, val := range s.state {
-			maindb.SetState(s.addr, key, val)
+			obj.SetState(key, val)
 		}
 		//TODO: should we reset all kv pairs if the s.state == nil ?
 	}

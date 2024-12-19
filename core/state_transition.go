@@ -136,19 +136,19 @@ func toWordSize(size uint64) uint64 {
 // A Message contains the data derived from a single transaction that is relevant to state
 // processing.
 type Message struct {
-	To            *common.Address
-	From          common.Address
-	Nonce         uint64
-	Value         *big.Int
-	GasLimit      uint64
-	GasPrice      *big.Int
-	GasFeeCap     *big.Int
-	GasTipCap     *big.Int
-	Data          []byte
-	AccessList    types.AccessList
-	BlobGasFeeCap *big.Int
-	BlobHashes    []common.Hash
-	AuthList      []types.SetCodeAuthorization
+	To                    *common.Address
+	From                  common.Address
+	Nonce                 uint64
+	Value                 *big.Int
+	GasLimit              uint64
+	GasPrice              *big.Int
+	GasFeeCap             *big.Int
+	GasTipCap             *big.Int
+	Data                  []byte
+	AccessList            types.AccessList
+	BlobGasFeeCap         *big.Int
+	BlobHashes            []common.Hash
+	SetCodeAuthorizations []types.SetCodeAuthorization
 
 	// When SkipAccountChecks is true, the message nonce is not checked against the
 	// account nonce in state. It also disables checking that the sender is an EOA.
@@ -173,13 +173,15 @@ func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.In
 		Value:          tx.Value(),
 		Data:           tx.Data(),
 		AccessList:     tx.AccessList(),
-		AuthList:       tx.AuthList(),
+		SetCodeAuthorizations:       tx.AuthList(),
 		IsSystemTx:     tx.IsSystemTx(),
 		IsDepositTx:    tx.IsDepositTx(),
 		Mint:           tx.Mint(),
 		RollupCostData: tx.RollupCostData(),
 
 		SkipAccountChecks: false,
+		SkipNonceChecks:       false,
+		SkipFromEOACheck:      false,
 		BlobHashes:        tx.BlobHashes(),
 		BlobGasFeeCap:     tx.BlobGasFeeCap(),
 	}
@@ -401,11 +403,11 @@ func (st *StateTransition) preCheck() error {
 		}
 	}
 	// Check that EIP-7702 authorization list signatures are well formed.
-	if msg.AuthList != nil {
+	if msg.SetCodeAuthorizations != nil {
 		if msg.To == nil {
 			return fmt.Errorf("%w (sender %v)", ErrSetCodeTxCreate, msg.From)
 		}
-		if len(msg.AuthList) == 0 {
+		if len(msg.SetCodeAuthorizations) == 0 {
 			return fmt.Errorf("%w (sender %v)", ErrEmptyAuthList, msg.From)
 		}
 	}
@@ -492,7 +494,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	)
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(msg.Data, msg.AccessList, msg.AuthList, contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
+	gas, err := IntrinsicGas(msg.Data, msg.AccessList, msg.SetCodeAuthorizations, contractCreation, rules.IsHomestead, rules.IsIstanbul, rules.IsShanghai)
 	if err != nil {
 		return nil, err
 	}
@@ -532,8 +534,8 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		st.state.SetNonce(msg.From, st.state.GetNonce(msg.From)+1)
 
 		// Apply EIP-7702 authorizations.
-		if msg.AuthList != nil {
-			for _, auth := range msg.AuthList {
+		if msg.SetCodeAuthorizations != nil {
+			for _, auth := range msg.SetCodeAuthorizations {
 				// Note errors are ignored, we simply skip invalid authorizations here.
 				st.applyAuthorization(msg, &auth)
 			}

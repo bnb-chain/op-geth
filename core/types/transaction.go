@@ -545,8 +545,8 @@ func (tx *Transaction) WithoutBlobTxSidecar() *Transaction {
 	return cpy
 }
 
-// AuthList returns the authorizations list of the transaction.
-func (tx *Transaction) AuthList() []SetCodeAuthorization {
+// SetCodeAuthorizations returns the authorizations list of the transaction.
+func (tx *Transaction) SetCodeAuthorizations() []SetCodeAuthorization {
 	setcodetx, ok := tx.inner.(*SetCodeTx)
 	if !ok {
 		return nil

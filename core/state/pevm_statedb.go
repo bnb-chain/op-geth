@@ -2023,7 +2023,7 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 		p.trie = tr
 	}
 
-	usedAddrs := make([][]byte, 0)
+	usedAddrs := make([][]byte, 0, len(p.stateObjectsPending))
 
 	for addr := range p.stateObjectsPending {
 		if obj, _ := p.getStateObjectFromStateObjects(addr); obj.deleted {
@@ -2276,8 +2276,6 @@ func (p *ParallelStateDB) deleteStateObject(obj *stateObject) {
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) { p.AccountUpdates += time.Since(start) }(time.Now())
 	}
-	p.trieParallelLock.Lock()
-	defer p.trieParallelLock.Unlock()
 	// Delete the account from the trie
 	addr := obj.Address()
 	if err := p.trie.DeleteAccount(addr); err != nil {

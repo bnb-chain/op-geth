@@ -100,6 +100,8 @@ var (
 	txDAGReaderChanGauge = metrics.NewRegisteredGauge("chain/block/txdag/reader/chan", nil)
 
 	parallelTxNumMeter             = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
+	parallelEnableMeter            = metrics.NewRegisteredMeter("chain/parallel/enable", nil)
+	parallelFallbackMeter          = metrics.NewRegisteredMeter("chain/parallel/fallback", nil)
 	parallelConflictTxNumMeter     = metrics.NewRegisteredMeter("chain/parallel/conflicttxs", nil)
 	parallelExecutionTimer         = metrics.NewRegisteredTimer("chain/parallel/exec", nil)
 	parallelConfirmTimer           = metrics.NewRegisteredTimer("chain/parallel/confirm", nil)
@@ -2015,15 +2017,20 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Process block using the parent state as reference point
 			pstart = time.Now()
-			if bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge) {
+			useSerialProcessor := bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)
+			if useSerialProcessor {
 				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
 				blockProcessedInParallel = false
 			} else {
+				if bc.vmConfig.EnableParallelExec {
+					parallelEnableMeter.Mark(1)
+				}
 				receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
 				blockProcessedInParallel = true
 				if err != nil {
 					// parallel processing fail , fallback to serial with new statDB.
 					log.Warn("ParallelEVM fallback to serial process", "error", err.Error())
+					parallelFallbackMeter.Mark(1)
 					execErr := err
 					statedb, err = bc.reGenerateStateForFallBack(parent.Root, block.Root(), statedb)
 					if err != nil {
@@ -2051,6 +2058,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if blockProcessedInParallel {
 				// invalid parallel execution, try serial
 				log.Warn("ParallelEVM fallback to serial process after ValidateState", "error", err.Error())
+				parallelFallbackMeter.Mark(1)
 				parent := it.previous()
 				if parent == nil {
 					parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)

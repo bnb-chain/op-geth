@@ -2152,6 +2152,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if err != nil {
 			return it.index, err
 		}
+		timers = statedb.Timers()
 		// Update the metrics touched during block commit
 		accountCommitTimer.Update(timers.AccountCommits)   // Account commits are complete, we can mark them
 		storageCommitTimer.Update(timers.StorageCommits)   // Storage commits are complete, we can mark them

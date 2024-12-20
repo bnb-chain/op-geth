@@ -563,6 +563,10 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 	return false
 }
 
+func (s *StateDB) prefetchAccount(address common.Address) {
+	panic("stateDB not support prefetchAccount")
+}
+
 /*
  * SETTERS
  */

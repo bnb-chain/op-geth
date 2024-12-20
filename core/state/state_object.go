@@ -429,7 +429,7 @@ func (s *stateObject) finalise(prefetch bool) {
 	s.dirtyStorage.Range(func(key, value interface{}) bool {
 		s.pendingStorage.StoreValue(key.(common.Hash), value.(common.Hash))
 		originalValue, _ := s.originStorage.GetValue(key.(common.Hash))
-		if value.(common.Hash) != originalValue {
+		if value.(common.Hash) != originalValue && prefetch {
 			originalKey := key.(common.Hash)
 			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(originalKey[:])) // Copy needed for closure
 		}
@@ -839,4 +839,17 @@ func (s *stateObject) Nonce() uint64 {
 
 func (s *stateObject) Root() common.Hash {
 	return s.data.Root
+}
+
+func (s *stateObject) prefetchStorage(key common.Hash, val common.Hash) {
+	prefetcher := s.dbItf.getPrefetcher()
+	if prefetcher == nil {
+		return
+	}
+	originalValue, _ := s.originStorage.GetValue(key)
+	if val != originalValue && s.data.Root != types.EmptyRootHash {
+		s.dbItf.getTrieParallelLock().Lock()
+		s.dbItf.getPrefetcher().prefetch(s.addrHash, s.data.Root, s.address, [][]byte{common.CopyBytes(key[:])})
+		s.dbItf.getTrieParallelLock().Unlock()
+	}
 }

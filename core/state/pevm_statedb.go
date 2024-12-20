@@ -537,7 +537,7 @@ func (pst *UncommittedDB) Merge(deleteEmptyObjects bool) error {
 	}
 	// 3. merge logs writes
 	for _, st := range pst.cache {
-		st.merge(pst.maindb)
+		st.merge(pst.maindb, pst.isMainDBIsParallelDB)
 	}
 	// 4. merge object states
 	for _, log := range pst.logs {
@@ -793,30 +793,44 @@ func (s state) conflicts(maindb *StateDB) error {
 	return nil
 }
 
-func (s state) merge(maindb StateDBer) {
+func (s state) merge(maindb StateDBer, prefetch bool) {
 	// 1. merge the balance
 	// 2. merge the nonce
 	// 3. merge the code
 	// 4. merge the state
 	if s.modified&ModifySelfDestruct != 0 {
 		maindb.SelfDestruct(s.addr)
+		if prefetch {
+			maindb.prefetchAccount(s.addr)
+		}
 		return
 	}
+	hasModified := false
 	obj := maindb.getOrNewStateObject(s.addr)
 	if s.modified&ModifyBalance != 0 {
 		obj.SetBalance(s.balance)
+		hasModified = true
 	}
 	if s.modified&ModifyNonce != 0 {
 		obj.SetNonce(s.nonce)
+		hasModified = true
 	}
 	if s.modified&ModifyCode != 0 {
 		obj.SetCode(common.BytesToHash(s.codeHash), s.code)
+		hasModified = true
 	}
 	if s.modified&ModifyState != 0 {
 		for key, val := range s.state {
 			obj.SetState(key, val)
+			if prefetch {
+				obj.prefetchStorage(key, val)
+			}
 		}
+		hasModified = true
 		//TODO: should we reset all kv pairs if the s.state == nil ?
+	}
+	if hasModified && prefetch {
+		maindb.prefetchAccount(obj.address)
 	}
 }
 
@@ -969,7 +983,7 @@ func (wst writes) selfDestruct(addr common.Address) {
 
 func (wst writes) merge(maindb *StateDB) {
 	for _, st := range wst {
-		st.merge(maindb)
+		st.merge(maindb, false)
 	}
 }
 
@@ -1434,6 +1448,15 @@ func (p *ParallelStateDB) setStateObject(object *stateObject) {
 	p.stateObjects.Store(object.address, object)
 }
 
+func (p *ParallelStateDB) prefetchAccount(address common.Address) {
+	if p.prefetcher == nil {
+		return
+	}
+	p.trieParallelLock.Lock()
+	defer p.trieParallelLock.Unlock()
+	p.prefetcher.prefetch(common.Hash{}, p.originalRoot, common.Address{}, [][]byte{common.CopyBytes(address[:])})
+}
+
 func (p *ParallelStateDB) createObject(addr common.Address) (newobj *stateObject, prev *stateObject) {
 	prev = p.getDeletedStateObject(addr) // Note, prev might have been deleted, we need that!
 	newobj = newObject(p, true, addr, nil)
@@ -1858,12 +1881,10 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 
 	runnerCount := goMaxProcs * 3 / 4
 	dirtyChan := make(chan common.Address, runnerCount)
-	addressesToPrefetch := make([][]byte, 0, 16)
 	go func() {
 		p.journalDirty.Range(func(key, value interface{}) bool {
 			address := key.(common.Address)
 			dirtyChan <- address
-			addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(address[:]))
 			return true
 		})
 		close(dirtyChan)
@@ -1910,7 +1931,7 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 					delete(p.storagesOrigin, obj.address)
 					p.StorageMux.Unlock()
 				} else {
-					obj.finalise(true) // Prefetch slots in the background
+					obj.finalise(false) // Prefetch slots in the background
 				}
 
 				obj.created = false
@@ -1925,11 +1946,6 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 		}
 	}
 	wg.Wait()
-	if p.prefetcher != nil && len(addressesToPrefetch) > 0 {
-		p.trieParallelLock.Lock()
-		p.prefetcher.prefetch(common.Hash{}, p.originalRoot, common.Address{}, addressesToPrefetch)
-		p.trieParallelLock.Unlock()
-	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	p.clearJournalAndRefund()
 }

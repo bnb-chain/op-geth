@@ -124,4 +124,5 @@ type StateDBer interface {
 	timeAddStorageHashes(du time.Duration)
 	timeAddStorageCommits(du time.Duration)
 	getOrNewStateObject(addr common.Address) *stateObject
+	prefetchAccount(address common.Address)
 }

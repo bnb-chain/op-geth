@@ -1881,10 +1881,12 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 
 	runnerCount := goMaxProcs * 3 / 4
 	dirtyChan := make(chan common.Address, runnerCount)
+	addressesToPrefetch := make([][]byte, 0, 16)
 	go func() {
 		p.journalDirty.Range(func(key, value interface{}) bool {
 			address := key.(common.Address)
 			dirtyChan <- address
+			addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(address[:]))
 			return true
 		})
 		close(dirtyChan)
@@ -1931,7 +1933,7 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 					delete(p.storagesOrigin, obj.address)
 					p.StorageMux.Unlock()
 				} else {
-					obj.finalise(false) // Prefetch slots in the background
+					obj.finalise(true) // Prefetch slots in the background
 				}
 
 				obj.created = false
@@ -1946,6 +1948,11 @@ func (p *ParallelStateDB) Finalise(deleteEmptyObjects bool) {
 		}
 	}
 	wg.Wait()
+	if p.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		p.trieParallelLock.Lock()
+		p.prefetcher.prefetch(common.Hash{}, p.originalRoot, common.Address{}, addressesToPrefetch)
+		p.trieParallelLock.Unlock()
+	}
 	// Invalidate journal because reverting across transactions is not allowed.
 	p.clearJournalAndRefund()
 }
@@ -2022,7 +2029,6 @@ func (p *ParallelStateDB) StateIntermediateRoot() common.Hash {
 			p.prefetcher.close()
 			p.prefetcher = nil
 		}()
-		r = p.trie.Hash()
 	}
 
 	if prefetcher != nil {

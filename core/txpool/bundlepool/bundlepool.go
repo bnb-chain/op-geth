@@ -375,7 +375,8 @@ func (p *BundlePool) reset(newHead *types.Header) {
 			(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
 			p.slots -= numSlots(p.bundles[hash])
 			delete(p.bundles, hash)
-		} else if len(bundle.Txs) == 0 || txSet.Contains(bundle.Txs[0].Hash()) {
+		} else if len(bundle.Txs) == 0 || (txSet.Contains(bundle.Txs[0].Hash()) &&
+			!containsHash(bundle.DroppingTxHashes, bundle.Txs[0].Hash())) {
 			p.slots -= numSlots(p.bundles[hash])
 			delete(p.bundles, hash)
 		}
@@ -445,6 +446,15 @@ func (p *BundlePool) SetMaxGas(maxGas uint64) {}
 // numSlots calculates the number of slots needed for a single bundle.
 func numSlots(bundle *types.Bundle) uint64 {
 	return (bundle.Size() + bundleSlotSize - 1) / bundleSlotSize
+}
+
+func containsHash(arr []common.Hash, match common.Hash) bool {
+	for _, elem := range arr {
+		if elem == match {
+			return true
+		}
+	}
+	return false
 }
 
 // =====================================================================================================================

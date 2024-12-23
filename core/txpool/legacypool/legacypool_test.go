@@ -1852,7 +1852,7 @@ func TestUnderpricing(t *testing.T) {
 // Tests that more expensive transactions push out cheap ones from the pool, but
 // without producing instability by creating gaps that start jumping transactions
 // back and forth between queued/pending.
-func TestStableUnderpricing(t *testing.T) {
+func TestStableUnderpricingForAsyncPriced(t *testing.T) {
 	t.Parallel()
 
 	// Create the pool to test the pricing enforcement with

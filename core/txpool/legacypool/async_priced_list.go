@@ -72,7 +72,6 @@ func (a *asyncPricedList) run() {
 			go func(reheap bool, newOnes []*types.Transaction, toRemove int, baseFee *big.Int) {
 				a.handle(reheap, newOnes, toRemove, baseFee, currentDone)
 				<-currentDone
-				close(currentDone)
 				currentDone = nil
 			}(reheap, newOnes, toRemove, baseFee)
 
@@ -110,15 +109,16 @@ func (a *asyncPricedList) handle(reheap bool, newOnes []*types.Transaction, toRe
 	if reheap {
 		a.priced.Reheap()
 		// set the lowest priced transaction when reheap is done
+		var emptyTx *types.Transaction = nil
 		if len(a.priced.floating.list) > 0 {
 			a.floatingLowest.Store(a.priced.floating.list[0])
 		} else {
-			a.floatingLowest.Store(nil)
+			a.floatingLowest.Store(emptyTx)
 		}
 		if len(a.priced.urgent.list) > 0 {
 			a.urgentLowest.Store(a.priced.urgent.list[0])
 		} else {
-			a.urgentLowest.Store(nil)
+			a.urgentLowest.Store(emptyTx)
 		}
 	}
 	if baseFee != nil {
@@ -135,10 +135,19 @@ func (a *asyncPricedList) Removed(count int) {
 }
 
 func (a *asyncPricedList) Underpriced(tx *types.Transaction) bool {
-	urgentLowest, floatingLowest := a.urgentLowest.Load(), a.floatingLowest.Load()
-	return (urgentLowest == nil || a.priced.urgent.cmp(urgentLowest.(*types.Transaction), tx) >= 0) &&
-		(floatingLowest == nil || a.priced.floating.cmp(floatingLowest.(*types.Transaction), tx) >= 0) &&
-		(floatingLowest != nil && urgentLowest != nil)
+	var urgentLowest, floatingLowest *types.Transaction = nil, nil
+	ul, fl := a.urgentLowest.Load(), a.floatingLowest.Load()
+	if ul != nil {
+		// be careful that ul might be nil
+		urgentLowest = ul.(*types.Transaction)
+	}
+	if fl != nil {
+		// be careful that fl might be nil
+		floatingLowest = fl.(*types.Transaction)
+	}
+	return (urgentLowest == nil || a.priced.urgent.cmp(urgentLowest, tx) >= 0) &&
+		(floatingLowest == nil || a.priced.floating.cmp(floatingLowest, tx) >= 0) &&
+		(floatingLowest != nil || urgentLowest != nil)
 }
 
 // Disacard cleans staled transactions to make room for new ones

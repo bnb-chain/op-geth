@@ -375,7 +375,7 @@ func (p *BundlePool) reset(newHead *types.Header) {
 			(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
 			p.slots -= numSlots(p.bundles[hash])
 			delete(p.bundles, hash)
-		} else if txSet.Contains(bundle.Txs[0].Hash()) {
+		} else if len(bundle.Txs) == 0 || txSet.Contains(bundle.Txs[0].Hash()) {
 			p.slots -= numSlots(p.bundles[hash])
 			delete(p.bundles, hash)
 		}

@@ -153,6 +153,8 @@ type BlockChain interface {
 
 // Config are the configuration parameters of the transaction pool.
 type Config struct {
+	EnableAsyncPriced bool // enable async pricedlist. Set as true only --txpool.enableasyncpriced option is enabled
+
 	Locals    []common.Address // Addresses that should be treated by default as local
 	NoLocals  bool             // Whether local transaction handling should be disabled
 	Journal   string           // Journal of local transactions to survive node restarts
@@ -319,7 +321,11 @@ func New(config Config, chain BlockChain) *LegacyPool {
 		pool.locals.add(addr)
 		pool.pendingCache.markLocal(addr)
 	}
-	pool.priced = newPricedList(pool.all)
+	if config.EnableAsyncPriced {
+		pool.priced = newAsyncPricedList(pool.all)
+	} else {
+		pool.priced = newPricedList(pool.all)
+	}
 
 	if (!config.NoLocals || config.JournalRemote) && config.Journal != "" {
 		pool.journal = newTxJournal(config.Journal)

@@ -224,6 +224,7 @@ func (nf *nodebufferlist) recoverNodeBufferList(freezer *rawdb.ResettableFreezer
 		nf.layers += current.layers
 	}
 	nf.diffToBase()
+	nf.backgroundFlush()
 
 	log.Info("Succeed to recover node buffer list", "base_size", nf.base.size, "tail_state_id", nf.tail.id,
 		"head_state_id", nf.head.id, "nbl_layers", nf.layers, "base_layers", nf.base.layers)

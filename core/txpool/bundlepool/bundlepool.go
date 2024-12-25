@@ -361,6 +361,10 @@ func (p *BundlePool) reset(newHead *types.Header) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if len(p.bundles) == 0 {
+		return
+	}
+
 	// Prune outdated bundles and invalid bundles
 	block := p.chain.GetBlock(newHead.Hash(), newHead.Number.Uint64())
 	txSet := mapset.NewSet[common.Hash]()
@@ -370,17 +374,26 @@ func (p *BundlePool) reset(newHead *types.Header) {
 			txSet.Add(tx.Hash())
 		}
 	}
+	var wg sync.WaitGroup
 	for hash, bundle := range p.bundles {
-		if (bundle.MaxTimestamp != 0 && newHead.Time > bundle.MaxTimestamp) ||
-			(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
-			p.slots -= numSlots(p.bundles[hash])
-			delete(p.bundles, hash)
-		} else if len(bundle.Txs) == 0 || (txSet.Contains(bundle.Txs[0].Hash()) &&
-			!containsHash(bundle.DroppingTxHashes, bundle.Txs[0].Hash())) {
-			p.slots -= numSlots(p.bundles[hash])
-			delete(p.bundles, hash)
-		}
+		wg.Add(1)
+		go func(hash common.Hash, bundle *types.Bundle) {
+			if (bundle.MaxTimestamp != 0 && newHead.Time > bundle.MaxTimestamp) ||
+				(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
+				p.slots -= numSlots(p.bundles[hash])
+				delete(p.bundles, hash)
+			} else {
+				for _, tx := range bundle.Txs {
+					if txSet.Contains(tx.Hash()) && !containsHash(bundle.DroppingTxHashes, tx.Hash()) {
+						p.slots -= numSlots(p.bundles[hash])
+						delete(p.bundles, hash)
+						break
+					}
+				}
+			}
+		}(hash, bundle)
 	}
+	wg.Wait()
 	bundleGauge.Update(int64(len(p.bundles)))
 	slotsGauge.Update(int64(p.slots))
 }

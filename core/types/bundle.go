@@ -43,6 +43,7 @@ type Bundle struct {
 
 type SimulatedBundle struct {
 	OriginalBundle *Bundle
+	SucceedTxs     Transactions
 
 	BundleGasFees  *big.Int
 	BundleGasPrice *big.Int

@@ -331,9 +331,9 @@ func (w *worker) mergeBundles(
 		log.Info("included bundle",
 			"gasUsed", simulatedBundle.BundleGasUsed,
 			"gasPrice", simulatedBundle.BundleGasPrice,
-			"txcount", len(simulatedBundle.OriginalBundle.Txs))
+			"txcount", len(simulatedBundle.SucceedTxs))
 
-		includedTxs = append(includedTxs, bundle.OriginalBundle.Txs...)
+		includedTxs = append(includedTxs, simulatedBundle.SucceedTxs...)
 
 		mergedBundle.BundleGasFees.Add(mergedBundle.BundleGasFees, simulatedBundle.BundleGasFees)
 		mergedBundle.BundleGasUsed += simulatedBundle.BundleGasUsed
@@ -366,9 +366,8 @@ func (w *worker) simulateBundle(
 		bundleGasFees = new(big.Int)
 	)
 
-	txsLen := len(bundle.Txs)
-	for i := 0; i < txsLen; i++ {
-		tx := bundle.Txs[i]
+	succeedTxs := types.Transactions{}
+	for i, tx := range bundle.Txs {
 		state.SetTxContext(tx.Hash(), i+currentTxCount)
 
 		snap := state.Snapshot()
@@ -382,9 +381,6 @@ func (w *worker) simulateBundle(
 				log.Warn("drop tx in bundle", "hash", tx.Hash().String())
 				state.RevertToSnapshot(snap)
 				gasPool.SetGas(gp)
-				bundle.Txs = bundle.Txs.Remove(i)
-				txsLen = len(bundle.Txs)
-				i--
 				continue
 			}
 
@@ -404,9 +400,6 @@ func (w *worker) simulateBundle(
 			// for unRevertible tx but itself can be dropped, we drop it and revert the state and gas pool
 			if containsHash(bundle.DroppingTxHashes, receipt.TxHash) {
 				log.Warn("drop tx in bundle", "hash", receipt.TxHash.String())
-				bundle.Txs = bundle.Txs.Remove(i)
-				txsLen = len(bundle.Txs)
-				i--
 				continue
 			}
 			err = errNonRevertingTxInBundleFailed
@@ -433,10 +426,11 @@ func (w *worker) simulateBundle(
 			txGasFees := new(big.Int).Mul(txGasUsed, effectiveTip)
 			bundleGasFees.Add(bundleGasFees, txGasFees)
 		}
+		succeedTxs = append(succeedTxs, tx)
 	}
 
 	// prune bundle when all txs are dropped
-	if len(bundle.Txs) == 0 {
+	if len(succeedTxs) == 0 {
 		log.Warn("prune bundle", "hash", bundle.Hash().String(), "err", "empty bundle")
 		w.eth.TxPool().PruneBundle(bundle.Hash())
 		return nil, errors.New("empty bundle")
@@ -462,6 +456,7 @@ func (w *worker) simulateBundle(
 
 	return &types.SimulatedBundle{
 		OriginalBundle: bundle,
+		SucceedTxs:     succeedTxs,
 		BundleGasFees:  bundleGasFees,
 		BundleGasPrice: bundleGasPrice,
 		BundleGasUsed:  bundleGasUsed,

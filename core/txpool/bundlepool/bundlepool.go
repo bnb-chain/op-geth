@@ -378,6 +378,7 @@ func (p *BundlePool) reset(newHead *types.Header) {
 	for hash, bundle := range p.bundles {
 		wg.Add(1)
 		go func(hash common.Hash, bundle *types.Bundle) {
+			defer wg.Done()
 			if (bundle.MaxTimestamp != 0 && newHead.Time > bundle.MaxTimestamp) ||
 				(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
 				p.slots -= numSlots(p.bundles[hash])

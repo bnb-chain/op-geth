@@ -572,6 +572,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		log.Info("Parallel V2 enabled", "parallelNum", ParallelNum())
 	} else {
 		bc.processor = NewStateProcessor(chainConfig, bc, engine)
+		bc.serialProcessor = bc.processor
 	}
 	// Start future block processor.
 	bc.wg.Add(1)
@@ -2017,14 +2018,13 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Process block using the parent state as reference point
 			pstart = time.Now()
-			useSerialProcessor := bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)
+			txDAGMissButNecessary := bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)
+			useSerialProcessor := !bc.vmConfig.EnableParallelExec || txDAGMissButNecessary
 			if useSerialProcessor {
 				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
 				blockProcessedInParallel = false
 			} else {
-				if bc.vmConfig.EnableParallelExec {
-					parallelEnableMeter.Mark(1)
-				}
+				parallelEnableMeter.Mark(1)
 				receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
 				blockProcessedInParallel = true
 				if err != nil {

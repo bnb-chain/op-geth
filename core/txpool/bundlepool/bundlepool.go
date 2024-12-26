@@ -362,6 +362,8 @@ func (p *BundlePool) reset(newHead *types.Header) {
 	defer p.mu.Unlock()
 
 	if len(p.bundles) == 0 {
+		bundleGauge.Update(int64(len(p.bundles)))
+		slotsGauge.Update(int64(p.slots))
 		return
 	}
 

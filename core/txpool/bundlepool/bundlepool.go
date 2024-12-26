@@ -374,27 +374,21 @@ func (p *BundlePool) reset(newHead *types.Header) {
 			txSet.Add(tx.Hash())
 		}
 	}
-	var wg sync.WaitGroup
 	for hash, bundle := range p.bundles {
-		wg.Add(1)
-		go func(hash common.Hash, bundle *types.Bundle) {
-			defer wg.Done()
-			if (bundle.MaxTimestamp != 0 && newHead.Time > bundle.MaxTimestamp) ||
-				(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
-				p.slots -= numSlots(p.bundles[hash])
-				delete(p.bundles, hash)
-			} else {
-				for _, tx := range bundle.Txs {
-					if txSet.Contains(tx.Hash()) && !containsHash(bundle.DroppingTxHashes, tx.Hash()) {
-						p.slots -= numSlots(p.bundles[hash])
-						delete(p.bundles, hash)
-						break
-					}
+		if (bundle.MaxTimestamp != 0 && newHead.Time > bundle.MaxTimestamp) ||
+			(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
+			p.slots -= numSlots(p.bundles[hash])
+			delete(p.bundles, hash)
+		} else {
+			for _, tx := range bundle.Txs {
+				if txSet.Contains(tx.Hash()) && !containsHash(bundle.DroppingTxHashes, tx.Hash()) {
+					p.slots -= numSlots(p.bundles[hash])
+					delete(p.bundles, hash)
+					break
 				}
 			}
-		}(hash, bundle)
+		}
 	}
-	wg.Wait()
 	bundleGauge.Update(int64(len(p.bundles)))
 	slotsGauge.Update(int64(p.slots))
 }

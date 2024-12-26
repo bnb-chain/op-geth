@@ -176,6 +176,8 @@ type Config struct {
 
 	ReannounceTime    time.Duration // Duration for announcing local pending transactions again
 	ReannounceRemotes bool          // Wether reannounce remote transactions or not
+
+	BroadcastDirectly bool // broadcast transactions directly to peers
 }
 
 // DefaultConfig contains the default configurations for the transaction pool.

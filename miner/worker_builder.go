@@ -367,8 +367,9 @@ func (w *worker) simulateBundle(
 	)
 
 	succeedTxs := types.Transactions{}
-	for i, tx := range bundle.Txs {
-		state.SetTxContext(tx.Hash(), i+currentTxCount)
+	succeedTxCount := 0
+	for _, tx := range bundle.Txs {
+		state.SetTxContext(tx.Hash(), succeedTxCount+currentTxCount)
 
 		snap := state.Snapshot()
 		gp := gasPool.Gas()
@@ -427,6 +428,7 @@ func (w *worker) simulateBundle(
 			bundleGasFees.Add(bundleGasFees, txGasFees)
 		}
 		succeedTxs = append(succeedTxs, tx)
+		succeedTxCount++
 	}
 
 	// prune bundle when all txs are dropped

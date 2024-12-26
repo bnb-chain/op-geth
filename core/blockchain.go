@@ -1978,7 +1978,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if parent == nil {
 				parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
 			}
-			// Enable prefetching to pull in trie node paths while processing transactions
+
 			if bc.vmConfig.EnableParallelExec {
 				bc.parseTxDAG(block)
 			}
@@ -1992,7 +1992,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if err != nil {
 				return it.index, err
 			}
-
+			// Enable prefetching to pull in trie node paths while processing transactions
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
 

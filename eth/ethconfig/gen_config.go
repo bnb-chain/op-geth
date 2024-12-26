@@ -77,7 +77,13 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RollupDisableTxPoolGossip               bool
 		RollupDisableTxPoolAdmission            bool
 		RollupHaltOnIncompatibleProtocolVersion string
+		ParallelTxMode                          bool
+		ParallelTxNum                           int
 		EnableOpcodeOptimizing                  bool
+		EnableParallelTxDAG                     bool
+		ParallelTxDAGFile                       string
+		ParallelTxUnorderedMerge                bool
+		ParallelTxParallelMerge                 bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -138,7 +144,13 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RollupDisableTxPoolGossip = c.RollupDisableTxPoolGossip
 	enc.RollupDisableTxPoolAdmission = c.RollupDisableTxPoolAdmission
 	enc.RollupHaltOnIncompatibleProtocolVersion = c.RollupHaltOnIncompatibleProtocolVersion
+	enc.ParallelTxMode = c.ParallelTxMode
+	enc.ParallelTxNum = c.ParallelTxNum
 	enc.EnableOpcodeOptimizing = c.EnableOpcodeOptimizing
+	enc.EnableParallelTxDAG = c.EnableParallelTxDAG
+	enc.ParallelTxDAGFile = c.ParallelTxDAGFile
+	enc.ParallelTxUnorderedMerge = c.ParallelTxUnorderedMerge
+	enc.ParallelTxParallelMerge = c.ParallelTxParallelMerge
 	return &enc, nil
 }
 
@@ -203,7 +215,13 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RollupDisableTxPoolGossip               *bool
 		RollupDisableTxPoolAdmission            *bool
 		RollupHaltOnIncompatibleProtocolVersion *string
+		ParallelTxMode                          *bool
+		ParallelTxNum                           *int
 		EnableOpcodeOptimizing                  *bool
+		EnableParallelTxDAG                     *bool
+		ParallelTxDAGFile                       *string
+		ParallelTxUnorderedMerge                *bool
+		ParallelTxParallelMerge                 *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -383,8 +401,26 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.RollupHaltOnIncompatibleProtocolVersion != nil {
 		c.RollupHaltOnIncompatibleProtocolVersion = *dec.RollupHaltOnIncompatibleProtocolVersion
 	}
+	if dec.ParallelTxMode != nil {
+		c.ParallelTxMode = *dec.ParallelTxMode
+	}
+	if dec.ParallelTxNum != nil {
+		c.ParallelTxNum = *dec.ParallelTxNum
+	}
 	if dec.EnableOpcodeOptimizing != nil {
 		c.EnableOpcodeOptimizing = *dec.EnableOpcodeOptimizing
+	}
+	if dec.EnableParallelTxDAG != nil {
+		c.EnableParallelTxDAG = *dec.EnableParallelTxDAG
+	}
+	if dec.ParallelTxDAGFile != nil {
+		c.ParallelTxDAGFile = *dec.ParallelTxDAGFile
+	}
+	if dec.ParallelTxUnorderedMerge != nil {
+		c.ParallelTxUnorderedMerge = *dec.ParallelTxUnorderedMerge
+	}
+	if dec.ParallelTxParallelMerge != nil {
+		c.ParallelTxParallelMerge = *dec.ParallelTxParallelMerge
 	}
 	return nil
 }

@@ -537,6 +537,21 @@ func (h *priceHeap) Pop() interface{} {
 	return x
 }
 
+var _ pricedListInterface = (*pricedList)(nil)
+
+type pricedListInterface interface {
+	Put(tx *types.Transaction, local bool)
+	Removed(count int)
+	Underpriced(tx *types.Transaction) bool
+	Discard(slots int, force bool) (types.Transactions, bool)
+	NeedReheap(currHead *types.Header) bool
+	Reheap()
+	SetBaseFee(baseFee *big.Int)
+	GetBaseFee() *big.Int
+	Staled() int
+	TxCount() int
+}
+
 // pricedList is a price-sorted heap to allow operating on transactions pool
 // contents in a price-incrementing way. It's built upon the all transactions
 // in txpool but only interested in the remote part. It means only remote transactions
@@ -569,6 +584,10 @@ func newPricedList(all *lookup) *pricedList {
 	return &pricedList{
 		all: all,
 	}
+}
+
+func (l *pricedList) Staled() int {
+	return int(l.stales.Load())
 }
 
 // Put inserts a new transaction into the heap.
@@ -703,4 +722,13 @@ func (l *pricedList) Reheap() {
 // necessary to call right before SetBaseFee when processing a new block.
 func (l *pricedList) SetBaseFee(baseFee *big.Int) {
 	l.urgent.baseFee = baseFee
+}
+
+// GetBaseFee returns the current base fee used for sorting the urgent heap.
+func (l *pricedList) GetBaseFee() *big.Int {
+	return l.urgent.baseFee
+}
+
+func (l *pricedList) TxCount() int {
+	return len(l.urgent.list) + len(l.floating.list)
 }

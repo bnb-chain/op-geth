@@ -126,6 +126,10 @@ func (a *asyncPricedList) handle(reheap bool, newOnes []*types.Transaction, toRe
 	}
 }
 
+func (a *asyncPricedList) Staled() int {
+	return a.priced.Staled()
+}
+
 func (a *asyncPricedList) Put(tx *types.Transaction, local bool) {
 	a.add <- &addEvent{tx, local}
 }
@@ -180,4 +184,8 @@ func (a *asyncPricedList) GetBaseFee() *big.Int {
 
 func (a *asyncPricedList) Stop() {
 	close(a.quit)
+}
+
+func (a *asyncPricedList) TxCount() int {
+	return a.priced.TxCount()
 }

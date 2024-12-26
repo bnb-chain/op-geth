@@ -270,7 +270,7 @@ type LegacyPool struct {
 	queue   map[common.Address]*list     // Queued but non-processable transactions
 	beats   map[common.Address]time.Time // Last heartbeat from each known account
 	all     *lookup                      // All transactions to allow lookups
-	priced  *pricedList                  // All transactions sorted by price
+	priced  pricedListInterface          // All transactions sorted by price
 
 	pendingCache *cacheForMiner //pending list cache for miner
 
@@ -446,7 +446,7 @@ func (pool *LegacyPool) loop() {
 			pool.mu.RLock()
 			pending, queued := pool.stats()
 			pool.mu.RUnlock()
-			stales := int(pool.priced.stales.Load())
+			stales := pool.priced.Staled()
 
 			if pending != prevPending || queued != prevQueued || stales != prevStales {
 				log.Debug("Transaction pool status report", "executable", pending, "queued", queued, "stales", stales)
@@ -852,7 +852,6 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 				pool.priced.SetBaseFee(baseFee)
 			}
 			pool.priced.Reheap()
-			pool.priced.currHead = currHead
 		}
 
 		// If the new transaction is underpriced, don't accept it
@@ -1468,7 +1467,7 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 	if reset != nil {
 		pool.demoteUnexecutables(demoteAddrs)
 		demoteTimer.UpdateSince(t0)
-		var pendingBaseFee = pool.priced.urgent.baseFee
+		var pendingBaseFee = pool.priced.GetBaseFee()
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
 				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)

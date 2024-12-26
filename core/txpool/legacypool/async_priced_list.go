@@ -182,7 +182,7 @@ func (a *asyncPricedList) GetBaseFee() *big.Int {
 	return a.priced.floating.baseFee
 }
 
-func (a *asyncPricedList) Stop() {
+func (a *asyncPricedList) Close() {
 	close(a.quit)
 }
 

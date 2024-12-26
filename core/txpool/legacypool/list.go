@@ -544,12 +544,12 @@ type pricedListInterface interface {
 	Removed(count int)
 	Underpriced(tx *types.Transaction) bool
 	Discard(slots int, force bool) (types.Transactions, bool)
-	NeedReheap(currHead *types.Header) bool
 	Reheap()
 	SetBaseFee(baseFee *big.Int)
 	GetBaseFee() *big.Int
 	Staled() int
 	TxCount() int
+	Close()
 }
 
 // pricedList is a price-sorted heap to allow operating on transactions pool
@@ -564,7 +564,6 @@ type pricedListInterface interface {
 // better candidates for inclusion while in other cases (at the top of the baseFee peak)
 // the floating heap is better. When baseFee is decreasing they behave similarly.
 type pricedList struct {
-	currHead *types.Header // Current block header for effective tip calculation
 	// Number of stale price points to (re-heap trigger).
 	stales atomic.Int64
 
@@ -687,10 +686,6 @@ func (l *pricedList) Discard(slots int, force bool) (types.Transactions, bool) {
 	return drop, true
 }
 
-func (l *pricedList) NeedReheap(currHead *types.Header) bool {
-	return l.currHead == nil || currHead == nil || currHead.Hash().Cmp(l.currHead.Hash()) != 0
-}
-
 // Reheap forcibly rebuilds the heap based on the current remote transaction set.
 func (l *pricedList) Reheap() {
 	l.reheapMu.Lock()
@@ -722,6 +717,7 @@ func (l *pricedList) Reheap() {
 // necessary to call right before SetBaseFee when processing a new block.
 func (l *pricedList) SetBaseFee(baseFee *big.Int) {
 	l.urgent.baseFee = baseFee
+	l.Reheap()
 }
 
 // GetBaseFee returns the current base fee used for sorting the urgent heap.
@@ -731,4 +727,8 @@ func (l *pricedList) GetBaseFee() *big.Int {
 
 func (l *pricedList) TxCount() int {
 	return len(l.urgent.list) + len(l.floating.list)
+}
+
+func (l *pricedList) Close() {
+	//do nothing
 }

@@ -399,22 +399,18 @@ func (w *worker) simulateBundle(
 
 		if receipt.Status == types.ReceiptStatusFailed && !containsHash(bundle.RevertingTxHashes, receipt.TxHash) {
 			// for unRevertible tx but itself can be dropped, we drop it and revert the state and gas pool
-			if containsHash(bundle.DroppingTxHashes, receipt.TxHash) {
-				log.Warn("drop tx in bundle", "hash", receipt.TxHash.String())
-				gasPool.SetGas(gp)
-				succeedTxs = append(succeedTxs, tx)
-				succeedTxCount++
-				continue
-			}
-			err = errNonRevertingTxInBundleFailed
-			log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
+			if !containsHash(bundle.DroppingTxHashes, receipt.TxHash) {
+				err = errNonRevertingTxInBundleFailed
+				log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
 
-			if prune {
-				w.eth.TxPool().PruneBundle(bundle.Hash())
-				log.Warn("prune bundle", "hash", bundle.Hash().String())
-			}
+				if prune {
+					w.eth.TxPool().PruneBundle(bundle.Hash())
+					log.Warn("prune bundle", "hash", bundle.Hash().String())
+				}
 
-			return nil, err
+				return nil, err
+			}
+			log.Warn("drop tx in bundle", "hash", receipt.TxHash.String())
 		}
 		if !w.eth.TxPool().Has(tx.Hash()) {
 			bundleGasUsed += receipt.GasUsed

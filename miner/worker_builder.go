@@ -402,6 +402,8 @@ func (w *worker) simulateBundle(
 			if containsHash(bundle.DroppingTxHashes, receipt.TxHash) {
 				log.Warn("drop tx in bundle", "hash", receipt.TxHash.String())
 				gasPool.SetGas(gp)
+				succeedTxs = append(succeedTxs, tx)
+				succeedTxCount++
 				continue
 			}
 			err = errNonRevertingTxInBundleFailed

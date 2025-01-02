@@ -1412,12 +1412,19 @@ func (pool *LegacyPool) scheduleReorgLoop() {
 
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
 func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirtyAccounts *accountSet, events map[common.Address]*sortedMap) {
+	var reorgCost, waittime time.Duration
+	var promoted []*types.Transaction
+	var demoted, sendFeed int
 	defer func(t0 time.Time) {
-		reorgDurationTimer.Update(time.Since(t0))
+		reorgCost = time.Since(t0)
+		reorgDurationTimer.Update(reorgCost)
 		if reset != nil {
 			reorgresetTimer.UpdateSince(t0)
-			if reset.newHead != nil {
-				log.Info("Transaction pool reorged", "from", reset.oldHead.Number.Uint64(), "to", reset.newHead.Number.Uint64())
+			demoteTxMeter.Mark(int64(demoted))
+			pending, queued := pool.stats()
+			if reset.newHead != nil && reset.oldHead != nil {
+				log.Info("Transaction pool reorged", "from", reset.oldHead.Number.Uint64(), "to", reset.newHead.Number.Uint64(),
+					"reorgCost", reorgCost, "waittime", waittime, "promoted", len(promoted), "demoted", demoted, "sendFeed", sendFeed, "pending", pending, "queued", queued)
 			}
 		}
 	}(time.Now())
@@ -1430,7 +1437,9 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 		// the flatten operation can be avoided.
 		promoteAddrs = dirtyAccounts.flatten()
 	}
+	tw := time.Now()
 	pool.mu.Lock()
+	waittime = time.Since(tw)
 	tl, t0 := time.Now(), time.Now()
 	if reset != nil {
 		// Reset from the old head to the new, rescheduling any reorged transactions
@@ -1452,7 +1461,7 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 	}
 	// Check for pending transactions for every account that sent new ones
 	t0 = time.Now()
-	promoted := pool.promoteExecutables(promoteAddrs)
+	promoted = pool.promoteExecutables(promoteAddrs)
 	promoteTimer.UpdateSince(t0)
 
 	// If a new block appeared, validate the pool of pending transactions. This will
@@ -1460,7 +1469,7 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 	// because of another transaction (e.g. higher gas price).
 	t0 = time.Now()
 	if reset != nil {
-		pool.demoteUnexecutables(demoteAddrs)
+		demoted = pool.demoteUnexecutables(demoteAddrs)
 		demoteTimer.UpdateSince(t0)
 		var pendingBaseFee = pool.priced.urgent.baseFee
 		if reset.newHead != nil {
@@ -1506,6 +1515,7 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			txs = append(txs, set.Flatten()...)
 		}
 		pool.txFeed.Send(core.NewTxsEvent{Txs: txs})
+		sendFeed = len(txs)
 	}
 }
 
@@ -1883,14 +1893,14 @@ func (pool *LegacyPool) truncateQueue() {
 // Note: transactions are not marked as removed in the priced list because re-heaping
 // is always explicitly triggered by SetBaseFee and it would be unnecessary and wasteful
 // to trigger a re-heap is this function
-func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) {
+func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) int {
+	var demoteTxNum = 0
 	if demoteAddrs == nil {
 		demoteAddrs = make([]common.Address, 0, len(pool.pending))
 		for addr := range pool.pending {
 			demoteAddrs = append(demoteAddrs, addr)
 		}
 	}
-	demoteTxMeter.Mark(int64(len(demoteAddrs)))
 
 	var removed = 0
 	// Iterate over all accounts and demote any non-executable transactions
@@ -1957,8 +1967,10 @@ func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) {
 		}
 		pool.pendingCache.del(dropPendingCache, pool.signer)
 		removed += len(dropPendingCache)
+		demoteTxNum += len(dropPendingCache)
 	}
 	pool.priced.Removed(removed)
+	return demoteTxNum
 }
 
 // addressByHeartbeat is an account address tagged with its last activity timestamp.

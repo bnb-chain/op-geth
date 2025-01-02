@@ -62,7 +62,8 @@ func checkMainDB(data map[int]int) bool {
 }
 
 func newTxReq(from, to, value int) *PEVMTxRequest {
-	usedGas := uint64(value)
+	usedGas := atomic.Uint64{}
+	usedGas.Add(uint64(value))
 	return &PEVMTxRequest{
 		usedGas:  &usedGas,
 		gasLimit: uint64(from),
@@ -71,7 +72,7 @@ func newTxReq(from, to, value int) *PEVMTxRequest {
 }
 
 func (mt *mockTx) Value() int {
-	return int(*mt.req.usedGas)
+	return int(mt.req.usedGas.Load())
 }
 
 func (mt *mockTx) From() int {
@@ -268,7 +269,7 @@ func setTxIndex(allReq []*PEVMTxRequest) {
 func TestTxLevelRun(t *testing.T) {
 	// case 1: empty txs
 	case1 := func() {
-		levels([]uint64{}, [][]int{}).Run(func(*PEVMTxRequest) *PEVMTxResult { return nil }, func(*PEVMTxResult) error { return nil }, false)
+		levels([]uint64{}, [][]int{}).Run(func(*PEVMTxRequest) *PEVMTxResult { return nil }, func(*PEVMTxResult) error { return nil }, nil, false, false)
 	}
 	// case 2: 4 txs with no dependencies, no conflicts
 	case2 := func() {
@@ -290,7 +291,7 @@ func TestTxLevelRun(t *testing.T) {
 			nil, nil, nil, nil,
 		})
 		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
-		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm, false)
+		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm, nil, false, false)
 		ok := checkMainDB(map[int]int{1: 0, 2: 0, 3: 0, 4: 0, 5: 11, 6: 21, 7: 31, 8: 41})
 		if err != nil {
 			t.Fatalf("failed, err:%v", err)
@@ -326,7 +327,7 @@ func TestTxLevelRun(t *testing.T) {
 			nil, nil, {0}, {1},
 		})
 		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
-		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm, false)
+		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm, nil, false, false)
 		ok := checkMainDB(map[int]int{1: 0, 2: 0, 3: 0, 4: 0, 5: 11, 6: 21})
 		if err != nil {
 			t.Fatalf("failed, err:%v", err)
@@ -362,7 +363,7 @@ func TestTxLevelRun(t *testing.T) {
 			{0}, nil, {-1}, {-1},
 		})
 		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
-		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm, false)
+		err, _ := NewTxLevels(allReqs, txdag).Run(caller.execute, caller.confirm, nil, false, false)
 		ok := checkMainDB(map[int]int{1: 0, 2: 0, 3: 0, 4: 0, 5: 11, 6: 21})
 		if err != nil {
 			t.Fatalf("failed, err:%v", err)
@@ -410,7 +411,7 @@ func TestTxLevelRun(t *testing.T) {
 			res[i+2000] = i
 		}
 		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
-		err, _ := NewTxLevels(allReqs, nil).Run(caller.execute, caller.confirm, false)
+		err, _ := NewTxLevels(allReqs, nil).Run(caller.execute, caller.confirm, nil, false, false)
 		ok := checkMainDB(res)
 		if err != nil {
 			t.Fatalf("failed, err:%v", err)
@@ -436,7 +437,7 @@ func TestTxLevelRun(t *testing.T) {
 		}
 		setTxIndex(allReqs)
 		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
-		err, _ := NewTxLevels(allReqs, nil).Run(caller.execute, caller.confirm, false)
+		err, _ := NewTxLevels(allReqs, nil).Run(caller.execute, caller.confirm, nil, false, false)
 		ok := checkMainDB(map[int]int{1: 5, 2: 20, 3: 10})
 		if err != nil {
 			t.Fatalf("failed, err:%v", err)
@@ -465,7 +466,7 @@ func TestTxLevelRun(t *testing.T) {
 		}
 		caller := caller{txs: make(map[*PEVMTxRequest]*mockTx)}
 		setTxIndex(allReqs)
-		err, _ := NewTxLevels(allReqs, dag).Run(caller.execute, caller.confirm, false)
+		err, _ := NewTxLevels(allReqs, dag).Run(caller.execute, caller.confirm, nil, false, false)
 		ok := checkMainDB(map[int]int{1: 5, 2: 20, 3: 10})
 		if err != nil {
 			t.Fatalf("failed, err:%v", err)

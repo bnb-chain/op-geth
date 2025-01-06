@@ -2,14 +2,15 @@ package miner
 
 import (
 	"errors"
-	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
-	"github.com/holiman/uint256"
 	"math/big"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
+	"github.com/holiman/uint256"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -78,7 +79,7 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 	pendingBlobTxs := w.eth.TxPool().Pending(filter)
 
 	packFromTxpoolTimer.UpdateSince(start)
-	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
+	log.Debug("packFromTxpoolTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash(), "txs", len(pendingPlainTxs))
 
 	// Split the pending transactions into locals and remotes.
 	localPlainTxs, remotePlainTxs := make(map[common.Address][]*txpool.LazyTransaction), pendingPlainTxs

@@ -388,11 +388,13 @@ func (p *BundlePool) reset(newHead *types.Header) {
 				if txSet.Contains(tx.Hash()) && !containsHash(bundle.DroppingTxHashes, tx.Hash()) {
 					p.slots -= numSlots(p.bundles[hash])
 					delete(p.bundles, hash)
-					continue
+					break
 				}
 			}
 		}
-		p.bundleHeap.Push(bundle)
+		if p.bundles[hash] != nil {
+			p.bundleHeap.Push(bundle)
+		}
 	}
 	bundleGauge.Update(int64(len(p.bundles)))
 	slotsGauge.Update(int64(p.slots))

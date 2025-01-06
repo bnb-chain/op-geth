@@ -635,7 +635,6 @@ func (pool *LegacyPool) ContentFrom(addr common.Address) ([]*types.Transaction, 
 // The transactions can also be pre-filtered by the dynamic fee components to
 // reduce allocations and load on downstream subsystems.
 func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address][]*txpool.LazyTransaction {
-	// TODO need to confirm
 	defer func(t0 time.Time) {
 		getPendingDurationTimer.Update(time.Since(t0))
 	}(time.Now())

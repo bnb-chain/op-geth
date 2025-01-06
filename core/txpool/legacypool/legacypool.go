@@ -629,7 +629,6 @@ func (pool *LegacyPool) ContentFrom(addr common.Address) ([]*types.Transaction, 
 // The transactions can also be pre-filtered by the dynamic fee components to
 // reduce allocations and load on downstream subsystems.
 func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address][]*txpool.LazyTransaction {
-	// TODO need to confirm
 	defer func(t0 time.Time) {
 		getPendingDurationTimer.Update(time.Since(t0))
 	}(time.Now())
@@ -644,16 +643,13 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 		minTipBig  *big.Int
 		baseFeeBig *big.Int
 
-		blockNumber        uint64        = 0
-		blockHash          common.Hash   = common.Hash{}
-		nonceTooLowCount                 = 0
-		currBlockDuration  time.Duration = 0
-		currHeaderDuration time.Duration = 0
-		txHashesDuration   time.Duration = 0
-		staled                           = make(map[common.Hash]struct{})
+		blockNumber      uint64      = 0
+		blockHash        common.Hash = common.Hash{}
+		nonceTooLowCount             = 0
+		staled                       = make(map[common.Hash]struct{})
 	)
 	defer func() {
-		log.Info("perf-trace  Pending() nonce too low", "blockNumber", blockNumber, "blockHash", blockHash, "nonceTooLowCount", nonceTooLowCount, "staled", len(staled), "currHeaderDuration", currHeaderDuration, "currBlockDuration", currBlockDuration, "txHashesDuration", txHashesDuration)
+		log.Debug("perf-trace txpool-trace  Pending() nonce too low", "blockNumber", blockNumber, "blockHash", blockHash, "nonceTooLowCount", nonceTooLowCount, "staled", len(staled))
 	}()
 	if filter.MinTip != nil {
 		minTipBig = filter.MinTip.ToBig()
@@ -662,18 +658,14 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 		baseFeeBig = filter.BaseFee.ToBig()
 	}
 	pending := make(map[common.Address][]*txpool.LazyTransaction, len(pool.pending))
-	t0 := time.Now()
 	if currHeader := pool.chain.CurrentBlock(); currHeader != nil {
-		currHeaderDuration = time.Since(t0)
 		blockNumber = currHeader.Number.Uint64()
 		blockHash = currHeader.Hash()
 		currBlock := pool.chain.GetBlock(blockHash, currHeader.Number.Uint64())
-		currBlockDuration = time.Since(t0) - currHeaderDuration
 		staled = make(map[common.Hash]struct{}, len(currBlock.Transactions()))
 		for _, tx := range currBlock.Transactions() {
 			staled[tx.Hash()] = struct{}{}
 		}
-		txHashesDuration = time.Since(t0) - currBlockDuration - currHeaderDuration
 	}
 	for addr, txs := range pool.pendingCache.dump() {
 		// remove nonce too low transactions

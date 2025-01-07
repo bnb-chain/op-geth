@@ -133,11 +133,6 @@ var (
 	reorgresetTimer           = metrics.NewRegisteredTimer("txpool/reorgresettime", nil)
 	truncateTimer             = metrics.NewRegisteredTimer("txpool/truncatetime", nil)
 	reorgresetNoblockingTimer = metrics.NewRegisteredTimer("txpool/noblocking/reorgresettime", nil)
-
-	//nonce too low
-	nonceTooLowHeaderTimer = metrics.NewRegisteredTimer("txpool/nonce/too/low/header/duration", nil)
-	nonceTooLowBlockTimer  = metrics.NewRegisteredTimer("txpool/nonce/too/low/block/duration", nil)
-	nonceTooLowTxMeter     = metrics.NewRegisteredMeter("txpool/nonce/too/low/tx", nil)
 )
 
 // BlockChain defines the minimal set of methods needed to back a tx pool with

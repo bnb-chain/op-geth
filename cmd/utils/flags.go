@@ -452,12 +452,6 @@ var (
 		Value:    ethconfig.Defaults.TxPool.ReannounceRemotes,
 		Category: flags.TxPoolCategory,
 	}
-	TxPoolBroadcastDirectlyFlag = &cli.BoolFlag{
-		Name:     "txpool.broadcastdirectly",
-		Usage:    "broadcast transaction bodies directly to the static peers(default = false)",
-		Value:    ethconfig.Defaults.TxPool.BroadcastDirectly,
-		Category: flags.TxPoolCategory,
-	}
 	// bundle pool settings
 	BundlePoolGlobalSlotsFlag = &cli.Uint64Flag{
 		Name:     "bundlepool.globalslots",
@@ -1754,9 +1748,6 @@ func setTxPool(ctx *cli.Context, cfg *legacypool.Config) {
 	}
 	if ctx.IsSet(TxPoolReannounceRemotesFlag.Name) {
 		cfg.ReannounceRemotes = ctx.Bool(TxPoolReannounceRemotesFlag.Name)
-	}
-	if ctx.IsSet(TxPoolBroadcastDirectlyFlag.Name) {
-		cfg.BroadcastDirectly = ctx.Bool(TxPoolBroadcastDirectlyFlag.Name)
 	}
 }
 

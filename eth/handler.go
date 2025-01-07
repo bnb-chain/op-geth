@@ -89,18 +89,18 @@ type txPool interface {
 // handlerConfig is the collection of initialization parameters to create a full
 // node network handler.
 type handlerConfig struct {
-	StaticNodes       []*enode.Node
-	Database          ethdb.Database         // Database for direct sync insertions
-	Chain             *core.BlockChain       // Blockchain to serve data from
-	TxPool            txPool                 // Transaction pool to propagate from
-	Merger            *consensus.Merger      // The manager for eth1/2 transition
-	Network           uint64                 // Network identifier to advertise
-	Sync              downloader.SyncMode    // Whether to snap or full sync
-	BloomCache        uint64                 // Megabytes to alloc for snap sync bloom
-	EventMux          *event.TypeMux         // Legacy event mux, deprecate for `feed`
-	RequiredBlocks    map[uint64]common.Hash // Hard coded map of required block hashes for sync challenges
-	NoTxGossip        bool                   // Disable P2P transaction gossip
-	BroadcastDirectly bool                   // Broadcast transactions bodies directly to static nodes
+	StaticNodes    []*enode.Node
+	DirectNodes    []*enode.Node
+	Database       ethdb.Database         // Database for direct sync insertions
+	Chain          *core.BlockChain       // Blockchain to serve data from
+	TxPool         txPool                 // Transaction pool to propagate from
+	Merger         *consensus.Merger      // The manager for eth1/2 transition
+	Network        uint64                 // Network identifier to advertise
+	Sync           downloader.SyncMode    // Whether to snap or full sync
+	BloomCache     uint64                 // Megabytes to alloc for snap sync bloom
+	EventMux       *event.TypeMux         // Legacy event mux, deprecate for `feed`
+	RequiredBlocks map[uint64]common.Hash // Hard coded map of required block hashes for sync challenges
+	NoTxGossip     bool                   // Disable P2P transaction gossip
 }
 
 type handler struct {
@@ -115,8 +115,7 @@ type handler struct {
 	chain    *core.BlockChain
 	maxPeers int
 
-	noTxGossip        bool
-	broadcastDirectly bool
+	noTxGossip bool
 
 	downloader   *downloader.Downloader
 	blockFetcher *fetcher.BlockFetcher
@@ -142,7 +141,7 @@ type handler struct {
 	handlerStartCh chan struct{}
 	handlerDoneCh  chan struct{}
 
-	staticNodes map[string]struct{}
+	directNodes map[string]struct{}
 }
 
 // newHandler returns a handler for all Ethereum chain management protocol.
@@ -152,24 +151,23 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		config.EventMux = new(event.TypeMux) // Nicety initialization for tests
 	}
 	h := &handler{
-		networkID:         config.Network,
-		forkFilter:        forkid.NewFilter(config.Chain),
-		eventMux:          config.EventMux,
-		database:          config.Database,
-		txpool:            config.TxPool,
-		noTxGossip:        config.NoTxGossip,
-		broadcastDirectly: config.BroadcastDirectly,
-		chain:             config.Chain,
-		peers:             newPeerSet(),
-		merger:            config.Merger,
-		requiredBlocks:    config.RequiredBlocks,
-		quitSync:          make(chan struct{}),
-		handlerDoneCh:     make(chan struct{}),
-		handlerStartCh:    make(chan struct{}),
-		staticNodes:       make(map[string]struct{}),
+		networkID:      config.Network,
+		forkFilter:     forkid.NewFilter(config.Chain),
+		eventMux:       config.EventMux,
+		database:       config.Database,
+		txpool:         config.TxPool,
+		noTxGossip:     config.NoTxGossip,
+		chain:          config.Chain,
+		peers:          newPeerSet(),
+		merger:         config.Merger,
+		requiredBlocks: config.RequiredBlocks,
+		quitSync:       make(chan struct{}),
+		handlerDoneCh:  make(chan struct{}),
+		handlerStartCh: make(chan struct{}),
+		directNodes:    make(map[string]struct{}),
 	}
-	for _, node := range config.StaticNodes {
-		h.staticNodes[node.ID().String()] = struct{}{}
+	for _, node := range config.DirectNodes {
+		h.directNodes[node.ID().String()] = struct{}{}
 	}
 
 	if config.Sync == downloader.FullSync {
@@ -632,21 +630,14 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 	}
 }
 
-func (h *handler) peersForNormalBroadcast(numDirect int, peers []*ethPeer) (direct []*ethPeer, announce []*ethPeer) {
-	if numDirect == 0 || len(peers) <= 0 || len(peers) <= numDirect {
-		return peers, nil
-	}
-	return peers[0:numDirect], peers[numDirect:]
-}
-
-func (h *handler) peersForDirectlyBroadcast(numDirect int, peers []*ethPeer) (direct []*ethPeer, announce []*ethPeer) {
+func (h *handler) peersForBroadcasting(numDirect int, peers []*ethPeer) (direct []*ethPeer, announce []*ethPeer) {
 	// Split the peers into direct-peers and announce-peers
 	// we send the tx directly to direct-peers; all static nodes are direct-peers
 	// we announce the tx to announce-peers
 	direct = make([]*ethPeer, 0, numDirect)
 	announce = make([]*ethPeer, 0, len(peers)-numDirect)
 	for _, peer := range peers {
-		if _, ok := h.staticNodes[peer.ID()]; ok {
+		if _, ok := h.directNodes[peer.ID()]; ok {
 			direct = append(direct, peer)
 		} else {
 			announce = append(announce, peer)
@@ -692,11 +683,7 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 			largeTxs++
 		default:
 			numDirect = int(math.Sqrt(float64(len(peers))))
-			if h.broadcastDirectly {
-				direct, announce = h.peersForDirectlyBroadcast(numDirect, peers)
-			} else {
-				direct, announce = h.peersForNormalBroadcast(numDirect, peers)
-			}
+			direct, announce = h.peersForBroadcasting(numDirect, peers)
 		}
 
 		// Send the tx unconditionally to a subset of our peers

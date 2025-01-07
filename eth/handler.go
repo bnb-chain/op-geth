@@ -632,7 +632,7 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 
 func (h *handler) peersForBroadcasting(numDirect int, peers []*ethPeer) (direct []*ethPeer, announce []*ethPeer) {
 	// Split the peers into direct-peers and announce-peers
-	// we send the tx directly to direct-peers; all static nodes are direct-peers
+	// we send the tx directly to direct-peers
 	// we announce the tx to announce-peers
 	direct = make([]*ethPeer, 0, numDirect)
 	announce = make([]*ethPeer, 0, len(peers)-numDirect)

@@ -238,6 +238,9 @@ func (config *Config) sanitize() Config {
 		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", time.Minute)
 		conf.ReannounceTime = time.Minute
 	}
+	if config.EnableAsyncPriced {
+		log.Info("Enabling async pricedlist")
+	}
 	return conf
 }
 

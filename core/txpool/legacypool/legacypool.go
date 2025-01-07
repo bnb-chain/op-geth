@@ -115,6 +115,8 @@ var (
 	// demote metrics
 	// demoteDuration measures how long time a demotion takes.
 	demoteTxMeter   = metrics.NewRegisteredMeter("txpool/demote/tx", nil)
+	promoteTxMeter  = metrics.NewRegisteredMeter("txpool/promote/tx", nil)
+	sendFeedTxMeter = metrics.NewRegisteredMeter("txpool/sendfeed/tx", nil)
 	resetDepthMeter = metrics.NewRegisteredMeter("txpool/reset/depth", nil) //reorg depth of blocks which causes demote
 
 	// mutex latency metrics
@@ -128,13 +130,22 @@ var (
 	addWaitLockTimer   = metrics.NewRegisteredTimer("txpool/locked/waittime", nil)
 	validateBasicTimer = metrics.NewRegisteredTimer("txpool/validate/basic", nil)
 
+	// reset detail metrics
+	resetCount         = metrics.NewRegisteredCounter("txpool/reset/count", nil)
+	resetTimer         = metrics.NewRegisteredTimer("txpool/reset/time", nil)
+	resetWaitLockTimer = metrics.NewRegisteredTimer("txpool/reset/wait/time", nil)
+	resetResetTimer    = metrics.NewRegisteredTimer("txpool/reset/reset/time", nil)
+	resetPromoteTimer  = metrics.NewRegisteredTimer("txpool/reset/promote/time", nil)
+	resetDemoteTimer   = metrics.NewRegisteredTimer("txpool/reset/demote/time", nil)
+	resetReheapTimer   = metrics.NewRegisteredTimer("txpool/reset/reheap/time", nil)
+	resetFeedTimer     = metrics.NewRegisteredTimer("txpool/reset/feed/time", nil)
+
 	// reorg detail metrics
-	resetTimer                = metrics.NewRegisteredTimer("txpool/resettime", nil)
-	promoteTimer              = metrics.NewRegisteredTimer("txpool/promotetime", nil)
-	demoteTimer               = metrics.NewRegisteredTimer("txpool/demotetime", nil)
-	reorgresetTimer           = metrics.NewRegisteredTimer("txpool/reorgresettime", nil)
-	truncateTimer             = metrics.NewRegisteredTimer("txpool/truncatetime", nil)
-	reorgresetNoblockingTimer = metrics.NewRegisteredTimer("txpool/noblocking/reorgresettime", nil)
+	reorgCount         = metrics.NewRegisteredCounter("txpool/reorg/count", nil)
+	reorgTimer         = metrics.NewRegisteredTimer("txpool/reorg/time", nil)
+	reorgWaitLockTimer = metrics.NewRegisteredTimer("txpool/reorg/wait/time", nil)
+	reorgPromoteTimer  = metrics.NewRegisteredTimer("txpool/reorg/promote/time", nil)
+	reorgFeedTimer     = metrics.NewRegisteredTimer("txpool/reorg/feed/time", nil)
 )
 
 // BlockChain defines the minimal set of methods needed to back a tx pool with
@@ -1418,22 +1429,41 @@ func (pool *LegacyPool) scheduleReorgLoop() {
 
 // runReorg runs reset and promoteExecutables on behalf of scheduleReorgLoop.
 func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirtyAccounts *accountSet, events map[common.Address]*sortedMap) {
-	var reorgCost, waittime time.Duration
+	var reorgCost, waittime, resetDur, demoteDur, reheapDur, promoteDur, sendfeedDur time.Duration
+	var t0 time.Time
 	var promoted []*types.Transaction
 	var demoted, sendFeed int
+	var start = time.Now()
 	defer func(t0 time.Time) {
 		reorgCost = time.Since(t0)
-		reorgDurationTimer.Update(reorgCost)
+		demoteTxMeter.Mark(int64(demoted))
+		promoteTxMeter.Mark(int64(len(promoted)))
+		sendFeedTxMeter.Mark(int64(sendFeed))
+
 		if reset != nil {
-			reorgresetTimer.UpdateSince(t0)
-			demoteTxMeter.Mark(int64(demoted))
+			resetCount.Inc(1)
+			resetTimer.Update(reorgCost)
+			resetWaitLockTimer.Update(waittime)
+			resetResetTimer.Update(resetDur)
+			resetDemoteTimer.Update(demoteDur)
+			resetReheapTimer.Update(reheapDur)
+			resetPromoteTimer.Update(promoteDur)
+			resetFeedTimer.Update(sendfeedDur)
+
 			pending, queued := pool.stats()
 			if reset.newHead != nil && reset.oldHead != nil {
 				log.Info("Transaction pool reorged", "from", reset.oldHead.Number.Uint64(), "to", reset.newHead.Number.Uint64(),
-					"reorgCost", reorgCost, "waittime", waittime, "promoted", len(promoted), "demoted", demoted, "sendFeed", sendFeed, "pending", pending, "queued", queued)
+					"reorgCost", reorgCost, "waittime", waittime, "promoted", len(promoted), "demoted", demoted, "sendFeed", sendFeed, "pending", pending, "queued", queued,
+					"resetDur", resetDur, "demoteDur", demoteDur, "reheapDur", reheapDur, "promoteDur", promoteDur, "sendfeedDur", sendfeedDur)
 			}
+		} else {
+			reorgCount.Inc(1)
+			reorgTimer.Update(reorgCost)
+			reorgWaitLockTimer.Update(waittime)
+			reorgPromoteTimer.Update(promoteDur)
+			reorgFeedTimer.Update(sendfeedDur)
 		}
-	}(time.Now())
+	}(start)
 	defer close(done)
 
 	var promoteAddrs, demoteAddrs []common.Address
@@ -1445,12 +1475,10 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 	}
 	tw := time.Now()
 	pool.mu.Lock()
-	waittime = time.Since(tw)
-	tl, t0 := time.Now(), time.Now()
+	waittime, t0 = time.Since(tw), time.Now()
 	if reset != nil {
 		// Reset from the old head to the new, rescheduling any reorged transactions
 		demoteAddrs = pool.reset(reset.oldHead, reset.newHead)
-		resetTimer.UpdateSince(t0)
 
 		// Nonces were reset, discard any events that became stale
 		for addr := range events {
@@ -1465,18 +1493,18 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			promoteAddrs = append(promoteAddrs, addr)
 		}
 	}
+	resetDur = time.Since(t0)
 	// Check for pending transactions for every account that sent new ones
 	t0 = time.Now()
 	promoted = pool.promoteExecutables(promoteAddrs)
-	promoteTimer.UpdateSince(t0)
+	promoteDur, t0 = time.Since(t0), time.Now()
 
 	// If a new block appeared, validate the pool of pending transactions. This will
 	// remove any transaction that has been included in the block or was invalidated
 	// because of another transaction (e.g. higher gas price).
-	t0 = time.Now()
 	if reset != nil {
 		demoted = pool.demoteUnexecutables(demoteAddrs)
-		demoteTimer.UpdateSince(t0)
+		demoteDur, t0 = time.Since(t0), time.Now()
 		var pendingBaseFee = pool.priced.urgent.baseFee
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
@@ -1495,17 +1523,16 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			nonces[addr] = highestPending.Nonce() + 1
 		}
 		pool.pendingNonces.setAll(nonces)
+		reheapDur, t0 = time.Since(t0), time.Now()
 	}
 	// Ensure pool.queue and pool.pending sizes stay within the configured limits.
-	t0 = time.Now()
 	pool.truncatePending()
 	pool.truncateQueue()
-	truncateTimer.UpdateSince(t0)
 
 	dropBetweenReorgHistogram.Update(int64(pool.changesSinceReorg))
 	pool.changesSinceReorg = 0 // Reset change counter
-	reorgresetNoblockingTimer.UpdateSince(tl)
 	pool.mu.Unlock()
+	t0 = time.Now()
 
 	// Notify subsystems for newly added transactions
 	for _, tx := range promoted {
@@ -1523,6 +1550,7 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 		pool.txFeed.Send(core.NewTxsEvent{Txs: txs})
 		sendFeed = len(txs)
 	}
+	sendfeedDur = time.Since(t0)
 }
 
 // reset retrieves the current state of the blockchain and ensures the content

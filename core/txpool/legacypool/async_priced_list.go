@@ -149,6 +149,8 @@ func (a *asyncPricedList) Underpriced(tx *types.Transaction) bool {
 		// be careful that fl might be nil
 		floatingLowest = fl.(*types.Transaction)
 	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return (urgentLowest == nil || a.priced.urgent.cmp(urgentLowest, tx) >= 0) &&
 		(floatingLowest == nil || a.priced.floating.cmp(floatingLowest, tx) >= 0) &&
 		(floatingLowest != nil || urgentLowest != nil)

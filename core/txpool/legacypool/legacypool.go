@@ -1632,14 +1632,13 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) (demoteAddrs []com
 		}
 	}
 	resetDepthMeter.Mark(int64(depth))
-	log.Info("reset block depth", "depth", depth)
 	// Initialize the internal state to the current head
 	if newHead == nil {
 		newHead = pool.chain.CurrentBlock() // Special case during testing
 	}
 	statedb, err := pool.chain.StateAt(newHead.Root)
 	if err != nil {
-		log.Error("Failed to reset txpool state", "err", err)
+		log.Error("Failed to reset txpool state", "err", err, "depth", depth)
 		return
 	}
 	pool.currentHead.Store(newHead)
@@ -1653,7 +1652,7 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) (demoteAddrs []com
 	}
 
 	// Inject any transactions discarded due to reorgs
-	log.Debug("Reinjecting stale transactions", "count", len(reinject))
+	log.Debug("reset state of txpool", "reinject", len(reinject), "depth", depth)
 	core.SenderCacher.Recover(pool.signer, reinject)
 	pool.addTxsLocked(reinject, false)
 	return

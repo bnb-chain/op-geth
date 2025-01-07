@@ -123,8 +123,10 @@ var (
 	journalMutexTimer = metrics.NewRegisteredTimer("txpool/mutex/journal/duration", nil)
 
 	// latency of add() method
-	addTimer         = metrics.NewRegisteredTimer("txpool/addtime", nil)
-	addWithLockTimer = metrics.NewRegisteredTimer("txpool/locked/addtime", nil)
+	addTimer           = metrics.NewRegisteredTimer("txpool/addtime", nil)
+	addWithLockTimer   = metrics.NewRegisteredTimer("txpool/locked/addtime", nil)
+	addWaitLockTimer   = metrics.NewRegisteredTimer("txpool/locked/waittime", nil)
+	validateBasicTimer = metrics.NewRegisteredTimer("txpool/validate/basic", nil)
 
 	// reorg detail metrics
 	resetTimer                = metrics.NewRegisteredTimer("txpool/resettime", nil)
@@ -1118,11 +1120,12 @@ func (pool *LegacyPool) addRemoteSync(tx *types.Transaction) error {
 // If sync is set, the method will block until all internal maintenance related
 // to the add is finished. Only use this during tests for determinism!
 func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error {
+	start := time.Now()
 	defer func(t0 time.Time) {
 		if len(txs) > 0 {
 			addTimer.Update(time.Since(t0) / time.Duration(len(txs)))
 		}
-	}(time.Now())
+	}(start)
 	// Do not treat as local if local transactions have been disabled
 	local = local && !pool.config.NoLocals
 
@@ -1155,7 +1158,10 @@ func (pool *LegacyPool) Add(txs []*types.Transaction, local, sync bool) []error 
 	}
 
 	// Process all the new transaction and merge any errors into the original slice
+	validateBasicTimer.UpdateSince(start)
+	tw := time.Now()
 	pool.mu.Lock()
+	addWaitLockTimer.UpdateSince(tw)
 	t0 := time.Now()
 	newErrs, dirtyAddrs := pool.addTxsLocked(news, local)
 	if len(news) > 0 {

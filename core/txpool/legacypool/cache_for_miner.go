@@ -14,6 +14,14 @@ var (
 	localCacheGauge   = metrics.NewRegisteredGauge("txpool/legacypool/local/cache", nil)
 )
 
+type pendingCache interface {
+	add(types.Transactions, types.Signer)
+	del(types.Transactions, types.Signer)
+	dump() map[common.Address]types.Transactions
+	markLocal(common.Address)
+	flattenLocals() []common.Address
+}
+
 // copy of pending transactions
 type cacheForMiner struct {
 	txLock   sync.Mutex

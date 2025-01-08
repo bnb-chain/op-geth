@@ -15,16 +15,6 @@ type addEvent struct {
 	local bool
 }
 
-type discardEvent struct {
-	slots int
-	force bool
-	done  chan *discardResult
-}
-type discardResult struct {
-	discardTxs types.Transactions
-	succ       bool
-}
-
 type asyncPricedList struct {
 	priced         *pricedList
 	floatingLowest atomic.Value
@@ -37,7 +27,6 @@ type asyncPricedList struct {
 	reheap     chan struct{}
 	add        chan *addEvent
 	remove     chan int
-	discard    chan *discardEvent
 	setBaseFee chan *big.Int
 }
 
@@ -48,7 +37,6 @@ func newAsyncPricedList(all *lookup) *asyncPricedList {
 		reheap:     make(chan struct{}),
 		add:        make(chan *addEvent),
 		remove:     make(chan int),
-		discard:    make(chan *discardEvent),
 		setBaseFee: make(chan *big.Int),
 	}
 	go a.run()

@@ -29,6 +29,7 @@ type asyncPricedList struct {
 	priced         *pricedList
 	floatingLowest atomic.Value
 	urgentLowest   atomic.Value
+	baseFee        atomic.Value
 	mu             sync.Mutex
 
 	// events
@@ -69,12 +70,7 @@ func (a *asyncPricedList) run() {
 	for {
 		if currentDone == nil {
 			currentDone = make(chan struct{})
-			go func(reheap bool, newOnes []*types.Transaction, toRemove int, baseFee *big.Int) {
-				a.handle(reheap, newOnes, toRemove, baseFee, currentDone)
-				<-currentDone
-				currentDone = nil
-			}(reheap, newOnes, toRemove, baseFee)
-
+			go a.handle(reheap, newOnes, toRemove, baseFee, currentDone)
 			reheap, newOnes, toRemove, baseFee = false, nil, 0, nil
 		}
 		select {
@@ -89,7 +85,14 @@ func (a *asyncPricedList) run() {
 
 		case baseFee = <-a.setBaseFee:
 
+		case <-currentDone:
+			currentDone = nil
+
 		case <-a.quit:
+			// Wait for current run to finish.
+			if currentDone != nil {
+				<-currentDone
+			}
 			return
 		}
 	}
@@ -122,11 +125,13 @@ func (a *asyncPricedList) handle(reheap bool, newOnes []*types.Transaction, toRe
 		}
 	}
 	if baseFee != nil {
+		a.baseFee.Store(baseFee)
 		a.priced.SetBaseFee(baseFee)
 	}
 }
 
 func (a *asyncPricedList) Staled() int {
+	// the Staled() of pricedList is thread-safe, so we don't need to lock here
 	return a.priced.Staled()
 }
 
@@ -181,7 +186,11 @@ func (a *asyncPricedList) SetHead(currHead *types.Header) {
 }
 
 func (a *asyncPricedList) GetBaseFee() *big.Int {
-	return a.priced.floating.baseFee
+	baseFee := a.baseFee.Load()
+	if baseFee == nil {
+		return big.NewInt(0)
+	}
+	return baseFee.(*big.Int)
 }
 
 func (a *asyncPricedList) Close() {
@@ -189,5 +198,7 @@ func (a *asyncPricedList) Close() {
 }
 
 func (a *asyncPricedList) TxCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	return a.priced.TxCount()
 }

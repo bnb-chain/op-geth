@@ -219,6 +219,10 @@ func makeFullNode(ctx *cli.Context) (*node.Node, ethapi.Backend) {
 		cfg.Eth.OverrideVerkle = &v
 	}
 
+	if ctx.Bool(utils.MiningEnabledFlag.Name) {
+		cfg.Eth.TxPool.EnableCache = true
+	}
+
 	backend, eth := utils.RegisterEthService(stack, &cfg.Eth)
 
 	// Create gauge with geth system and build information

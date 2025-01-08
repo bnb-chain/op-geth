@@ -47,6 +47,11 @@ var (
 	// sideeffects used during testing.
 	testTxPoolConfig Config
 
+	//
+	testTxPoolConfigEnableCache Config
+
+	enableCache bool
+
 	// eip1559Config is a chain config with EIP-1559 enabled at block 0.
 	eip1559Config *params.ChainConfig
 )
@@ -54,6 +59,10 @@ var (
 func init() {
 	testTxPoolConfig = DefaultConfig
 	testTxPoolConfig.Journal = ""
+
+	testTxPoolConfigEnableCache = DefaultConfig
+	testTxPoolConfigEnableCache.Journal = ""
+	testTxPoolConfigEnableCache.EnableCache = true
 
 	cpy := *params.TestChainConfig
 	eip1559Config = &cpy
@@ -163,7 +172,12 @@ func setupPoolWithConfig(config *params.ChainConfig) (*LegacyPool, *ecdsa.Privat
 	blockchain := newTestBlockChain(config, 10000000, statedb, new(event.Feed))
 
 	key, _ := crypto.GenerateKey()
-	pool := New(testTxPoolConfig, blockchain)
+	var pool *LegacyPool
+	if enableCache {
+		pool = New(testTxPoolConfigEnableCache, blockchain)
+	} else {
+		pool = New(testTxPoolConfig, blockchain)
+	}
 	if err := pool.Init(testTxPoolConfig.PriceLimit, blockchain.CurrentBlock(), makeAddressReserver()); err != nil {
 		panic(err)
 	}
@@ -1534,12 +1548,22 @@ func TestMinGasPriceEnforced(t *testing.T) {
 	}
 }
 
+func TestRepricingDynamicFeeEnableCache(t *testing.T) {
+	enableCache = true
+	repricingDynamicFee(t)
+	enableCache = false
+}
+
 // Tests that setting the transaction pool gas price to a higher value correctly
 // discards everything cheaper (legacy & dynamic fee) than that and moves any
 // gapped transactions back from the pending pool to the queue.
 //
 // Note, local transactions are never allowed to be dropped.
 func TestRepricingDynamicFee(t *testing.T) {
+	repricingDynamicFee(t)
+}
+
+func repricingDynamicFee(t *testing.T) {
 	t.Parallel()
 
 	// Create the pool to test the pricing enforcement with

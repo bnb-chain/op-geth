@@ -278,6 +278,9 @@ type LegacyPool struct {
 	all     *lookup                      // All transactions to allow lookups
 	priced  *pricedList                  // All transactions sorted by price
 
+	pendingCounter int
+	queueCounter   int
+
 	pendingCache pendingCache //pending list cache for miner
 
 	reqResetCh      chan *txpoolResetRequest
@@ -1015,6 +1018,7 @@ func (pool *LegacyPool) enqueueTx(hash common.Hash, tx *types.Transaction, local
 	} else {
 		// Nothing was replaced, bump the queued counter
 		queuedGauge.Inc(1)
+		pool.queueCounter++
 	}
 	// If the transaction isn't in lookup set but it's expected to be there,
 	// show the error log.
@@ -1073,6 +1077,7 @@ func (pool *LegacyPool) promoteTx(addr common.Address, hash common.Hash, tx *typ
 		pool.pendingCache.del([]*types.Transaction{old}, pool.signer)
 	} else {
 		// Nothing was replaced, bump the pending counter
+		pool.pendingCounter++
 		pendingGauge.Inc(1)
 	}
 	// Set the potentially new pending nonce and notify any subsystems of the new tx
@@ -1302,6 +1307,7 @@ func (pool *LegacyPool) removeTx(hash common.Hash, outofbound bool, unreserve bo
 			// Reduce the pending counter
 			pool.pendingCache.del(append(invalids, tx), pool.signer)
 			pendingGauge.Dec(int64(1 + len(invalids)))
+			pool.pendingCounter -= 1 + len(invalids)
 			return 1 + len(invalids)
 		}
 	}
@@ -1310,6 +1316,7 @@ func (pool *LegacyPool) removeTx(hash common.Hash, outofbound bool, unreserve bo
 		if removed, _ := future.Remove(tx); removed {
 			// Reduce the queued counter
 			queuedGauge.Dec(1)
+			pool.queueCounter -= 1
 		}
 		if future.Empty() {
 			delete(pool.queue, addr)
@@ -1717,6 +1724,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 		}
 		log.Trace("Promoted queued transactions", "count", len(promoted))
 		queuedGauge.Dec(int64(len(readies)))
+		pool.queueCounter -= len(readies)
 
 		// Drop all transactions over the allowed limit
 		var caps types.Transactions
@@ -1732,6 +1740,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 		// Mark all the items dropped as removed
 		pool.priced.Removed(len(forwards) + len(drops) + len(caps))
 		queuedGauge.Dec(int64(len(forwards) + len(drops) + len(caps)))
+		pool.queueCounter -= len(forwards) + len(drops) + len(caps)
 		if pool.locals.contains(addr) {
 			localGauge.Dec(int64(len(forwards) + len(drops) + len(caps)))
 		}
@@ -1751,10 +1760,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 // pending limit. The algorithm tries to reduce transaction counts by an approximately
 // equal number for all for accounts with many pending transactions.
 func (pool *LegacyPool) truncatePending() {
-	pending := uint64(0)
-	for _, list := range pool.pending {
-		pending += uint64(list.Len())
-	}
+	pending := uint64(pool.pendingCounter)
 	if pending <= pool.config.GlobalSlots {
 		return
 	}
@@ -1799,6 +1805,7 @@ func (pool *LegacyPool) truncatePending() {
 					pool.priced.Removed(len(caps))
 					dropPendingCache = append(dropPendingCache, caps...)
 					pendingGauge.Dec(int64(len(caps)))
+					pool.pendingCounter -= len(caps)
 					if pool.locals.contains(offenders[i]) {
 						localGauge.Dec(int64(len(caps)))
 					}
@@ -1827,6 +1834,7 @@ func (pool *LegacyPool) truncatePending() {
 				dropPendingCache = append(dropPendingCache, caps...)
 				pool.priced.Removed(len(caps))
 				pendingGauge.Dec(int64(len(caps)))
+				pool.pendingCounter -= len(caps)
 				if pool.locals.contains(addr) {
 					localGauge.Dec(int64(len(caps)))
 				}
@@ -1840,10 +1848,7 @@ func (pool *LegacyPool) truncatePending() {
 
 // truncateQueue drops the oldest transactions in the queue if the pool is above the global queue limit.
 func (pool *LegacyPool) truncateQueue() {
-	queued := uint64(0)
-	for _, list := range pool.queue {
-		queued += uint64(list.Len())
-	}
+	queued := uint64(pool.queueCounter)
 	if queued <= pool.config.GlobalQueue {
 		return
 	}
@@ -1939,6 +1944,7 @@ func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) {
 		dropPendingCache = append(dropPendingCache, invalids...)
 		dropPendingCache = append(dropPendingCache, drops...)
 		pendingGauge.Dec(int64(len(olds) + len(drops) + len(invalids)))
+		pool.pendingCounter -= len(olds) + len(drops) + len(invalids)
 		if pool.locals.contains(addr) {
 			localGauge.Dec(int64(len(olds) + len(drops) + len(invalids)))
 		}
@@ -1954,6 +1960,7 @@ func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) {
 			}
 			dropPendingCache = append(dropPendingCache, gapped...)
 			pendingGauge.Dec(int64(len(gapped)))
+			pool.pendingCounter -= len(gapped)
 		}
 		// Delete the entire pending entry if it became empty.
 		if list.Empty() {

@@ -169,6 +169,12 @@ func (pst *UncommittedDB) Prepare(rules params.Rules, sender, coinbase common.Ad
 //  2. object
 
 func (pst *UncommittedDB) SubBalance(addr common.Address, amount *uint256.Int) {
+	if amount.IsZero() {
+		obj := pst.getOrNewObject(addr)
+		if !obj.empty(pst) {
+			return
+		}
+	}
 	pst.journal.append(newJBalance(pst.cache[addr], addr))
 	obj := pst.getOrNewObject(addr)
 	newb := new(uint256.Int).Sub(obj.balance, amount)
@@ -176,6 +182,12 @@ func (pst *UncommittedDB) SubBalance(addr common.Address, amount *uint256.Int) {
 }
 
 func (pst *UncommittedDB) AddBalance(addr common.Address, amount *uint256.Int) {
+	if amount.IsZero() {
+		obj := pst.getOrNewObject(addr)
+		if !obj.empty(pst) {
+			return
+		}
+	}
 	pst.journal.append(newJBalance(pst.cache[addr], addr))
 	obj := pst.getOrNewObject(addr)
 	newb := new(uint256.Int).Add(obj.balance, amount)

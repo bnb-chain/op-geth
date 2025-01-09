@@ -153,7 +153,8 @@ type BlockChain interface {
 
 // Config are the configuration parameters of the transaction pool.
 type Config struct {
-	EnableCache bool // enable pending cache for mining. Set as true only --mine option is enabled
+	EnableAsyncPriced bool // enable async pricedlist. Set as true only --txpool.enableasyncpriced option is enabled
+	EnableCache       bool // enable pending cache for mining. Set as true only --mine option is enabled
 
 	Locals    []common.Address // Addresses that should be treated by default as local
 	NoLocals  bool             // Whether local transaction handling should be disabled
@@ -238,6 +239,9 @@ func (config *Config) sanitize() Config {
 		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", time.Minute)
 		conf.ReannounceTime = time.Minute
 	}
+	if config.EnableAsyncPriced {
+		log.Info("Enabling async pricedlist")
+	}
 	// log to inform user if the cache is enabled or not
 	if conf.EnableCache {
 		log.Info("legacytxpool Pending Cache is enabled")
@@ -276,7 +280,7 @@ type LegacyPool struct {
 	queue   map[common.Address]*list     // Queued but non-processable transactions
 	beats   map[common.Address]time.Time // Last heartbeat from each known account
 	all     *lookup                      // All transactions to allow lookups
-	priced  *pricedList                  // All transactions sorted by price
+	priced  pricedListInterface          // All transactions sorted by price
 
 	pendingCounter int
 	queueCounter   int
@@ -333,7 +337,11 @@ func New(config Config, chain BlockChain) *LegacyPool {
 		pool.locals.add(addr)
 		pool.pendingCache.markLocal(addr)
 	}
-	pool.priced = newPricedList(pool.all)
+	if config.EnableAsyncPriced {
+		pool.priced = newAsyncPricedList(pool.all)
+	} else {
+		pool.priced = newPricedList(pool.all)
+	}
 
 	if (!config.NoLocals || config.JournalRemote) && config.Journal != "" {
 		pool.journal = newTxJournal(config.Journal)
@@ -419,6 +427,7 @@ func (pool *LegacyPool) loop() {
 	defer evict.Stop()
 	defer journal.Stop()
 	defer reannounce.Stop()
+	defer pool.priced.Close()
 
 	// Notify tests that the init phase is done
 	close(pool.initDoneCh)
@@ -433,7 +442,7 @@ func (pool *LegacyPool) loop() {
 			pool.mu.RLock()
 			pending, queued := pool.stats()
 			pool.mu.RUnlock()
-			stales := int(pool.priced.stales.Load())
+			stales := pool.priced.Staled()
 
 			if pending != prevPending || queued != prevQueued || stales != prevStales {
 				log.Debug("Transaction pool status report", "executable", pending, "queued", queued, "stales", stales)
@@ -882,16 +891,6 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 	}
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(pool.all.Slots()+numSlots(tx)) > pool.config.GlobalSlots+pool.config.GlobalQueue {
-		currHead := pool.currentHead.Load()
-		if currHead != nil && currHead.BaseFee != nil && pool.priced.NeedReheap(currHead) {
-			if pool.chainconfig.IsLondon(new(big.Int).Add(currHead.Number, big.NewInt(1))) {
-				baseFee := eip1559.CalcBaseFee(pool.chainconfig, currHead, currHead.Time+1)
-				pool.priced.SetBaseFee(baseFee)
-			}
-			pool.priced.Reheap()
-			pool.priced.currHead = currHead
-		}
-
 		// If the new transaction is underpriced, don't accept it
 		if !isLocal && pool.priced.Underpriced(tx) {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "gasTipCap", tx.GasTipCap(), "gasFeeCap", tx.GasFeeCap())
@@ -1509,11 +1508,13 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 	if reset != nil {
 		pool.demoteUnexecutables(demoteAddrs)
 		demoteTimer.UpdateSince(t0)
-		var pendingBaseFee = pool.priced.urgent.baseFee
+		var pendingBaseFee = pool.priced.GetBaseFee()
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
 				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
 				pool.priced.SetBaseFee(pendingBaseFee)
+			} else {
+				pool.priced.Reheap()
 			}
 		}
 		// Update all accounts to the latest known pending nonce

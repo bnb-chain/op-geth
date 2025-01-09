@@ -166,6 +166,9 @@ type BlockChain interface {
 
 // Config are the configuration parameters of the transaction pool.
 type Config struct {
+	EnableAsyncPriced bool // enable async pricedlist. Set as true only --txpool.enableasyncpriced option is enabled
+	EnableCache       bool // enable pending cache for mining. Set as true only --mine option is enabled
+
 	Locals    []common.Address // Addresses that should be treated by default as local
 	NoLocals  bool             // Whether local transaction handling should be disabled
 	Journal   string           // Journal of local transactions to survive node restarts
@@ -249,6 +252,15 @@ func (config *Config) sanitize() Config {
 		log.Warn("Sanitizing invalid txpool reannounce time", "provided", conf.ReannounceTime, "updated", time.Minute)
 		conf.ReannounceTime = time.Minute
 	}
+	if config.EnableAsyncPriced {
+		log.Info("Enabling async pricedlist")
+	}
+	// log to inform user if the cache is enabled or not
+	if conf.EnableCache {
+		log.Info("legacytxpool Pending Cache is enabled")
+	} else {
+		log.Info("legacytxpool Pending Cache is disabled")
+	}
 	return conf
 }
 
@@ -281,9 +293,12 @@ type LegacyPool struct {
 	queue   map[common.Address]*list     // Queued but non-processable transactions
 	beats   map[common.Address]time.Time // Last heartbeat from each known account
 	all     *lookup                      // All transactions to allow lookups
-	priced  *pricedList                  // All transactions sorted by price
+	priced  pricedListInterface          // All transactions sorted by price
 
-	pendingCache *cacheForMiner //pending list cache for miner
+	pendingCounter int
+	queueCounter   int
+
+	pendingCache pendingCache //pending list cache for miner
 
 	reqResetCh      chan *txpoolResetRequest
 	reqPromoteCh    chan *accountSet
@@ -326,13 +341,20 @@ func New(config Config, chain BlockChain) *LegacyPool {
 		initDoneCh:      make(chan struct{}),
 		pendingCache:    newCacheForMiner(),
 	}
+	if !config.EnableCache {
+		pool.pendingCache = newNoneCacheForMiner(pool)
+	}
 	pool.locals = newAccountSet(pool.signer)
 	for _, addr := range config.Locals {
 		log.Info("Setting new local account", "address", addr)
 		pool.locals.add(addr)
 		pool.pendingCache.markLocal(addr)
 	}
-	pool.priced = newPricedList(pool.all)
+	if config.EnableAsyncPriced {
+		pool.priced = newAsyncPricedList(pool.all)
+	} else {
+		pool.priced = newPricedList(pool.all)
+	}
 
 	if (!config.NoLocals || config.JournalRemote) && config.Journal != "" {
 		pool.journal = newTxJournal(config.Journal)
@@ -361,9 +383,6 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserve txpool.A
 
 	// Set the basic pool parameters
 	pool.gasTip.Store(uint256.NewInt(gasTip))
-
-	// set dumper
-	pool.pendingCache.sync2cache(pool, pool.createFilter(pool.gasTip.Load().ToBig(), head.BaseFee))
 
 	// Initialize the state with head block, or fallback to empty one in
 	// case the head state is not available (might occur when node is not
@@ -399,25 +418,7 @@ func (pool *LegacyPool) Init(gasTip uint64, head *types.Header, reserve txpool.A
 	}
 	pool.wg.Add(1)
 	go pool.loop()
-	go pool.loopOfSync()
 	return nil
-}
-
-func (pool *LegacyPool) loopOfSync() {
-	ticker := time.NewTicker(400 * time.Millisecond)
-	for {
-		select {
-		case <-pool.reorgShutdownCh:
-			return
-		case <-ticker.C:
-			gasTip := pool.gasTip.Load()
-			currHead := pool.currentHead.Load()
-			if gasTip == nil || currHead == nil {
-				continue
-			}
-			pool.pendingCache.sync2cache(pool, pool.createFilter(gasTip.ToBig(), currHead.BaseFee))
-		}
-	}
 }
 
 // loop is the transaction pool's main event loop, waiting for and reacting to
@@ -439,6 +440,7 @@ func (pool *LegacyPool) loop() {
 	defer evict.Stop()
 	defer journal.Stop()
 	defer reannounce.Stop()
+	defer pool.priced.Close()
 
 	// Notify tests that the init phase is done
 	close(pool.initDoneCh)
@@ -453,7 +455,7 @@ func (pool *LegacyPool) loop() {
 			pool.mu.RLock()
 			pending, queued := pool.stats()
 			pool.mu.RUnlock()
-			stales := int(pool.priced.stales.Load())
+			stales := pool.priced.Staled()
 
 			if pending != prevPending || queued != prevQueued || stales != prevStales {
 				log.Debug("Transaction pool status report", "executable", pending, "queued", queued, "stales", stales)
@@ -658,35 +660,85 @@ func (pool *LegacyPool) ContentFrom(addr common.Address) ([]*types.Transaction, 
 // The transactions can also be pre-filtered by the dynamic fee components to
 // reduce allocations and load on downstream subsystems.
 func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address][]*txpool.LazyTransaction {
-	empty := txpool.PendingFilter{}
-	if filter == empty {
-		// return all pending transactions, no filtering
-		return pool.pendingCache.dump(false)
-	}
+	defer func(t0 time.Time) {
+		getPendingDurationTimer.Update(time.Since(t0))
+	}(time.Now())
 	// If only blob transactions are requested, this pool is unsuitable as it
 	// contains none, don't even bother.
 	if filter.OnlyBlobTxs {
 		return nil
 	}
-	defer func(t0 time.Time) {
-		getPendingDurationTimer.Update(time.Since(t0))
-	}(time.Now())
-	// It is a bit tricky here, we don't do the filtering here.
-	return pool.pendingCache.dump(true)
-}
 
-func (pool *LegacyPool) createFilter(gasPrice, baseFee *big.Int) func(txs types.Transactions, addr common.Address) types.Transactions {
-	return func(txs types.Transactions, addr common.Address) types.Transactions {
-		if !pool.pendingCache.IsLocal(addr) {
+	// Convert the new uint256.Int types to the old big.Int ones used by the legacy pool
+	var (
+		minTipBig  *big.Int
+		baseFeeBig *big.Int
+
+		blockNumber      uint64      = 0
+		blockHash        common.Hash = common.Hash{}
+		nonceTooLowCount             = 0
+		staled                       = make(map[common.Hash]struct{})
+	)
+	defer func() {
+		log.Debug("perf-trace txpool-trace  Pending() nonce too low", "blockNumber", blockNumber, "blockHash", blockHash, "nonceTooLowCount", nonceTooLowCount, "staled", len(staled))
+	}()
+	if filter.MinTip != nil {
+		minTipBig = filter.MinTip.ToBig()
+	}
+	if filter.BaseFee != nil {
+		baseFeeBig = filter.BaseFee.ToBig()
+	}
+	pending := make(map[common.Address][]*txpool.LazyTransaction, len(pool.pending))
+	if currHeader := pool.chain.CurrentBlock(); currHeader != nil {
+		blockNumber = currHeader.Number.Uint64()
+		blockHash = currHeader.Hash()
+		currBlock := pool.chain.GetBlock(blockHash, currHeader.Number.Uint64())
+		staled = make(map[common.Hash]struct{}, len(currBlock.Transactions()))
+		for _, tx := range currBlock.Transactions() {
+			staled[tx.Hash()] = struct{}{}
+		}
+	}
+	for addr, txs := range pool.pendingCache.dump() {
+		// remove nonce too low transactions
+		if len(staled) > 0 {
+			noncetoolow := -1
 			for i, tx := range txs {
-				if tx.EffectiveGasTipIntCmp(gasPrice, baseFee) < 0 {
+				if _, hit := staled[tx.Hash()]; !hit {
+					break
+				}
+				noncetoolow = i
+			}
+			nonceTooLowCount += noncetoolow + 1
+			txs = txs[noncetoolow+1:]
+		}
+
+		// If the miner requests tip enforcement, cap the lists now
+		if minTipBig != nil && !pool.locals.contains(addr) {
+			for i, tx := range txs {
+				if tx.EffectiveGasTipIntCmp(minTipBig, baseFeeBig) < 0 {
 					txs = txs[:i]
 					break
 				}
 			}
 		}
-		return txs
+		if len(txs) > 0 {
+			lazies := make([]*txpool.LazyTransaction, len(txs))
+			for i := 0; i < len(txs); i++ {
+				lazies[i] = &txpool.LazyTransaction{
+					Pool:      pool,
+					Hash:      txs[i].Hash(),
+					Tx:        txs[i],
+					Time:      txs[i].Time(),
+					GasFeeCap: uint256.MustFromBig(txs[i].GasFeeCap()),
+					GasTipCap: uint256.MustFromBig(txs[i].GasTipCap()),
+					Gas:       txs[i].Gas(),
+					BlobGas:   txs[i].BlobGas(),
+				}
+			}
+			pending[addr] = lazies
+		}
 	}
+	return pending
 }
 
 // Locals retrieves the accounts currently considered local by the pool.
@@ -852,16 +904,6 @@ func (pool *LegacyPool) add(tx *types.Transaction, local bool) (replaced bool, e
 	}
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(pool.all.Slots()+numSlots(tx)) > pool.config.GlobalSlots+pool.config.GlobalQueue {
-		currHead := pool.currentHead.Load()
-		if currHead != nil && currHead.BaseFee != nil && pool.priced.NeedReheap(currHead) {
-			if pool.chainconfig.IsLondon(new(big.Int).Add(currHead.Number, big.NewInt(1))) {
-				baseFee := eip1559.CalcBaseFee(pool.chainconfig, currHead, currHead.Time+1)
-				pool.priced.SetBaseFee(baseFee)
-			}
-			pool.priced.Reheap()
-			pool.priced.currHead = currHead
-		}
-
 		// If the new transaction is underpriced, don't accept it
 		if !isLocal && pool.priced.Underpriced(tx) {
 			log.Trace("Discarding underpriced transaction", "hash", hash, "gasTipCap", tx.GasTipCap(), "gasFeeCap", tx.GasFeeCap())
@@ -1017,6 +1059,7 @@ func (pool *LegacyPool) enqueueTx(hash common.Hash, tx *types.Transaction, local
 	} else {
 		// Nothing was replaced, bump the queued counter
 		queuedGauge.Inc(1)
+		pool.queueCounter++
 	}
 	// If the transaction isn't in lookup set but it's expected to be there,
 	// show the error log.
@@ -1075,6 +1118,7 @@ func (pool *LegacyPool) promoteTx(addr common.Address, hash common.Hash, tx *typ
 		pool.pendingCache.del([]*types.Transaction{old}, pool.signer)
 	} else {
 		// Nothing was replaced, bump the pending counter
+		pool.pendingCounter++
 		pendingGauge.Inc(1)
 	}
 	// Set the potentially new pending nonce and notify any subsystems of the new tx
@@ -1308,6 +1352,7 @@ func (pool *LegacyPool) removeTx(hash common.Hash, outofbound bool, unreserve bo
 			// Reduce the pending counter
 			pool.pendingCache.del(append(invalids, tx), pool.signer)
 			pendingGauge.Dec(int64(1 + len(invalids)))
+			pool.pendingCounter -= 1 + len(invalids)
 			return 1 + len(invalids)
 		}
 	}
@@ -1316,6 +1361,7 @@ func (pool *LegacyPool) removeTx(hash common.Hash, outofbound bool, unreserve bo
 		if removed, _ := future.Remove(tx); removed {
 			// Reduce the queued counter
 			queuedGauge.Dec(1)
+			pool.queueCounter -= 1
 		}
 		if future.Empty() {
 			delete(pool.queue, addr)
@@ -1505,17 +1551,15 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 	if reset != nil {
 		demoted = pool.demoteUnexecutables(demoteAddrs)
 		demoteDur, t0 = time.Since(t0), time.Now()
-		var pendingBaseFee = pool.priced.urgent.baseFee
+		var pendingBaseFee = pool.priced.GetBaseFee()
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
 				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
 				pool.priced.SetBaseFee(pendingBaseFee)
+			} else {
+				pool.priced.Reheap()
 			}
 		}
-		gasTip, baseFee := pool.gasTip.Load(), pendingBaseFee
-		go func() {
-			pool.pendingCache.sync2cache(pool, pool.createFilter(gasTip.ToBig(), baseFee))
-		}()
 		// Update all accounts to the latest known pending nonce
 		nonces := make(map[common.Address]uint64, len(pool.pending))
 		for addr, list := range pool.pending {
@@ -1753,6 +1797,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 		}
 		log.Trace("Promoted queued transactions", "count", len(promoted))
 		queuedGauge.Dec(int64(len(readies)))
+		pool.queueCounter -= len(readies)
 
 		// Drop all transactions over the allowed limit
 		var caps types.Transactions
@@ -1768,6 +1813,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 		// Mark all the items dropped as removed
 		pool.priced.Removed(len(forwards) + len(drops) + len(caps))
 		queuedGauge.Dec(int64(len(forwards) + len(drops) + len(caps)))
+		pool.queueCounter -= len(forwards) + len(drops) + len(caps)
 		if pool.locals.contains(addr) {
 			localGauge.Dec(int64(len(forwards) + len(drops) + len(caps)))
 		}
@@ -1787,10 +1833,7 @@ func (pool *LegacyPool) promoteExecutables(accounts []common.Address) []*types.T
 // pending limit. The algorithm tries to reduce transaction counts by an approximately
 // equal number for all for accounts with many pending transactions.
 func (pool *LegacyPool) truncatePending() {
-	pending := uint64(0)
-	for _, list := range pool.pending {
-		pending += uint64(list.Len())
-	}
+	pending := uint64(pool.pendingCounter)
 	if pending <= pool.config.GlobalSlots {
 		return
 	}
@@ -1835,6 +1878,7 @@ func (pool *LegacyPool) truncatePending() {
 					pool.priced.Removed(len(caps))
 					dropPendingCache = append(dropPendingCache, caps...)
 					pendingGauge.Dec(int64(len(caps)))
+					pool.pendingCounter -= len(caps)
 					if pool.locals.contains(offenders[i]) {
 						localGauge.Dec(int64(len(caps)))
 					}
@@ -1863,6 +1907,7 @@ func (pool *LegacyPool) truncatePending() {
 				dropPendingCache = append(dropPendingCache, caps...)
 				pool.priced.Removed(len(caps))
 				pendingGauge.Dec(int64(len(caps)))
+				pool.pendingCounter -= len(caps)
 				if pool.locals.contains(addr) {
 					localGauge.Dec(int64(len(caps)))
 				}
@@ -1876,10 +1921,7 @@ func (pool *LegacyPool) truncatePending() {
 
 // truncateQueue drops the oldest transactions in the queue if the pool is above the global queue limit.
 func (pool *LegacyPool) truncateQueue() {
-	queued := uint64(0)
-	for _, list := range pool.queue {
-		queued += uint64(list.Len())
-	}
+	queued := uint64(pool.queueCounter)
 	if queued <= pool.config.GlobalQueue {
 		return
 	}
@@ -1975,6 +2017,7 @@ func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) int {
 		dropPendingCache = append(dropPendingCache, invalids...)
 		dropPendingCache = append(dropPendingCache, drops...)
 		pendingGauge.Dec(int64(len(olds) + len(drops) + len(invalids)))
+		pool.pendingCounter -= len(olds) + len(drops) + len(invalids)
 		if pool.locals.contains(addr) {
 			localGauge.Dec(int64(len(olds) + len(drops) + len(invalids)))
 		}
@@ -1990,6 +2033,7 @@ func (pool *LegacyPool) demoteUnexecutables(demoteAddrs []common.Address) int {
 			}
 			dropPendingCache = append(dropPendingCache, gapped...)
 			pendingGauge.Dec(int64(len(gapped)))
+			pool.pendingCounter -= len(gapped)
 		}
 		// Delete the entire pending entry if it became empty.
 		if list.Empty() {

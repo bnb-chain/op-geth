@@ -116,6 +116,9 @@ type Config struct {
 	// maintained and re-connected on disconnects.
 	StaticNodes []*enode.Node
 
+	// Direct nodes are static nodes who will always reveived transactions body rather than just the hashes.
+	DirectNodes []*enode.Node
+
 	// Trusted nodes are used as pre-configured connections which are always
 	// allowed to connect, even above the peer limit.
 	TrustedNodes []*enode.Node

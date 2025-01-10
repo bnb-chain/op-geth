@@ -1138,8 +1138,8 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 
 	ParallelTxDATMaxDepthRatioFlag = &cli.Float64Flag{
 		Name:     "parallel.txdag-max-depth-ratio",
-		Usage:    "A ratio to decide whether or not to execute transactions in parallel, it will fallback to sequencial processor if the depth is larger than this value (default = 0.9)",
-		Value:    0.9,
+		Usage:    "A ratio to decide whether or not to execute transactions in parallel, it will fallback to sequencial processor if the depth is larger than this value (default = 1.0)",
+		Value:    1.0,
 		Category: flags.VMCategory,
 	}
 

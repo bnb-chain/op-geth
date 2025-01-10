@@ -516,6 +516,7 @@ func TestJournal(t *testing.T) {
 	}
 	tester.db.Close()
 	pathConfig := Defaults
+	pathConfig.UseBase = true
 	tester.db = New(tester.db.diskdb, pathConfig)
 
 	// Verify states including disk layer and all diff on top.

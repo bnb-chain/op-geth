@@ -109,7 +109,9 @@ func newNodeBufferList(
 	}
 
 	var base *multiDifflayer
-	if nodes != nil && !fastRecovery {
+	if nodes != nil && useBase {
+		// after using fast recovery, use ancient db to recover nbl for force kill and graceful kill.
+		// so this case for now is used in unit test
 		var size uint64
 		for _, subset := range nodes {
 			for path, n := range subset {
@@ -135,6 +137,7 @@ func newNodeBufferList(
 		waitForceKeepCh: make(chan struct{}),
 		keepFunc:        keepFunc,
 	}
+	nf.useBase.Store(useBase)
 
 	if !useBase && fastRecovery {
 		if freezer == nil {
@@ -151,7 +154,6 @@ func newNodeBufferList(
 		nf.tail = ele
 		nf.count = 1
 	}
-	nf.useBase.Store(useBase)
 
 	go nf.loop()
 
@@ -223,7 +225,7 @@ func (nf *nodebufferlist) recoverNodeBufferList(freezer *rawdb.ResettableFreezer
 		nf.size += current.size
 		nf.layers += current.layers
 	}
-	nf.diffToBase()
+	nf.diffToBase(true)
 	nf.backgroundFlush()
 
 	log.Info("Succeed to recover node buffer list", "base_size", nf.base.size, "tail_state_id", nf.tail.id,
@@ -676,15 +678,22 @@ func (nf *nodebufferlist) traverseReverse(cb func(*multiDifflayer) bool) {
 // diffToBase calls traverseReverse and merges the multiDifflayer's nodes to
 // base node buffer, if up to limit size and flush to disk. It is called
 // periodically in the background
-func (nf *nodebufferlist) diffToBase() {
+func (nf *nodebufferlist) diffToBase(skipCountCheck bool) {
+	count := 0
 	commitFunc := func(buffer *multiDifflayer) bool {
 		if nf.base.size >= nf.base.limit {
 			log.Debug("base node buffer need write disk immediately")
 			return false
 		}
-		if nf.count <= nf.rsevMdNum {
-			log.Debug("node buffer list less, waiting more difflayer to be committed")
+		if skipCountCheck && count == 1 { // only force flush one buffer to base
 			return false
+		}
+		if !skipCountCheck {
+			// when using fast recovery, force flush one buffer to base to avoid exceeding pebble batch size limit
+			if nf.count <= nf.rsevMdNum {
+				log.Debug("node buffer list less, waiting more difflayer to be committed")
+				return false
+			}
 		}
 		if buffer.block%nf.dlInMd != 0 {
 			log.Crit("committed block number misaligned", "block", buffer.block)
@@ -724,6 +733,7 @@ func (nf *nodebufferlist) diffToBase() {
 			baseNodeBufferDifflayerAvgSize.Update(int64(nf.base.size / nf.base.layers))
 		}
 		nf.report()
+		count++
 
 		return true
 	}
@@ -804,7 +814,7 @@ func (nf *nodebufferlist) loop() {
 			if nf.isFlushing.Swap(true) {
 				continue
 			}
-			nf.diffToBase()
+			nf.diffToBase(false)
 			if nf.base.size >= nf.base.limit {
 				nf.backgroundFlush()
 			}

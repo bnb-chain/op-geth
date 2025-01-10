@@ -219,14 +219,14 @@ type Config struct {
 	RollupDisableTxPoolAdmission            bool
 	RollupHaltOnIncompatibleProtocolVersion string
 
-	ParallelTxMode           bool // Whether to execute transaction in parallel mode when do full sync
-	ParallelTxNum            int  // Number of slot for transaction execution
-	EnableOpcodeOptimizing   bool
-	EnableParallelTxDAG      bool
-	ParallelTxDAGFile        string
-	ParallelTxUnorderedMerge bool // Whether to enable unordered merge in parallel mode
-	ParallelTxParallelMerge  bool
-
+	ParallelTxMode             bool // Whether to execute transaction in parallel mode when do full sync
+	ParallelTxNum              int  // Number of slot for transaction execution
+	EnableOpcodeOptimizing     bool
+	EnableParallelTxDAG        bool
+	ParallelTxDAGFile          string
+	ParallelTxUnorderedMerge   bool // Whether to enable unordered merge in parallel mode
+	ParallelTxParallelMerge    bool
+	ParallelTxDAGMaxDepthRatio float64
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.

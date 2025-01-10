@@ -257,7 +257,7 @@ func (f *TxFetcher) Notify(peer string, types []byte, sizes []uint32, hashes []c
 			duplicate++
 		case f.isKnownUnderpriced(hash):
 			underpriced++
-			log.Info("announced transaction is underpriced", "hash", hash.String())
+			log.Trace("announced transaction is underpriced", "hash", hash.String())
 		default:
 			unknownHashes = append(unknownHashes, hash)
 			if types == nil {
@@ -431,13 +431,13 @@ func (f *TxFetcher) loop() {
 				// check. Should be fine as the limit is in the thousands and the
 				// request size in the hundreds.
 				txAnnounceDOSMeter.Mark(int64(len(ann.hashes)))
-				log.Info("announced transaction DOS overflow", "hashes", joinHashes(ann.hashes), "num", len(ann.hashes))
+				log.Debug("announced transaction DOS overflow", "hashes", joinHashes(ann.hashes), "num", len(ann.hashes))
 				break
 			}
 			want := used + len(ann.hashes)
 			if want > maxTxAnnounces {
 				txAnnounceDOSMeter.Mark(int64(want - maxTxAnnounces))
-				log.Info("announced transaction DOS overflow", "hashes", joinHashes(ann.hashes[want-maxTxAnnounces:]), "num", len(ann.hashes))
+				log.Debug("announced transaction DOS overflow", "hashes", joinHashes(ann.hashes[want-maxTxAnnounces:]), "num", len(ann.hashes))
 				ann.hashes = ann.hashes[:want-maxTxAnnounces]
 				ann.metas = ann.metas[:want-maxTxAnnounces]
 			}
@@ -556,7 +556,7 @@ func (f *TxFetcher) loop() {
 			for peer, req := range f.requests {
 				if time.Duration(f.clock.Now()-req.time)+txGatherSlack > txFetchTimeout {
 					txRequestTimeoutMeter.Mark(int64(len(req.hashes)))
-					log.Info("announced transaction request timeout", "hashes", joinHashes(req.hashes), "num", len(req.hashes))
+					log.Debug("announced transaction request timeout", "hashes", joinHashes(req.hashes), "num", len(req.hashes))
 
 					// Reschedule all the not-yet-delivered fetches to alternate peers
 					for _, hash := range req.hashes {

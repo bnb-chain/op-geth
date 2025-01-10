@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.5.5
+
+This is a minor release for opBNB Mainnet and Testnet.
+
+It includes several performance optimizations and improvements, primarily focused on transaction pool enhancements and block mining efficiency.
+Key improvements include tuning snapshot bloom filters for higher TPS, optimizing block mining overhead with a new engine API, and multiple transaction pool optimizations such as cache management, truncation efficiency, direct transaction broadcasting, stale transaction filtering, and asynchronous pricing.
+Metrics have also been added to monitor these optimizations.
+
+Upgrading is optional.
+
+### What's Changed
+* perf: tune snapshot bloom for higher tps by @bnoieh in https://github.com/bnb-chain/op-geth/pull/230
+* perf: support new api engine_opSealPayload and optimize overheads of block mining by @bnoieh in https://github.com/bnb-chain/op-geth/pull/193
+* Txpool optimization: disable cache if --mine is not enabled by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/245
+* Txpool optimization: optimize truncate by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/241
+* Txpool optimization: broadcast transaction body directly to peer by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/243
+* Txpool optimization: filter out staled transactions of "nonce too low" when providing all pending list to miner by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/244
+* Txpool opt async priced by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/246
+* chore: txpool optimization metrics by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/247
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.5
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.4...v0.5.5
+
 ## v0.5.4
 
 This is a minor release for opBNB Mainnet and Testnet.

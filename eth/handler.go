@@ -688,31 +688,23 @@ func (h *handler) BroadcastTransactions(txs types.Transactions) {
 		// Send the tx unconditionally to a subset of our peers
 		for _, peer := range direct {
 			txset[peer] = append(txset[peer], tx.Hash())
-			log.Trace("Broadcast transaction", "peer", peer.ID(), "hash", tx.Hash())
 		}
 		// For the remaining peers, send announcement only
 		for _, peer := range announce {
 			annos[peer] = append(annos[peer], tx.Hash())
-			log.Trace("Announce transaction", "peer", peer.ID(), "hash", tx.Hash())
 		}
 	}
 	for peer, hashes := range txset {
 		directPeers++
 		directCount += len(hashes)
 		peer.AsyncSendTransactions(hashes)
-		log.Trace("Transaction broadcast bodies", "txs", len(hashes),
-			"peer.id", peer.Node().ID().String(), "peer.IP", peer.Node().IP().String(),
-		)
 	}
 	for peer, hashes := range annos {
 		annPeers++
 		annCount += len(hashes)
 		peer.AsyncSendPooledTransactionHashes(hashes)
-		log.Trace("Transaction broadcast hashes", "txs", len(hashes),
-			"peer.id", peer.Node().ID().String(), "peer.IP", peer.Node().IP().String(),
-		)
 	}
-	log.Debug("Distributed transactions", "plaintxs", len(txs)-blobTxs-largeTxs, "blobtxs", blobTxs, "largetxs", largeTxs,
+	log.Trace("Distributed transactions", "plaintxs", len(txs)-blobTxs-largeTxs, "blobtxs", blobTxs, "largetxs", largeTxs,
 		"bcastpeers", directPeers, "bcastcount", directCount, "annpeers", annPeers, "anncount", annCount)
 }
 

@@ -1496,7 +1496,7 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 			resetPromoteTimer.Update(promoteDur)
 			resetFeedTimer.Update(sendfeedDur)
 
-			pending, queued := pool.stats()
+			pending, queued := pool.Stats()
 			if reset.newHead != nil && reset.oldHead != nil {
 				log.Info("Transaction pool reorged", "from", reset.oldHead.Number.Uint64(), "to", reset.newHead.Number.Uint64(),
 					"reorgCost", reorgCost, "waittime", waittime, "promoted", len(promoted), "demoted", demoted, "sendFeed", sendFeed, "pending", pending, "queued", queued,

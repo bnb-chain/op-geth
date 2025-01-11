@@ -609,15 +609,7 @@ func (pool *LegacyPool) Stats() (int, int) {
 // stats retrieves the current pool stats, namely the number of pending and the
 // number of queued (non-executable) transactions.
 func (pool *LegacyPool) stats() (int, int) {
-	pending := 0
-	for _, list := range pool.pending {
-		pending += list.Len()
-	}
-	queued := 0
-	for _, list := range pool.queue {
-		queued += list.Len()
-	}
-	return pending, queued
+	return pool.pendingCounter, pool.queueCounter
 }
 
 // Content retrieves the data content of the transaction pool, returning all the

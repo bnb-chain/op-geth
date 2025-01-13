@@ -350,8 +350,6 @@ func (tl TxLevel) predictTxDAG(dag types.TxDAG) {
 
 func NewTxLevels(all []*PEVMTxRequest, dag types.TxDAG) TxLevels {
 	var levels TxLevels = make(TxLevels, 0, 8)
-	var currLevel int = 0
-
 	var enlargeLevelsIfNeeded = func(currLevel int, levels *TxLevels) {
 		if len(*levels) <= currLevel {
 			for i := len(*levels); i <= currLevel; i++ {
@@ -367,22 +365,47 @@ func NewTxLevels(all []*PEVMTxRequest, dag types.TxDAG) TxLevels {
 		return TxLevels{all}
 	}
 
-	marked := make(map[int]int, len(all))
-	for _, tx := range all {
-		dep := dag.TxDep(tx.txIndex)
+	// build the levels from the DAG
+	marked, _ := BuildTxLevels(len(all), dag)
+	// put the transactions into the levels
+	for txIndex, tx := range all {
+		level := marked[txIndex]
+		enlargeLevelsIfNeeded(level, &levels)
+		levels[level] = append(levels[level], tx)
+	}
+	return levels
+}
+
+func BuildTxLevels(txCount int, dag types.TxDAG) (marked map[int]int, depth int) {
+	if dag == nil {
+		return make(map[int]int), 0
+	}
+	// marked is used to record which level that each transaction should be put
+	marked = make(map[int]int, txCount)
+	var (
+		// currLevelHasTx marks if the current level has any transaction
+		currLevelHasTx bool
+	)
+
+	depth, currLevelHasTx = 0, false
+	for txIndex := 0; txIndex < txCount; txIndex++ {
+		dep := dag.TxDep(txIndex)
 		switch true {
 		case dep != nil && dep.CheckFlag(types.ExcludedTxFlag),
 			dep != nil && dep.CheckFlag(types.NonDependentRelFlag):
 			// excluted tx, occupies the whole level
 			// or dependent-to-all tx, occupies the whole level, too
-			levels = append(levels, TxLevel{tx})
-			marked[tx.txIndex], currLevel = len(levels)-1, len(levels)
+			if currLevelHasTx {
+				// shift to next level if there are transactions in the current level
+				depth++
+			}
+			marked[txIndex] = depth
+			// occupy the current level
+			depth, currLevelHasTx = depth+1, false
 
 		case dep == nil || len(dep.TxIndexes) == 0:
-			// dependent on none
-			enlargeLevelsIfNeeded(currLevel, &levels)
-			levels[currLevel] = append(levels[currLevel], tx)
-			marked[tx.txIndex] = currLevel
+			// dependent on none, just put it in the current level
+			marked[txIndex], currLevelHasTx = depth, true
 
 		case dep != nil && len(dep.TxIndexes) > 0:
 			// dependent on others
@@ -395,19 +418,22 @@ func NewTxLevels(all []*PEVMTxRequest, dag types.TxDAG) TxLevels {
 			}
 			if prevLevel < 0 {
 				// broken DAG, just ignored it
-				enlargeLevelsIfNeeded(currLevel, &levels)
-				levels[currLevel] = append(levels[currLevel], tx)
-				marked[tx.txIndex] = currLevel
+				marked[txIndex], currLevelHasTx = depth, true
 				continue
 			}
-			enlargeLevelsIfNeeded(prevLevel+1, &levels)
-			levels[prevLevel+1] = append(levels[prevLevel+1], tx)
 			// record the level of this tx
-			marked[tx.txIndex] = prevLevel + 1
+			marked[txIndex] = prevLevel + 1
+			if marked[txIndex] > depth {
+				depth, currLevelHasTx = marked[txIndex], true
+			}
 
 		default:
 			panic("unexpected case")
 		}
 	}
-	return levels
+	// check if the last level has any transaction, to avoid the empty level
+	if !currLevelHasTx {
+		depth--
+	}
+	return marked, depth + 1
 }

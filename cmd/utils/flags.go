@@ -1136,6 +1136,13 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.VMCategory,
 	}
 
+	ParallelTxDATMaxDepthRatioFlag = &cli.Float64Flag{
+		Name:     "parallel.txdag-max-depth-ratio",
+		Usage:    "A ratio to decide whether or not to execute transactions in parallel, it will fallback to sequencial processor if the depth is larger than this value (default = 0.9)",
+		Value:    0.9,
+		Category: flags.VMCategory,
+	}
+
 	VMOpcodeOptimizeFlag = &cli.BoolFlag{
 		Name:     "vm.opcode.optimize",
 		Usage:    "enable opcode optimization",
@@ -2055,6 +2062,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(ParallelTxDAGFileFlag.Name) {
 		cfg.ParallelTxDAGFile = ctx.String(ParallelTxDAGFileFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDATMaxDepthRatioFlag.Name) {
+		cfg.ParallelTxDAGMaxDepthRatio = ctx.Float64(ParallelTxDATMaxDepthRatioFlag.Name)
 	}
 
 	if ctx.IsSet(ParallelTxDAGSenderPrivFlag.Name) {

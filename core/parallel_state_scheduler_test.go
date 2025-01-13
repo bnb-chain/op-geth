@@ -601,12 +601,44 @@ func TestNewTxLevels(t *testing.T) {
 	assertEqual(levels([]uint64{1, 2, 3, 4, 5}, [][]int{nil, nil, nil, {-2}, {-2}}), [][]uint64{{1, 2, 3}, {4}, {5}}, t)
 
 	// case 9: loop-back txdag
-	assertEqual(levels([]uint64{1, 2, 3, 4}, [][]int{{1}, nil, {0}, nil}), [][]uint64{{1, 2, 4}, {3}}, t)
+	assertEqual(levels([]uint64{1, 2, 3, 4}, [][]int{{1}, nil, {0}, nil}), [][]uint64{{1, 2}, {3, 4}}, t)
+
+	// case 10: nonedependent txs + execlude txs + nonedependent txs
+	assertEqual(levels([]uint64{1, 2, 3, 4, 5}, [][]int{nil, nil, {-2}, nil, nil}), [][]uint64{{1, 2}, {3}, {4, 5}}, t)
+}
+
+func TestBuildLevels(t *testing.T) {
+	var (
+		marks map[int]int
+		depth int
+	)
+	// case 1: 1 excluded tx + n no dependencies txs + n dependencies txs + 1 all-dependencies tx
+	marks, depth = levelMarks([]uint64{1, 2, 3, 4, 5, 6, 7}, [][]int{{-1}, nil, nil, nil, {0, 1}, {2}, {-2}})
+	assertEqualMarks(marks, map[int]int{0: 0, 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 3}, t)
+	if depth != 4 {
+		t.Fatalf("expected depth: 4, got depth: %d", depth)
+	}
+	// case 2: nonedependent txs + execlude txs + nonedependent txs
+	marks, depth = levelMarks([]uint64{1, 2, 3, 4, 5}, [][]int{nil, nil, {-2}, nil, nil})
+	assertEqualMarks(marks, map[int]int{0: 0, 1: 0, 2: 1, 3: 2, 4: 2}, t)
+	if depth != 3 {
+		t.Fatalf("expected depth: 3, got depth: %d", depth)
+	}
+	// case 3: (broken TxDAG) n dependent txs + 1 execlude tx + none dependent txs
+	marks, depth = levelMarks([]uint64{1, 2, 3, 4, 5}, [][]int{{1}, {2}, {-1}, nil, nil})
+	assertEqualMarks(marks, map[int]int{0: 0, 1: 0, 2: 1, 3: 2, 4: 2}, t)
+	if depth != 3 {
+		t.Fatalf("expected depth: 3, got depth: %d", depth)
+	}
 }
 
 func TestMultiLevel(t *testing.T) {
 	// case 7: 1 excluded tx + n no dependencies txs + n dependencies txs + 1 all-dependencies tx
-	assertEqual(levels([]uint64{1, 2, 3, 4, 5, 6, 7, 8}, [][]int{nil, nil, nil, {0}, nil, {1}, nil, {2}}), [][]uint64{{1, 2, 3, 5, 7}, {4, 6, 8}}, t)
+	assertEqual(levels([]uint64{1, 2, 3, 4, 5, 6, 7, 8}, [][]int{nil, nil, nil, {0}, nil, {1}, nil, {2}}), [][]uint64{{1, 2, 3}, {4, 5, 6, 7, 8}}, t)
+}
+
+func levelMarks(nonces []uint64, txdag [][]int) (map[int]int, int) {
+	return BuildTxLevels(len(nonces), int2txdag(txdag))
 }
 
 func levels(nonces []uint64, txdag [][]int) TxLevels {
@@ -648,6 +680,17 @@ func int2txdag(txdag [][]int) types.TxDAG {
 		}
 	}
 	return &dag
+}
+
+func assertEqualMarks(actual map[int]int, expected map[int]int, t *testing.T) {
+	if len(actual) != len(expected) {
+		t.Fatalf("expected %d marks, got %d marks", len(expected), len(actual))
+	}
+	for i, mark := range actual {
+		if expected[i] != mark {
+			t.Fatalf("expected mark[%d]: %d, got mark[%d]: %d", i, expected[i], i, mark)
+		}
+	}
 }
 
 func assertEqual(actual TxLevels, expected [][]uint64, t *testing.T) {

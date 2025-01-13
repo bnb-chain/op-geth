@@ -41,6 +41,7 @@ type Config struct {
 	TxDAG                        types.TxDAG
 	EnableParallelUnorderedMerge bool // Whether to enable unordered merge in parallel mode
 	EnableTxParallelMerge        bool // Whether to enable parallel merge in parallel mode
+	TxDAGMaxDepthRatio           float64
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,

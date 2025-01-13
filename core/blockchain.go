@@ -1760,6 +1760,19 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	return bc.insertChain(chain, true)
 }
 
+func (bc *BlockChain) useSerialProcessor(block *types.Block) (bool, bool) {
+	// findout whether or not the dependencies of the block are too deep to be processed
+	// if the dependencies are too deep, we will fallback to serial processing
+	txCount := len(block.Transactions())
+	_, depth := BuildTxLevels(txCount, bc.vmConfig.TxDAG)
+	tooDeep := float64(depth)/float64(txCount) > bc.vmConfig.TxDAGMaxDepthRatio
+	isByzantium := bc.chainConfig.IsByzantium(block.Number())
+
+	txDAGMissButNecessary := bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)
+	useSerialProcessor := !bc.vmConfig.EnableParallelExec || txDAGMissButNecessary || tooDeep || !isByzantium
+	return useSerialProcessor, tooDeep
+}
+
 // insertChain is the internal implementation of InsertChain, which assumes that
 // 1) chains are contiguous, and 2) The chain mutex is held.
 //
@@ -1971,6 +1984,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		)
 
 		blockProcessedInParallel := false
+		var (
+			tooDeep, useSerialProcessor bool
+			depth                       int
+		)
 		// skip block process if we already have the state, receipts and logs from mining work
 		if !(receiptExist && logExist && stateExist) {
 			// Retrieve the parent block and it's state to execute on top
@@ -1982,9 +1999,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if bc.vmConfig.EnableParallelExec {
 				bc.parseTxDAG(block)
 			}
-			isByzantium := bc.chainConfig.IsByzantium(block.Number())
 
-			if bc.vmConfig.EnableParallelExec && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge && isByzantium {
+			useSerialProcessor, tooDeep = bc.useSerialProcessor(block)
+			if !useSerialProcessor {
 				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
 			} else {
 				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
@@ -2018,8 +2035,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Process block using the parent state as reference point
 			pstart = time.Now()
-			txDAGMissButNecessary := bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)
-			useSerialProcessor := !bc.vmConfig.EnableParallelExec || txDAGMissButNecessary
 			if useSerialProcessor {
 				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
 				blockProcessedInParallel = false
@@ -2143,7 +2158,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			"accountUpdates", common.PrettyDuration(timers.AccountUpdates),
 			"storageUpdates", common.PrettyDuration(timers.StorageUpdates),
 			"accountHashes", common.PrettyDuration(timers.AccountHashes),
-			"storageHashes", common.PrettyDuration(timers.StorageHashes))
+			"storageHashes", common.PrettyDuration(timers.StorageHashes),
+			"tooDeep", tooDeep, "depth", depth,
+		)
 
 		// Write the block to the chain and get the status.
 		var (

@@ -2257,7 +2257,8 @@ func (bc *BlockChain) parseTxDAG(block *types.Block) {
 	if bc.txDAGReader != nil {
 		// load cache txDAG from file first
 		txDAG = bc.txDAGReader.TxDAG(block.NumberU64())
-	} else {
+	}
+	if txDAG == nil {
 		// load TxDAG from block
 		txDAG, err = types.GetTxDAG(block)
 		if err != nil {

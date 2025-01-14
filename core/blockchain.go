@@ -107,7 +107,7 @@ var (
 
 	// metrics to identify whether a block is processed in parallel EVM or serial EVM
 	parallelInSequencial = metrics.NewRegisteredMeter("chain/parallel/sequencial", nil)
-	parallelTxDepth      = metrics.NewRegisteredMeter("chain/parallel/txdepth", nil)
+	parallelTxDepth      = metrics.NewRegisteredGauge("chain/parallel/txdepth", nil)
 	// TxDepthRatio = TxDepth / TxNum * 100
 	parallelTxDepthRatio = metrics.NewRegisteredGauge("chain/parallel/txdepth/ratio", nil)
 
@@ -581,7 +581,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	if bc.vmConfig.EnableParallelExec {
 		bc.processor = newPEVMProcessor(chainConfig, bc, engine)
 		bc.serialProcessor = NewStateProcessor(chainConfig, bc, engine)
-		log.Info("Parallel V2 enabled", "parallelNum", ParallelNum())
+		log.Info("Parallel V2 enabled", "parallelNum", ParallelNum(), "TxDepthRation", bc.vmConfig.TxDAGMaxDepthRatio)
 	} else {
 		bc.processor = NewStateProcessor(chainConfig, bc, engine)
 		bc.serialProcessor = bc.processor
@@ -1772,7 +1772,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	return bc.insertChain(chain, true)
 }
 
-func (bc *BlockChain) useSerialProcessor(block *types.Block) (bool, bool) {
+func (bc *BlockChain) useSerialProcessor(block *types.Block) bool {
 	// findout whether or not the dependencies of the block are too deep to be processed
 	// if the dependencies are too deep, we will fallback to serial processing
 	txCount := len(block.Transactions())
@@ -1792,7 +1792,7 @@ func (bc *BlockChain) useSerialProcessor(block *types.Block) (bool, bool) {
 
 	// mark the metrics
 	defer func() {
-		parallelTxDepth.Mark(int64(depth))
+		parallelTxDepth.Update(int64(depth))
 		parallelTxDepthRatio.Update(int64(depthRatio * 100))
 		// put reasons in expensive metrics
 		if metrics.EnabledExpensive {
@@ -1806,8 +1806,11 @@ func (bc *BlockChain) useSerialProcessor(block *types.Block) (bool, bool) {
 				parallelConditionByzantium.Mark(1)
 			}
 		}
+		log.Info("run in parallel or sequencial", "block", block.Number(), "useSerialProcessor", useSerialProcessor, "depthRatio", depthRatio, "depth", depth, "txCount", txCount, "txDAG", bc.vmConfig.TxDAG == nil, "byz", isByzantium, "tooDeep", tooDeep,
+			"enableTxDAG", bc.enableTxDAG, "enableParallelExec", bc.vmConfig.EnableParallelExec)
+
 	}()
-	return useSerialProcessor, tooDeep
+	return useSerialProcessor
 }
 
 // insertChain is the internal implementation of InsertChain, which assumes that
@@ -2022,8 +2025,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		blockProcessedInParallel := false
 		var (
-			tooDeep, useSerialProcessor bool
-			depth                       int
+			useSerialProcessor bool
 		)
 		// skip block process if we already have the state, receipts and logs from mining work
 		if !(receiptExist && logExist && stateExist) {
@@ -2037,7 +2039,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				bc.parseTxDAG(block)
 			}
 
-			useSerialProcessor, tooDeep = bc.useSerialProcessor(block)
+			useSerialProcessor = bc.useSerialProcessor(block)
 			if !useSerialProcessor {
 				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
 			} else {
@@ -2197,7 +2199,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			"storageUpdates", common.PrettyDuration(timers.StorageUpdates),
 			"accountHashes", common.PrettyDuration(timers.AccountHashes),
 			"storageHashes", common.PrettyDuration(timers.StorageHashes),
-			"tooDeep", tooDeep, "depth", depth,
 		)
 
 		// Write the block to the chain and get the status.

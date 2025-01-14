@@ -2066,6 +2066,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(ParallelTxDATMaxDepthRatioFlag.Name) {
 		cfg.ParallelTxDAGMaxDepthRatio = ctx.Float64(ParallelTxDATMaxDepthRatioFlag.Name)
+	} else {
+		cfg.ParallelTxDAGMaxDepthRatio = ParallelTxDATMaxDepthRatioFlag.Value
 	}
 
 	if ctx.IsSet(ParallelTxDAGSenderPrivFlag.Name) {

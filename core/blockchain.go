@@ -320,6 +320,7 @@ type BlockChain struct {
 	forker     *ForkChoice
 	vmConfig   vm.Config
 
+	// parallel EVM related
 	enableTxDAG     bool
 	txDAGWriteCh    chan TxDAGOutputItem
 	txDAGReader     *TxDAGFileReader
@@ -2112,27 +2113,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
-
-		if bc.enableTxDAG && !bc.vmConfig.EnableParallelExec {
-			// compare input TxDAG when it enable in consensus
-			dag, err := statedb.ResolveTxDAG(len(block.Transactions()), []common.Address{block.Coinbase(), params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient})
-			if err == nil {
-				// TODO(galaio): check TxDAG correctness?
-				log.Debug("Process TxDAG result", "block", block.NumberU64(), "txDAG", dag)
-				if metrics.EnabledExpensive {
-					go types.EvaluateTxDAGPerformance(dag, statedb.ResolveStats())
-				}
-				// try to write txDAG into file
-				if bc.txDAGWriteCh != nil && dag != nil {
-					bc.txDAGWriteCh <- TxDAGOutputItem{
-						blockNumber: block.NumberU64(),
-						txDAG:       dag,
-					}
-				}
-			} else {
-				log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
-			}
-		}
 
 		// Update the metrics touched during block processing and validation
 		timers := statedb.Timers()

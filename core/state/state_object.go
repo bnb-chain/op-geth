@@ -19,14 +19,13 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"golang.org/x/exp/slices"
 	"io"
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
-	"golang.org/x/exp/slices"
-
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -228,7 +227,6 @@ func (s *stateObject) empty() bool {
 	//   Slot 0 tx 2: GetNonce, lightCopy based on main DB(balance = 100) , not empty
 
 	if !s.dbItf.GetBalance(s.address).IsZero() { // check balance first, since it is most likely not zero
-
 		return false
 	}
 	if s.dbItf.GetNonce(s.address) != 0 {
@@ -261,7 +259,6 @@ func newObject(dbItf StateDBer, isParallel bool, address common.Address, acct *t
 	}
 
 	// dirty data when create a new account
-
 	if created {
 		s.dirtyBalance = new(uint256.Int).Set(acct.Balance)
 		s.dirtyNonce = new(uint64)
@@ -439,6 +436,7 @@ func (s *stateObject) finalise(prefetch bool) {
 		s.data.Nonce = *s.dirtyNonce
 		s.dirtyNonce = nil
 	}
+
 	if s.dirtyBalance != nil {
 		s.data.Balance = s.dirtyBalance
 		s.dirtyBalance = nil
@@ -447,6 +445,7 @@ func (s *stateObject) finalise(prefetch bool) {
 		s.data.CodeHash = s.dirtyCodeHash
 		s.dirtyCodeHash = nil
 	}
+
 	if s.dbItf.getPrefetcher() != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
 		s.dbItf.getTrieParallelLock().Lock()
 		s.dbItf.getPrefetcher().prefetch(s.addrHash, s.data.Root, s.address, slotsToPrefetch)
@@ -458,24 +457,30 @@ func (s *stateObject) finalise(prefetch bool) {
 }
 
 func (s *stateObject) finaliseRWSet() {
+	if s.isParallel {
+		return
+	}
+	db := s.dbItf.(*StateDB)
+	if db.mvStates == nil {
+		return
+	}
+	ms := db.mvStates
 	s.dirtyStorage.Range(func(key, value interface{}) bool {
-		// three are some unclean dirtyStorage from previous reverted txs, it will skip finalise
-		// so add a new rule, if val has no change, then skip it
 		if value == s.GetCommittedState(key.(common.Hash)) {
 			return true
 		}
-		s.dbItf.RecordWrite(types.StorageStateKey(s.address, key.(common.Hash)), value.(common.Hash))
+		ms.RecordStorageWrite(s.address, key.(common.Hash))
 		return true
 	})
 
 	if s.dirtyNonce != nil && *s.dirtyNonce != s.data.Nonce {
-		s.dbItf.RecordWrite(types.AccountStateKey(s.address, types.AccountNonce), *s.dirtyNonce)
+		ms.RecordAccountWrite(s.address, types.AccountNonce)
 	}
 	if s.dirtyBalance != nil && s.dirtyBalance.Cmp(s.data.Balance) != 0 {
-		s.dbItf.RecordWrite(types.AccountStateKey(s.address, types.AccountBalance), new(uint256.Int).Set(s.dirtyBalance))
+		ms.RecordAccountWrite(s.address, types.AccountBalance)
 	}
 	if s.dirtyCodeHash != nil && !slices.Equal(s.dirtyCodeHash, s.data.CodeHash) {
-		s.dbItf.RecordWrite(types.AccountStateKey(s.address, types.AccountCodeHash), s.dirtyCodeHash)
+		ms.RecordAccountWrite(s.address, types.AccountCodeHash)
 	}
 }
 
@@ -718,9 +723,16 @@ func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	object.selfDestructed = s.selfDestructed
 	object.dirtyCode = s.dirtyCode
 	object.deleted = s.deleted
-	object.dirtyBalance = s.dirtyBalance
-	object.dirtyNonce = s.dirtyNonce
-	object.dirtyCodeHash = s.dirtyCodeHash
+	if s.dirtyBalance != nil {
+		object.dirtyBalance = new(uint256.Int).Set(s.dirtyBalance)
+	}
+	if s.dirtyNonce != nil {
+		object.dirtyNonce = new(uint64)
+		*object.dirtyNonce = *s.dirtyNonce
+	}
+	if s.dirtyCodeHash != nil {
+		object.dirtyCodeHash = s.dirtyCodeHash
+	}
 	return object
 }
 

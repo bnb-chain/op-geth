@@ -84,8 +84,6 @@ type StateDBer interface {
 	StopPrefetcher()
 	StartPrefetcher(namespace string)
 	SetExpectedStateRoot(root common.Hash)
-	ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (types.TxDAG, error)
-	ResolveStats() map[int]*types.ExeStat
 	IntermediateRoot(deleteEmptyObjects bool) common.Hash
 	Error() error
 	Timers() *Timers
@@ -112,7 +110,6 @@ type StateDBer interface {
 	setError(err error)
 	getTrieParallelLock() *sync.Mutex
 	timeAddStorageReads(du time.Duration)
-	RecordWrite(key types.RWKey, value interface{})
 	timeAddStorageUpdates(du time.Duration)
 	countAddStorageDeleted(diff int)
 	countAddStorageUpdated(diff int)
@@ -125,4 +122,5 @@ type StateDBer interface {
 	timeAddStorageCommits(du time.Duration)
 	getOrNewStateObject(addr common.Address) *stateObject
 	prefetchAccount(address common.Address)
+	CheckFeeReceiversRWSet()
 }

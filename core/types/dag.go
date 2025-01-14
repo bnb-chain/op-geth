@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"strings"
-	"time"
-
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 	"golang.org/x/exp/slices"
+	"strings"
+	"time"
 )
 
 const TxDAGAbiJson = `
@@ -160,21 +159,20 @@ func ValidatePlainTxDAG(d TxDAG, txCnt int) error {
 		return fmt.Errorf("PlainTxDAG contains wrong txs count, expect: %v, actual: %v", txCnt, d.TxCount())
 	}
 	for i := 0; i < txCnt; i++ {
-		dp := d.TxDep(i)
-		if dp == nil {
+		dep := d.TxDep(i)
+		if dep == nil {
 			return fmt.Errorf("PlainTxDAG contains nil txdep, tx: %v", i)
 		}
-		if dp.Flags != nil && *dp.Flags & ^TxDepFlagMask > 0 {
-			return fmt.Errorf("PlainTxDAG contains unknown flags, flags: %v", *dp.Flags)
-		}
-		dep := TxDependency(d, i)
-		for j, tx := range dep {
+		for j, tx := range dep.TxIndexes {
 			if tx >= uint64(i) || tx >= uint64(txCnt) {
 				return fmt.Errorf("PlainTxDAG contains the exceed range dependency, tx: %v", i)
 			}
-			if j > 0 && dep[j] <= dep[j-1] {
+			if j > 0 && dep.TxIndexes[j] <= dep.TxIndexes[j-1] {
 				return fmt.Errorf("PlainTxDAG contains unordered dependency, tx: %v", i)
 			}
+		}
+		if dep.Flags != nil && *dep.Flags & ^TxDepFlagMask > 0 {
+			return fmt.Errorf("PlainTxDAG contains unknown flags, flags: %v", *dep.Flags)
 		}
 	}
 	return nil
@@ -255,6 +253,8 @@ func (d *EmptyTxDAG) String() string {
 }
 
 // PlainTxDAG indicate how to use the dependency of txs, and delay the distribution of GasFee
+//
+//go:generate go run ../../rlp/rlpgen -type PlainTxDAG -out gen_plaintxdag_rlp.go
 type PlainTxDAG struct {
 	// Tx Dependency List, the list index is equal to TxIndex
 	TxDeps []TxDep
@@ -487,6 +487,18 @@ var (
 )
 
 func EvaluateTxDAGPerformance(dag TxDAG, stats map[int]*ExeStat) {
+	if stats == nil {
+		if dag.TxCount() == 0 {
+			return
+		}
+		totalTxMeter.Mark(int64(dag.TxCount()))
+		for i := 0; i < dag.TxCount(); i++ {
+			if len(TxDependency(dag, i)) == 0 {
+				totalNoDepMeter.Mark(1)
+			}
+		}
+	}
+
 	if len(stats) != dag.TxCount() || dag.TxCount() == 0 {
 		return
 	}

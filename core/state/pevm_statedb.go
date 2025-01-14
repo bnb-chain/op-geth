@@ -73,6 +73,11 @@ type UncommittedDB struct {
 	isMainDBIsParallelDB bool
 }
 
+func (pst *UncommittedDB) CheckFeeReceiversRWSet() {
+	//TODO implement me
+	return
+}
+
 func NewUncommittedDB(maindb StateDBer) *UncommittedDB {
 	_, ok := maindb.(*ParallelStateDB)
 	return &UncommittedDB{
@@ -1571,15 +1576,6 @@ func (p *ParallelStateDB) StartPrefetcher(namespace string) {
 	}
 }
 
-func (p *ParallelStateDB) ResolveTxDAG(txCnt int, gasFeeReceivers []common.Address) (types.TxDAG, error) {
-	//do nothing
-	return nil, nil
-}
-
-func (p *ParallelStateDB) ResolveStats() map[int]*types.ExeStat {
-	return nil
-}
-
 func (p *ParallelStateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	// Finalise all the dirty storage states and write them into the tries
 	p.Finalise(deleteEmptyObjects)
@@ -2401,10 +2397,6 @@ func (p *ParallelStateDB) timeAddStorageReads(du time.Duration) {
 	p.StorageReads += du
 }
 
-func (p *ParallelStateDB) RecordWrite(key types.RWKey, value interface{}) {
-	//do nothing
-}
-
 func (p *ParallelStateDB) timeAddStorageUpdates(du time.Duration) {
 	p.StorageUpdates += du
 }
@@ -2448,4 +2440,8 @@ func (p *ParallelStateDB) timeAddStorageCommits(du time.Duration) {
 func (p *ParallelStateDB) setStateObjectIfEmpty(obj *stateObject) bool {
 	_, loaded := p.stateObjects.LoadOrStore(obj.address, obj)
 	return !loaded
+}
+
+func (s *ParallelStateDB) CheckFeeReceiversRWSet() {
+	return
 }

@@ -19,7 +19,6 @@ package core
 import (
 	"fmt"
 	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/log"
 	"math"
 	"math/big"
 	"time"
@@ -418,10 +417,6 @@ func (st *StateTransition) preCheck() error {
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
 func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
-	// start record rw set in here
-	if !st.msg.IsSystemTx && !st.msg.IsDepositTx {
-		st.state.BeforeTxTransition()
-	}
 	if mint := st.msg.Mint; mint != nil {
 		mintU256, overflow := uint256.FromBig(mint)
 		if overflow {
@@ -446,22 +441,12 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		if st.msg.IsSystemTx && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
 			gasUsed = 0
 		}
-		// just record error tx here
-		if ferr := st.state.FinaliseRWSet(); ferr != nil {
-			log.Error("finalise error deposit tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
-		}
 		result = &ExecutionResult{
 			UsedGas:    gasUsed,
 			Err:        fmt.Errorf("failed deposit: %w", err),
 			ReturnData: nil,
 		}
 		err = nil
-	}
-	if err != nil {
-		// just record error tx here
-		if ferr := st.state.FinaliseRWSet(); ferr != nil {
-			log.Error("finalise error tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
-		}
 	}
 	return result, err
 }
@@ -543,11 +528,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	}
 	DebugInnerExecutionDuration += time.Since(start)
 
-	// stop record rw set in here, skip gas fee distribution
-	if ferr := st.state.FinaliseRWSet(); ferr != nil {
-		log.Error("finalise tx rwSet fail", "block", st.evm.Context.BlockNumber, "tx", st.evm.StateDB.TxIndex(), "err", ferr)
-	}
-
 	// if deposit: skip refunds, skip tipping coinbase
 	// Regolith changes this behaviour to report the actual gasUsed instead of always reporting all gas used.
 	if st.msg.IsDepositTx && !rules.IsOptimismRegolith {
@@ -563,6 +543,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			ReturnData: ret,
 		}, nil
 	}
+
 	// Note for deposit tx there is no ETH refunded for unused gas, but that's taken care of by the fact that gasPrice
 	// is always 0 for deposit tx. So calling refundGas will ensure the gasUsed accounting is correct without actually
 	// changing the sender's balance
@@ -589,6 +570,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		baseFee *uint256.Int
 		l1Fee   *uint256.Int
 	)
+	// check fee receiver rwSet here
+	st.state.CheckFeeReceiversRWSet()
+
 	effectiveTip := msg.GasPrice
 	if rules.IsLondon {
 		effectiveTip = cmath.BigMin(msg.GasTipCap, new(big.Int).Sub(msg.GasFeeCap, st.evm.Context.BaseFee))

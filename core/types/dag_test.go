@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
+
 	"github.com/golang/snappy"
 
 	"github.com/cometbft/cometbft/libs/rand"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,7 +29,6 @@ func TestEncodeTxDAGCalldata(t *testing.T) {
 	assert.Equal(t, nil, err)
 	assert.Equal(t, true, tg.TxCount() > 0)
 	assert.Equal(t, originTg, tg)
-
 	_, err = DecodeTxDAGCalldata(nil)
 	assert.NotEqual(t, nil, err)
 }
@@ -303,7 +302,7 @@ func mockSystemTxDAGWithLargeDeps() TxDAG {
 	dag.TxDeps[7].TxIndexes = []uint64{3}
 	dag.TxDeps[8].TxIndexes = []uint64{}
 	//dag.TxDeps[9].TxIndexes = []uint64{0, 1, 2, 6, 7, 8}
-	dag.TxDeps[9] = NewTxDep([]uint64{3, 4, 5, 10, 11}, NonDependentRelFlag)
+	dag.TxDeps[9] = NewTxDep([]uint64{3, 4, 5}, NonDependentRelFlag)
 	dag.TxDeps[10] = NewTxDep([]uint64{}, ExcludedTxFlag)
 	dag.TxDeps[11] = NewTxDep([]uint64{}, ExcludedTxFlag)
 	return dag

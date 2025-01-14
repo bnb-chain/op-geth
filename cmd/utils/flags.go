@@ -1125,7 +1125,7 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 
 	ParallelTxDAGFlag = &cli.BoolFlag{
 		Name:     "parallel.txdag",
-		Usage:    "Enable the experimental parallel TxDAG generation, only valid in full sync mode (default = false)",
+		Usage:    "Enable the experimental parallel TxDAG generation (default = false)",
 		Category: flags.VMCategory,
 	}
 
@@ -2055,7 +2055,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	if ctx.IsSet(ParallelTxNumFlag.Name) {
 		cfg.ParallelTxNum = ctx.Int(ParallelTxNumFlag.Name)
 	}
-
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {
 		cfg.EnableParallelTxDAG = ctx.Bool(ParallelTxDAGFlag.Name)
 	}

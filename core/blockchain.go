@@ -99,6 +99,18 @@ var (
 	txDAGGenerateTimer   = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
 	txDAGReaderChanGauge = metrics.NewRegisteredGauge("chain/block/txdag/reader/chan", nil)
 
+	// expensive metrics
+	// metrics of reasons why a block is processed in a parallel EVM or serial EVM
+	parallelConditionTooDeep   = metrics.NewRegisteredMeter("chain/parallel/condition/toodeep", nil)
+	parallelConditionTxDAGMiss = metrics.NewRegisteredMeter("chain/parallel/condition/txdagmiss", nil)
+	parallelConditionByzantium = metrics.NewRegisteredMeter("chain/parallel/condition/byzantium", nil)
+
+	// metrics to identify whether a block is processed in parallel EVM or serial EVM
+	parallelInSequencial = metrics.NewRegisteredMeter("chain/parallel/sequencial", nil)
+	parallelTxDepth      = metrics.NewRegisteredMeter("chain/parallel/txdepth", nil)
+	// TxDepthRatio = TxDepth / TxNum * 100
+	parallelTxDepthRatio = metrics.NewRegisteredGauge("chain/parallel/txdepth/ratio", nil)
+
 	parallelTxNumMeter             = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
 	parallelEnableMeter            = metrics.NewRegisteredMeter("chain/parallel/enable", nil)
 	parallelFallbackMeter          = metrics.NewRegisteredMeter("chain/parallel/fallback", nil)
@@ -1766,11 +1778,36 @@ func (bc *BlockChain) useSerialProcessor(block *types.Block) (bool, bool) {
 	// if the dependencies are too deep, we will fallback to serial processing
 	txCount := len(block.Transactions())
 	_, depth := BuildTxLevels(txCount, bc.vmConfig.TxDAG)
-	tooDeep := float64(depth)/float64(txCount) > bc.vmConfig.TxDAGMaxDepthRatio
+	var depthRatio float64
+
+	if txCount > 0 {
+		depthRatio = float64(depth) / float64(txCount)
+	} else {
+		depthRatio = 0
+	}
+	tooDeep := depthRatio > bc.vmConfig.TxDAGMaxDepthRatio
 	isByzantium := bc.chainConfig.IsByzantium(block.Number())
 
 	txDAGMissButNecessary := bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)
 	useSerialProcessor := !bc.vmConfig.EnableParallelExec || txDAGMissButNecessary || tooDeep || !isByzantium
+
+	// mark the metrics
+	defer func() {
+		parallelTxDepth.Mark(int64(depth))
+		parallelTxDepthRatio.Update(int64(depthRatio * 100))
+		// put reasons in expensive metrics
+		if metrics.EnabledExpensive {
+			if tooDeep {
+				parallelConditionTooDeep.Mark(1)
+			}
+			if bc.vmConfig.TxDAG == nil {
+				parallelConditionTxDAGMiss.Mark(1)
+			}
+			if isByzantium {
+				parallelConditionByzantium.Mark(1)
+			}
+		}
+	}()
 	return useSerialProcessor, tooDeep
 }
 
@@ -2037,6 +2074,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// Process block using the parent state as reference point
 			pstart = time.Now()
 			if useSerialProcessor {
+				parallelInSequencial.Mark(1)
 				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
 				blockProcessedInParallel = false
 			} else {

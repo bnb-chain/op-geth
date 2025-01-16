@@ -1829,7 +1829,7 @@ func (bc *BlockChain) useSerialProcessor(block *types.Block) (useSerialProcessor
 		return true
 	}
 	// switch to serial processor if the block is too deep in the dependency graph
-	if tooDeep = depthRatio > bc.vmConfig.TxDAGMaxDepthRatio; tooDeep {
+	if tooDeep = (depthRatio > bc.vmConfig.TxDAGMaxDepthRatio); tooDeep {
 		return true
 	}
 	// switch to serial processor if the TxDAG is nil and parallel merge is enabled

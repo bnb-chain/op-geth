@@ -1772,24 +1772,23 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	return bc.insertChain(chain, true)
 }
 
-func (bc *BlockChain) useSerialProcessor(block *types.Block) bool {
-	// findout whether or not the dependencies of the block are too deep to be processed
-	// if the dependencies are too deep, we will fallback to serial processing
-	txCount := len(block.Transactions())
-	_, depth := BuildTxLevels(txCount, bc.vmConfig.TxDAG)
-	var depthRatio float64
-
-	if txCount > 0 {
-		depthRatio = float64(depth) / float64(txCount)
-	} else {
-		depthRatio = 0
-	}
-	tooDeep := depthRatio > bc.vmConfig.TxDAGMaxDepthRatio
-	isByzantium := bc.chainConfig.IsByzantium(block.Number())
-
-	txDAGMissButNecessary := bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)
-	useSerialProcessor := !bc.vmConfig.EnableParallelExec || txDAGMissButNecessary || tooDeep || !isByzantium
-
+// userSerialProcessor decides whether or not to use serial processor for the block
+// these are the reasons to use serial processor:
+//  0. the parallel flag is not enabled
+//  1. the block is empty
+//  2. the block is not byzantium
+//  3. the block is too deep in the dependency graph
+//  4. the TxDAG is nil and parallel merge is enabled
+func (bc *BlockChain) useSerialProcessor(block *types.Block) (useSerialProcessor bool) {
+	var (
+		enableParallel        bool
+		txCount               int
+		depth                 int
+		depthRatio            float64
+		tooDeep               bool
+		isByzantium           bool
+		txDAGMissButNecessary bool
+	)
 	// mark the metrics
 	defer func() {
 		parallelTxDepth.Update(int64(depth))
@@ -1806,11 +1805,38 @@ func (bc *BlockChain) useSerialProcessor(block *types.Block) bool {
 				parallelConditionByzantium.Mark(1)
 			}
 		}
-		log.Info("run in parallel or sequencial", "block", block.Number(), "useSerialProcessor", useSerialProcessor, "depthRatio", depthRatio, "depth", depth, "txCount", txCount, "txDAG", bc.vmConfig.TxDAG == nil, "byz", isByzantium, "tooDeep", tooDeep,
-			"enableTxDAG", bc.enableTxDAG, "enableParallelExec", bc.vmConfig.EnableParallelExec)
-
+		log.Info("run in parallel or sequencial", "block", block.Number(), "useSerialProcessor", useSerialProcessor, "depthRatio", depthRatio, "depth", depth, "txCount", txCount, "txDAG", bc.vmConfig.TxDAG != nil, "byz", isByzantium, "tooDeep", tooDeep,
+			"enableParallel", enableParallel, "enableParallelExec", bc.vmConfig.EnableParallelExec)
 	}()
-	return useSerialProcessor
+
+	txCount = len(block.Transactions())
+	_, depth = BuildTxLevels(txCount, bc.vmConfig.TxDAG)
+	if txCount > 0 {
+		depthRatio = float64(depth) / float64(txCount)
+	} else {
+		depthRatio = 0
+	}
+	// switch to serial processor if the block is empty
+	if txCount <= 1 {
+		return true
+	}
+	// switch to serial processor if parallel flag not enabled
+	if enableParallel = bc.vmConfig.EnableParallelExec; !enableParallel {
+		return true
+	}
+	// switch to serial processor if the block is not byzantium
+	if isByzantium = bc.chainConfig.IsByzantium(block.Number()); !isByzantium {
+		return true
+	}
+	// switch to serial processor if the block is too deep in the dependency graph
+	if tooDeep = depthRatio > bc.vmConfig.TxDAGMaxDepthRatio; tooDeep {
+		return true
+	}
+	// switch to serial processor if the TxDAG is nil and parallel merge is enabled
+	if txDAGMissButNecessary = (bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)); txDAGMissButNecessary {
+		return true
+	}
+	return false
 }
 
 // insertChain is the internal implementation of InsertChain, which assumes that
@@ -2040,7 +2066,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 
 			useSerialProcessor = bc.useSerialProcessor(block)
-			if !useSerialProcessor {
+			if !useSerialProcessor && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge {
+				//ParallelStateDB is used for parallel merge, and it works only when the block's TxDAG is not nil
 				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
 			} else {
 				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)

@@ -723,9 +723,16 @@ func (api *ConsensusAPI) opSealPayload(payloadID engine.PayloadID, update engine
 	} else if version == "V3" {
 		payloadEnvelope, err = api.GetPayloadV3(payloadID)
 	} else {
-		return engine.OpSealPayloadResponse{ErrStage: engine.GetPayloadStage}, engine.UnsupportedFork.With(errors.New(engine.GetPayloadStage + "invalid engine api version"))
+		forkErr := engine.UnsupportedFork.With(errors.New(engine.GetPayloadStage + "invalid engine api version"))
+		forkErr.SetStage(engine.GetPayloadStage)
+		return engine.OpSealPayloadResponse{ErrStage: engine.GetPayloadStage}, forkErr
 	}
 	if err != nil {
+		if engineApiErr, ok := err.(*engine.EngineAPIError); ok {
+			engineApiErr.SetStage(engine.GetPayloadStage)
+			log.Error("Seal payload engineApiError when get payload", "error", engineApiErr.Error(), "code", engineApiErr.ErrorCode(), "payloadID", payloadID)
+			return engine.OpSealPayloadResponse{ErrStage: engine.GetPayloadStage}, engineApiErr
+		}
 		log.Error("Seal payload error when get payload", "error", err, "payloadID", payloadID)
 		return engine.OpSealPayloadResponse{ErrStage: engine.GetPayloadStage}, fmt.Errorf("sealApiGetPayloadErrStage: %w", err)
 	}
@@ -736,9 +743,16 @@ func (api *ConsensusAPI) opSealPayload(payloadID engine.PayloadID, update engine
 	} else if version == "V3" {
 		payloadStatus, err = api.NewPayloadV3(*payloadEnvelope.ExecutionPayload, []common.Hash{}, payloadEnvelope.ParentBeaconBlockRoot)
 	} else {
-		return engine.OpSealPayloadResponse{ErrStage: engine.NewPayloadStage}, engine.UnsupportedFork.With(errors.New(engine.NewPayloadStage + "invalid engine api version"))
+		forkErr := engine.UnsupportedFork.With(errors.New(engine.NewPayloadStage + "invalid engine api version"))
+		forkErr.SetStage(engine.NewPayloadStage)
+		return engine.OpSealPayloadResponse{ErrStage: engine.NewPayloadStage}, forkErr
 	}
 	if err != nil {
+		if engineApiErr, ok := err.(*engine.EngineAPIError); ok {
+			engineApiErr.SetStage(engine.NewPayloadStage)
+			log.Error("Seal payload engineApiError when new payload", "error", engineApiErr.Error(), "code", engineApiErr.ErrorCode(), "payloadStatus", payloadStatus)
+			return engine.OpSealPayloadResponse{ErrStage: engine.NewPayloadStage, PayloadStatus: payloadStatus}, engineApiErr
+		}
 		log.Error("Seal payload error when new payload", "error", err, "payloadStatus", payloadStatus)
 		return engine.OpSealPayloadResponse{ErrStage: engine.NewPayloadStage, PayloadStatus: payloadStatus}, fmt.Errorf("sealApiNewPayloadErrStage: %w", err)
 	}
@@ -750,6 +764,11 @@ func (api *ConsensusAPI) opSealPayload(payloadID engine.PayloadID, update engine
 	update.HeadBlockHash = payloadEnvelope.ExecutionPayload.BlockHash
 	updateResponse, err := api.ForkchoiceUpdatedV3(update, nil)
 	if err != nil {
+		if engineApiErr, ok := err.(*engine.EngineAPIError); ok {
+			engineApiErr.SetStage(engine.ForkchoiceUpdatedStage)
+			log.Error("Seal payload engineApiError when forkchoiceUpdated", "error", engineApiErr.Error(), "code", engineApiErr.ErrorCode(), "payloadStatus", updateResponse.PayloadStatus)
+			return engine.OpSealPayloadResponse{ErrStage: engine.ForkchoiceUpdatedStage, PayloadStatus: updateResponse.PayloadStatus}, engineApiErr
+		}
 		log.Error("Seal payload error when forkchoiceUpdated", "error", err, "payloadStatus", updateResponse.PayloadStatus)
 		return engine.OpSealPayloadResponse{ErrStage: engine.ForkchoiceUpdatedStage, PayloadStatus: updateResponse.PayloadStatus}, fmt.Errorf("sealApiForkchoiceUpdatedErrStage: %w", err)
 	}

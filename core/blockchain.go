@@ -217,6 +217,7 @@ var defaultCacheConfig = &CacheConfig{
 func DefaultCacheConfigWithScheme(scheme string) *CacheConfig {
 	config := *defaultCacheConfig
 	config.StateScheme = scheme
+	config.UseBase = true
 	return &config
 }
 

@@ -31,9 +31,9 @@ import (
 type PayloadVersion byte
 
 const (
-	GetPayloadStage  = "getPayload"
-	NewPayloadStage  = "newPayload"
-	ForkchoiceUpdatedStage = "forkchoiceUpdated"
+	GetPayloadStage        = "sealApiGetPayloadErrStage"
+	NewPayloadStage        = "sealApiNewPayloadErrStage"
+	ForkchoiceUpdatedStage = "sealApiForkchoiceUpdatedErrStage"
 )
 
 var (

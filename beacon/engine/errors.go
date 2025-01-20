@@ -49,6 +49,11 @@ func (e *EngineAPIError) With(err error) *EngineAPIError {
 	}
 }
 
+// SetStage sets error stage in seal payload
+func (e *EngineAPIError) SetStage(stage string) {
+	e.msg = stage + e.msg
+}
+
 var (
 	_ rpc.Error     = new(EngineAPIError)
 	_ rpc.DataError = new(EngineAPIError)

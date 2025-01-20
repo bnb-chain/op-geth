@@ -72,6 +72,8 @@ func (a *asyncPricedList) run() {
 			toRemove += remove
 
 		case baseFee = <-a.setBaseFee:
+			// always reheap after setting base fee
+			reheap = true
 
 		case <-currentDone:
 			currentDone = nil
@@ -124,11 +126,17 @@ func (a *asyncPricedList) Staled() int {
 }
 
 func (a *asyncPricedList) Put(tx *types.Transaction, local bool) {
-	a.add <- &addEvent{tx, local}
+	select {
+	case a.add <- &addEvent{tx, local}:
+	case <-a.quit:
+	}
 }
 
 func (a *asyncPricedList) Removed(count int) {
-	a.remove <- count
+	select {
+	case a.remove <- count:
+	case <-a.quit:
+	}
 }
 
 func (a *asyncPricedList) Underpriced(tx *types.Transaction) bool {
@@ -161,12 +169,17 @@ func (a *asyncPricedList) NeedReheap(currHead *types.Header) bool {
 }
 
 func (a *asyncPricedList) Reheap() {
-	a.reheap <- struct{}{}
+	select {
+	case a.reheap <- struct{}{}:
+	case <-a.quit:
+	}
 }
 
 func (a *asyncPricedList) SetBaseFee(baseFee *big.Int) {
-	a.setBaseFee <- baseFee
-	a.reheap <- struct{}{}
+	select {
+	case a.setBaseFee <- baseFee:
+	case <-a.quit:
+	}
 }
 
 func (a *asyncPricedList) SetHead(currHead *types.Header) {

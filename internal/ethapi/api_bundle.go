@@ -116,6 +116,7 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBund
 		MinTimestamp:      minTimestamp,
 		MaxTimestamp:      maxTimestamp,
 		RevertingTxHashes: args.RevertingTxHashes,
+		DroppingTxHashes:  args.DroppingTxHashes,
 	}
 
 	// If the maxBlockNumber and maxTimestamp are not set, set max ddl of bundle as types.MaxBundleAliveBlock

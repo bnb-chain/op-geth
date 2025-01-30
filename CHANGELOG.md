@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.5.5
+
+This is a hot fix release, the detail about this fix will be revealed later.
+Please upgrade your node to this version if your node is exposed to the public network via p2p.
+
 ## v0.5.4
 
 This is a minor release for opBNB Mainnet and Testnet.

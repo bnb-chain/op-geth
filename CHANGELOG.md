@@ -1,5 +1,297 @@
 # Changelog
 
+## v0.5.5
+
+This is a hot fix release, the detail about this fix will be revealed later.
+Please upgrade your node to this version if your node is exposed to the public network via p2p.
+
+## v0.5.4
+
+This is a minor release for opBNB Mainnet and Testnet.
+
+It enables the TxDAG generation feature.
+When it's enabled in the sequencer, it will generate TxDAG of the block and append it to the last transaction calldata.
+The TxDAG can be used for acceleration of the block execution along with the parallel evm feature released in [v0.5.1-pevm.alpha](https://github.com/bnb-chain/op-geth/releases/tag/v0.5.1-pevm.alpha).
+
+It's optional to upgrade to this version since the new feature only works in the sequencer node.
+
+### What's Changed
+* feat: TxDAG generation v0.1 version by @welkin22 in https://github.com/bnb-chain/op-geth/pull/187
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.4
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.3...v0.5.4
+
+## v0.5.3
+
+This is a minor release for opBNB Mainnet and Testnet.
+
+It fixes a txpool memory leak bug that could cause out-of-memory issues.
+
+It is recommended to upgrade to this version for both Mainnet and Testnet.
+
+### What's Changed
+* fix: txpool reheap out-of-memory issues by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/211
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.3
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.2...v0.5.3
+
+## v0.5.2
+
+This is a minor release for opBNB Mainnet and Testnet.
+
+It includes several optimizations and improvements, including the introduction of a new feature to automatically recover from unexpected shutdowns, support for multi-database features, and fixes to various bugs.
+
+Upgrading is optional.
+
+### What's Changed
+* feat: add recover node buffer list for pathdb by @sysvm in https://github.com/bnb-chain/op-geth/pull/126
+* fix(op-geth): add new field in SimulateGaslessBundleResp by @redhdx in https://github.com/bnb-chain/op-geth/pull/205
+* feat: support multi database feature for op by @jingjunLi in https://github.com/bnb-chain/op-geth/pull/127
+* fix: Fix pbss snapshot inconsistency with engine-sync enabled when starting by @krish-nr in https://github.com/bnb-chain/op-geth/pull/189
+* fix: fix StateScheme overwrite bug by @jingjunLi in https://github.com/bnb-chain/op-geth/pull/220
+* fix(op-geth): fix gasless receipt l1fee by @redhdx in https://github.com/bnb-chain/op-geth/pull/219
+* feat: sequencer auto recover when meet an unexpected shutdown by @krish-nr in https://github.com/bnb-chain/op-geth/pull/166
+
+### New Contributors
+* @jingjunLi made their first contribution in https://github.com/bnb-chain/op-geth/pull/127
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.2
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.1...v0.5.2
+
+## v0.5.1
+
+This release includes various optimizations and improvements to transaction processing, CI support, and network infrastructure.
+
+This is a minor release for opBNB Mainnet and Testnet.
+Upgrading is optional.
+
+### What's Changed
+
+* fix(ci): support building arm64 architecture (#165)
+* optimization: enqueue transactions in parallel from p2p (#173)
+* optimization: enlarge p2p buffer size and add some metrics for performance monitor (#171)
+* optimization: txpool pricedlist only reheap when pool is full (#175)
+* optimization: txpool pending cache improvement (#177)
+* chore: add bootnode in us region(testnet) (#194)
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.1
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.0...v0.5.1
+
+## v0.5.0
+This release includes code merging from the upstream version v1.101315.2 along with several fixs and improvements. Fjord fork from upstream is included.
+Fjord fork is scheduled to launch on the opBNB: 
+Testnet: Sep-10-2024 06:00 AM +UTC
+Mainnet: Sep-24-2024 06:00 AM +UTC
+
+### User Facing Changes
+Nodes on the Testnet and Mainnet need to be upgraded to this version before the hard fork time.
+
+### What's Changed
+* Merge upstream op-geth v1.101315.2 by @redhdx in https://github.com/bnb-chain/op-geth/pull/123
+* feature(op-geth): update opBNB qanet config by @redhdx in https://github.com/bnb-chain/op-geth/pull/138
+* fix: txpool legacy pool Pending() applies filter @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/124
+* feature(op-geth): Add extra error info when meet an unexpected el sync @krish-nr in https://github.com/bnb-chain/op-geth/pull/132
+* feat: cache lastTail in txindexer to avoid read from db by @bnoieh in https://github.com/bnb-chain/op-geth/pull/157
+
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.0
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.6...v0.5.0
+
+## v0.4.6
+
+This is a minor release for opBNB Mainnet and Testnet.
+Upgrading is optional.
+
+### What's Changed
+* perf: add DialOptions function for Dial by @constwz in https://github.com/bnb-chain/op-geth/pull/140
+* Fix: clear difflayer cache when truncate not triggered by @krish-nr in https://github.com/bnb-chain/op-geth/pull/141
+* fix addBundle issue by @redhdx in https://github.com/bnb-chain/op-geth/pull/143
+
+### New Contributors
+* @constwz made their first contribution in https://github.com/bnb-chain/op-geth/pull/140
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.4.6
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.5...v0.4.6
+
+## v0.4.5
+
+This is a hard fork release for the opBNB Mainnet called **Wright**. It will be activated on August 27, 2024, at 6 AM UTC.
+All **mainnet** op-geth nodes must upgrade to this release before the hard fork.
+
+The testnet hardfork will be activated on August 15, 2024, at 6 AM UTC.
+If you have upgraded your testnet op-geth to version 0.4.4, you can skip this version for the testnet. Otherwise, you can directly upgrade your testnet op-geth to version 0.4.5.
+
+### User Facing Changes
+
+To support gasless transactions on opBNB, the following features have been introduced:
+
+* The base fee is set to 0.
+* The bundle feature is supported.
+* When the gas price is set to 0, the L1 fee will also be set to 0.
+
+Combined with these features and a sponsor (paymaster), users can send transactions without holding BNB to pay gas fees.
+
+### Changelogs
+* perf: speedup pbss trienode read by @will-2012 in https://github.com/bnb-chain/op-geth/pull/122
+* pathdb: handle persistent id when using nodebufferlist by @sysvm in https://github.com/bnb-chain/op-geth/pull/121
+* feat: support auto recover when pbss meet unclean shutdown by @krish-nr in https://github.com/bnb-chain/op-geth/pull/125
+* fix: ignore truncation target range as flush not operated on time by @krish-nr in https://github.com/bnb-chain/op-geth/pull/131
+* feature(op-geth): add opbnb gasless solution by @redhdx in https://github.com/bnb-chain/op-geth/pull/130
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.4.5
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.3...v0.4.5
+
+## v0.4.4
+
+This is a hard fork release for the opBNB Testnet called **Wright**. It will be activated on August 15, 2024, at 6 AM UTC.
+All **testnet** nodes must upgrade to this release before the hard fork.
+
+Upgrading for mainnet nodes is optional.
+
+### User Facing Changes
+
+To support gasless transactions on opBNB, the following features have been introduced:
+
+* The base fee is set to 0.
+* The bundle feature is supported.
+* When the gas price is set to 0, the L1 fee will also be set to 0.
+
+Combined with these features and a sponsor (paymaster), users can send transactions without holding BNB to pay gas fees.
+
+### Changelogs
+* perf: speedup pbss trienode read by @will-2012 in https://github.com/bnb-chain/op-geth/pull/122
+* pathdb: handle persistent id when using nodebufferlist by @sysvm in https://github.com/bnb-chain/op-geth/pull/121
+* feat: support auto recover when pbss meet unclean shutdown by @krish-nr in https://github.com/bnb-chain/op-geth/pull/125
+* fix: ignore truncation target range as flush not operated on time by @krish-nr in https://github.com/bnb-chain/op-geth/pull/131
+* feature(op-geth): add opbnb gasless solution by @redhdx in https://github.com/bnb-chain/op-geth/pull/130
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.4.4
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.3...v0.4.4
+
+## 0.4.3
+
+This is a minor release for opBNB Mainnet and Testnet.
+Upgrading is optional.
+
+### User Facing Changes
+
+* Conducted several performance improvements for txpool and block execution.(#89, #84, #85, #92)
+* Added `--journalFile` flag to enable/disable the journal file feature. #95
+
+### What's Changed
+* feat(txpool): improve performance of Reheap by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/89
+* feat(txpool): improve demotion unexecutable transactions by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/84
+* opt: do verify and commit concurrently by @joeylichang in https://github.com/bnb-chain/op-geth/pull/92
+* improve Pending() of txpool to reduce the latency when miner worker committing transactions by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/85
+* core/trie: persist TrieJournal to journal file instead of kv database by @sysvm in https://github.com/bnb-chain/op-geth/pull/95
+* add some metrics for txpool by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/120
+
+## Docker Images
+
+ghcr.io/bnb-chain/op-geth:v0.4.3
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.2...v0.4.3
+
+## 0.4.2
+
+This is the mainnet hardfork release version.
+
+Four hard forks are scheduled to launch on the opBNB Mainnet:
+Shanghai/Canyon Time: 2024-06-20 08:00:00 AM UTC
+Delta Time: 2024-06-20 08:10:00 AM UTC
+Cancun/Ecotone Time: 2024-06-20 08:20:00 AM UTC
+Haber Time: 2024-06-20 08:30:00 AM UTC
+
+All mainnet `op-geth` have to be upgraded to this version before  2024-06-20 08:00:00 AM UTC.
+The `op-node` also have to be upgraded to v0.4.2 accordingly, check [this](https://github.com/bnb-chain/opbnb/releases/tag/v0.4.2) for more details.
+
+### What's Changed
+* fix: adjust flush condition to avoid not flush by @will-2012 in https://github.com/bnb-chain/op-geth/pull/114
+* config: Mainnet Shanghai/Canyon/Cancun/Ecotone/Haber fork time by @welkin22 in https://github.com/bnb-chain/op-geth/pull/116
+
+### Docker Images
+
+ghcr.io/bnb-chain/op-geth:v0.4.2
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.1...v0.4.2
+
+## 0.4.1
+
+This is the Haber Hardfork release for opBNB Testnet.
+
+The Haber hardfork will be activated on May 30, 2024, at 6:00 AM UTC.
+
+All testnet nodes must upgrade to this release before the hardfork.
+Upgrading for other networks is optional.
+
+### User Facing Changes
+* Introduced precompile for secp256r1 curve as [EIP 7212](https://eips.ethereum.org/EIPS/eip-7212). Please refer to this [PR](https://github.com/bnb-chain/op-geth/pull/112) for more details.
+
+### What's Changed
+* cmd/dbcmd: add inspect trie tool by @sysvm in https://github.com/bnb-chain/op-geth/pull/103
+* fix: cherry-picked from upstream code by @welkin22 in https://github.com/bnb-chain/op-geth/pull/109
+* fix: add miss cache code after 4844 merge by @welkin22 in https://github.com/bnb-chain/op-geth/pull/110
+* feat: add proof keeper by @will-2012 in https://github.com/bnb-chain/op-geth/pull/90
+* feature(op-geth): add precompile for secp256r1 curve after haber hardfork by @redhdx in https://github.com/bnb-chain/op-geth/pull/112
+
+### Docker Images
+* ghcr.io/bnb-chain/op-geth:v0.4.1
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.4.0...v0.4.1
+
+## 0.4.0
+This release includes code merging from the upstream version v1.101308.2 to transition Testnet's DA data from calldata to blob format.
+Four hard forks are scheduled to launch on the opBNB Testnet:
+Snow Time: May-15-2024 06:00 AM +UTC
+Shanghai/Canyon Time: May-15-2024 06:10 AM +UTC
+Delta Time: May-15-2024 06:20 AM +UTC
+Cancun/Ecotone Time: May-15-2024 06:30 AM +UTC
+
+The Shanghai/Canyon fork and Cancun/Ecotone fork involve changes to op-geth.
+
+### User Facing Changes
+Nodes on the **Testnet** need to be upgraded to this version before the first hard fork time.
+**Note: This is a version prepared for Testnet, Mainnet nodes do not need to upgrade to this version.**
+
+### Breaking Changes
+Fast Node Mode (released in version [v0.3.1](https://github.com/bnb-chain/op-geth/releases/tag/v0.3.1)) has become unusable due to conflicts with upstream code.
+We are working to resolve this issue and expect it to be fixed in the next version.
+
+### What's Changed
+* feature(op-geth): update opBNB qanet config by @redhdx in https://github.com/bnb-chain/op-geth/pull/99
+* canyon fork: revert disable create2deployer in canyon fork by @bnoieh in https://github.com/bnb-chain/op-geth/pull/100
+* feature(op-geth): add opBNB qanet hard fork config by @redhdx in https://github.com/bnb-chain/op-geth/pull/101
+* add precompiled contracts for light client by @KeefeL in https://github.com/bnb-chain/op-geth/pull/102
+* feature: add opBNB V5 bootnodes by @redhdx in https://github.com/bnb-chain/op-geth/pull/104
+* add bls example by @KeefeL in https://github.com/bnb-chain/op-geth/pull/105
+* Merge upstream op-geth v1.101308.2 by @welkin22 in https://github.com/bnb-chain/op-geth/pull/87
+* fix: the TrieCommitInterval not taking effect on restart by @welkin22 in https://github.com/bnb-chain/op-geth/pull/106
+* config: Testnet 4844 fork time by @welkin22 in https://github.com/bnb-chain/op-geth/pull/107
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.4.0
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.3.1...v0.4.0
+
 ## v0.3.1
 
 This is a minor release for opBNB Mainnet and Testnet.

@@ -22,9 +22,12 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -1631,7 +1634,6 @@ func testEIP155Transition(t *testing.T, scheme string) {
 			block.AddTx(tx)
 		}
 	})
-
 	blockchain, _ := NewBlockChain(rawdb.NewMemoryDatabase(), DefaultCacheConfigWithScheme(scheme), gspec, nil, ethash.NewFaker(), vm.Config{}, nil, nil)
 	defer blockchain.Stop()
 
@@ -4325,5 +4327,351 @@ func TestEIP3651(t *testing.T) {
 	expected = new(big.Int).SetUint64(block.GasUsed() * (block.Transactions()[0].GasTipCap().Uint64() + block.BaseFee().Uint64()))
 	if actual.Cmp(expected) != 0 {
 		t.Fatalf("sender balance incorrect: expected %d, got %d", expected, actual)
+	}
+}
+
+func TestTxDAGFile_ReadWrite(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "test.csv")
+	defer func() {
+		os.Remove(path)
+	}()
+	except := map[uint64]types.TxDAG{
+		0: types.NewEmptyTxDAG(),
+		1: makeEmptyPlainTxDAG(1),
+		2: makeEmptyPlainTxDAG(2, types.NonDependentRelFlag),
+		3: types.NewEmptyTxDAG(),
+		4: makeEmptyPlainTxDAG(4, types.NonDependentRelFlag, types.ExcludedTxFlag),
+		5: makeEmptyPlainTxDAG(5, types.NonDependentRelFlag, types.ExcludedTxFlag),
+	}
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	require.NoError(t, err)
+	for i := uint64(0); i < 6; i++ {
+		if i == 3 {
+			writeFile.WriteString("num,tag\n")
+		}
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: i, txDAG: except[i]}))
+	}
+	writeFile.Sync()
+	writeFile.Close()
+
+	reader, err := NewTxDAGFileReader(path)
+	require.NoError(t, err)
+	err = reader.InitAndStartReadingLock(0)
+	require.NoError(t, err)
+	for reader.latest < 5 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	for i := 0; i < 6; i++ {
+		num := uint64(i)
+		if except[num] != nil {
+			require.Equal(t, except[num], reader.TxDAG(num), "num:%d", num)
+		}
+	}
+}
+
+func TestTxDAGFile_LargeRead(t *testing.T) {
+	path := filepath.Join(os.TempDir(), "test.csv")
+	defer func() {
+		os.Remove(path)
+	}()
+	TxDAGCacheSize = 10
+	totalSize := uint64(100)
+	except := map[uint64]types.TxDAG{}
+	for i := uint64(0); i < totalSize-1; i++ {
+		except[i] = makeEmptyPlainTxDAG(1)
+	}
+	except[totalSize-1] = makeEmptyPlainTxDAG(510 * 1024)
+	writeFile, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	require.NoError(t, err)
+	for num := uint64(0); num < totalSize; num++ {
+		require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: num, txDAG: except[num]}))
+	}
+	writeFile.Sync()
+	writeFile.Close()
+
+	reader, err := NewTxDAGFileReader(path)
+	require.NoError(t, err)
+	err = reader.InitAndStartReadingLock(0)
+	require.NoError(t, err)
+
+	for i := uint64(0); i < totalSize; i++ {
+		for reader.latest < i || reader.latest == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
+
+	// test reset to genesis
+	err = reader.Reset(0)
+	require.NoError(t, err)
+
+	for i := uint64(0); i < totalSize; i++ {
+		for reader.latest < i || reader.latest == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
+
+	// test reset skip
+	err = reader.Reset(totalSize - TxDAGCacheSize)
+	require.NoError(t, err)
+	for i := totalSize - TxDAGCacheSize; i < totalSize; i++ {
+		for reader.latest < i || reader.latest == 0 {
+			time.Sleep(10 * time.Millisecond)
+		}
+		require.Equal(t, except[i], reader.TxDAG(i), i)
+	}
+}
+
+func makeEmptyPlainTxDAG(cnt int, flags ...uint8) *types.PlainTxDAG {
+	dag := types.NewPlainTxDAG(cnt)
+	for i := range dag.TxDeps {
+		dag.TxDeps[i] = types.NewTxDep(make([]uint64, 0), flags...)
+	}
+	return dag
+}
+
+func TestPEVMFallBackToSerialProcess(t *testing.T) {
+	testPEVMFallBackToSerialProcess(t, rawdb.HashScheme)
+	testPEVMFallBackToSerialProcess(t, rawdb.PathScheme)
+}
+
+/*
+testPEVMFallBackToSerialProcess deploys 4 contracts that all modify same kv state,
+and provided incorrect TxDAG that intentionally make PEVM create error at runtime with unorderedMerge.
+The test should pass with all TXs run successfully as PEVM would fall back to serial process.
+*/
+func testPEVMFallBackToSerialProcess(t *testing.T, scheme string) {
+	var (
+		engine = ethash.NewFaker()
+
+		// A sender who makes transactions, has some funds
+		key, _    = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address   = crypto.PubkeyToAddress(key.PublicKey)
+		funds     = big.NewInt(1000000000000000)
+		aa        = common.HexToAddress("0x00000000000000000000000000000000000000aa")
+		bb        = common.HexToAddress("0x00000000000000000000000000000000000000bb")
+		cc        = common.HexToAddress("0x00000000000000000000000000000000000000cc")
+		dd        = common.HexToAddress("0x00000000000000000000000000000000000000dd")
+		callc     = common.HexToAddress("0x0000000000000000000000000000000000000abc")
+		aaStorage = make(map[common.Hash]common.Hash) // Initial storage in AA
+	)
+
+	// Populate two slots
+	aaStorage[common.HexToHash("01")] = common.HexToHash("00")
+	aaStorage[common.HexToHash("02")] = common.HexToHash("00")
+
+	aaCode := []byte{
+		byte(vm.PUSH1), 0x0, // value
+		byte(vm.PUSH1), 0x1, // location
+		byte(vm.SSTORE),     // Set slot[1] = 1
+		byte(vm.PUSH1), 0x0, // value
+		byte(vm.PUSH1), 0x2, // location
+		byte(vm.SSTORE),
+	}
+
+	bbCode := []byte{
+		byte(vm.PUSH1), 0x3, // value
+		byte(vm.PUSH1), 0x1, // location
+		byte(vm.SSTORE),     // Set slot[1] = 3
+		byte(vm.PUSH1), 0x4, // value
+		byte(vm.PUSH1), 0x2, // location
+		byte(vm.SSTORE),
+	}
+
+	ccCode := []byte{
+		byte(vm.PUSH1), 0x5, // value
+		byte(vm.PUSH1), 0x1, // location
+		byte(vm.SSTORE),     // Set slot[1] = 5
+		byte(vm.PUSH1), 0x6, // value
+		byte(vm.PUSH1), 0x2, // location
+		byte(vm.SSTORE),
+	}
+
+	ddCode := []byte{
+		byte(vm.PUSH1), 0x7, // value
+		byte(vm.PUSH1), 0x1, // location
+		byte(vm.SSTORE),     // Set slot[1] = 7
+		byte(vm.PUSH1), 0x8, // value
+		byte(vm.PUSH1), 0x2, // location
+		byte(vm.SSTORE),
+	}
+
+	callcode := []byte{
+		/*   ByteCode    ,     stack */
+		// Get call value
+		byte(vm.CALLVALUE), /* value */
+		byte(vm.DUP1),      /* value, value */
+		byte(vm.DUP1),      /* value, value, value */
+		byte(vm.DUP1),      /* value, value, value, value */
+		// value == 1 jump to call aa
+		byte(vm.PUSH1), 0x1, /* value, value, value, value, 0x1 */
+		byte(vm.EQ),          /* value, value, value, 1 or 0 */
+		byte(vm.PUSH1), 0x1d, /* value, value, value, 1/0, 0xa */
+		byte(vm.JUMPI), /*value, value, value, */
+		// value = 2 jump to call bb
+		byte(vm.PUSH1), 0x2, /* value, value, value,  0x2 */
+		byte(vm.EQ),          /* value, value, 1 or 0 */
+		byte(vm.PUSH1), 0x2e, /* value, value, 1/0, 0xa */
+		byte(vm.JUMPI), /* */
+		// value = 3 jump to call cc
+		byte(vm.PUSH1), 0x3, /* value, value,  0x3 */
+		byte(vm.EQ),          /* value, 1 or 0 */
+		byte(vm.PUSH1), 0x3f, /* value, 1/0, 0xa */
+		byte(vm.JUMPI), /* */
+		// value = 4 jump to call dd
+		byte(vm.PUSH1), 0x4, /* value, 0x2 */
+		byte(vm.EQ),          /* 1 or 0 */
+		byte(vm.PUSH1), 0x50, /* 1/0, 0xff */
+		byte(vm.JUMPI), /* */
+		// if not match, stop
+		byte(vm.STOP),
+
+		// call 0xaa
+		// outsize, outoffset, insize, inoffset
+		// offset 0x1d (29)
+		byte(vm.JUMPDEST),
+		byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0,
+		byte(vm.PUSH1), 0, // value
+		byte(vm.PUSH1), 0xaa, //address
+		byte(vm.GAS), // gas
+		byte(vm.CALLCODE),
+		byte(vm.POP),
+		byte(vm.STOP),
+
+		// call 0xbb
+		// outsize, outoffset, insize, inoffset
+		// offset 0x2e (46)
+		byte(vm.JUMPDEST),
+		byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0,
+		byte(vm.PUSH1), 0, // value
+		byte(vm.PUSH1), 0xbb, //address
+		byte(vm.GAS), // gas
+		byte(vm.CALLCODE),
+		byte(vm.POP),
+		byte(vm.STOP),
+
+		// call 0xcc
+		// offset 0x3f(63)
+		// outsize, outoffset, insize, inoffset
+		byte(vm.JUMPDEST),
+		byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0,
+		byte(vm.PUSH1), 0, // value
+		byte(vm.PUSH1), 0xcc, //address
+		byte(vm.GAS), // gas
+		byte(vm.CALLCODE),
+		byte(vm.POP),
+		byte(vm.STOP),
+
+		// call 0xdd
+		// offset (0x50)80
+		// outsize, outoffset, insize, inoffset
+		byte(vm.JUMPDEST),
+		byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0,
+		byte(vm.PUSH1), 0, // value
+		byte(vm.PUSH1), 0xdd, //address
+		byte(vm.GAS), // gas
+		byte(vm.CALLCODE),
+		byte(vm.POP),
+		byte(vm.STOP),
+	}
+
+	gspec := &Genesis{
+		Config: params.TestChainConfig,
+		Alloc: types.GenesisAlloc{
+			address: {Balance: funds},
+			aa: {
+				Code:    aaCode,
+				Nonce:   1,
+				Balance: big.NewInt(0),
+			},
+			bb: {
+				Code:    bbCode,
+				Balance: big.NewInt(1),
+			},
+			cc: {
+				Code:    ccCode,
+				Balance: big.NewInt(1),
+			},
+			dd: {
+				Code:    ddCode,
+				Balance: big.NewInt(1),
+			},
+
+			callc: {
+				Code:    callcode,
+				Nonce:   1,
+				Balance: big.NewInt(1000),
+				Storage: aaStorage,
+			},
+		},
+	}
+
+	dag := types.NewPlainTxDAG(4)
+	// make incorrect DAG, which will cause nonce too high error at runtime
+	dag.TxDeps[0].TxIndexes = []uint64{}
+	dag.TxDeps[1].TxIndexes = []uint64{0}
+	dag.TxDeps[2].TxIndexes = []uint64{}
+	dag.TxDeps[3].TxIndexes = []uint64{}
+
+	txDAGFile := filepath.Join(os.TempDir(), fmt.Sprintf("test_txdag_%v.csv", "testPEVMFallBackWithDeleteCreateAccount"))
+	writeFile, err := os.OpenFile(txDAGFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+	require.NoError(t, err)
+	require.NoError(t, writeTxDAGToFile(writeFile, TxDAGOutputItem{blockNumber: 1, txDAG: dag}))
+	writeFile.Sync()
+	writeFile.Close()
+
+	defer os.Remove(txDAGFile)
+
+	_, blocks, _ := GenerateChainWithGenesis(gspec, engine, 1, func(i int, b *BlockGen) {
+		b.SetCoinbase(common.Address{1})
+		// One transaction to AA
+		tx, _ := types.SignTx(types.NewTransaction(0, callc,
+			big.NewInt(1), 50000, b.header.BaseFee, nil), types.HomesteadSigner{}, key)
+		b.AddTx(tx)
+		// One transaction to BB
+		tx, _ = types.SignTx(types.NewTransaction(1, callc,
+			big.NewInt(2), 100000, b.header.BaseFee, nil), types.HomesteadSigner{}, key)
+		b.AddTx(tx)
+
+		tx, _ = types.SignTx(types.NewTransaction(2, callc,
+			big.NewInt(3), 100000, b.header.BaseFee, nil), types.HomesteadSigner{}, key)
+		b.AddTx(tx)
+
+		tx, _ = types.SignTx(types.NewTransaction(3, callc,
+			big.NewInt(4), 100000, b.header.BaseFee, nil), types.HomesteadSigner{}, key)
+		b.AddTx(tx)
+	})
+	// Import the canonical chain with PEVM and trust DAG with UnorderedMerge
+	chain, err := NewBlockChain(rawdb.NewMemoryDatabase(), DefaultCacheConfigWithScheme(scheme), gspec, nil, engine, vm.Config{
+		EnableParallelExec:           true,
+		ParallelTxNum:                4,
+		EnableParallelUnorderedMerge: true,
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create tester chain: %v", err)
+	}
+	defer chain.Stop()
+
+	chain.SetupTxDAGGeneration(txDAGFile, true)
+
+	if n, err := chain.InsertChain(blocks); err != nil {
+		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
+	}
+	statedb, _ := chain.State()
+
+	// If all is correct, then slot 1 and 2 are zero
+	if got, exp := statedb.GetState(callc, common.HexToHash("03")), (common.Hash{}); got != exp {
+		t.Errorf("got %x exp %x", got, exp)
+	}
+	if got, exp := statedb.GetState(callc, common.HexToHash("04")), (common.Hash{}); got != exp {
+		t.Errorf("got %x exp %x", got, exp)
+	}
+	// Also, 3 and 4 should be set
+	if got, exp := statedb.GetState(callc, common.HexToHash("01")), common.HexToHash("07"); got != exp {
+		t.Fatalf("got %x exp %x", got, exp)
+	}
+	if got, exp := statedb.GetState(callc, common.HexToHash("02")), common.HexToHash("08"); got != exp {
+		t.Fatalf("got %x exp %x", got, exp)
 	}
 }

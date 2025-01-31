@@ -1279,6 +1279,7 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	w.mu.RUnlock()
 
 	start := time.Now()
+
 	// Retrieve the pending transactions pre-filtered by the 1559/4844 dynamic fees
 	filter := txpool.PendingFilter{
 		MinTip: tip,

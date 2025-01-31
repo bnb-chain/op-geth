@@ -18,11 +18,15 @@
 package core
 
 import (
+	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -92,10 +96,37 @@ var (
 	triedbCommitExternalTimer = metrics.NewRegisteredTimer("chain/triedb/commit/external", nil)
 	innerExecutionTimer       = metrics.NewRegisteredTimer("chain/inner/execution", nil)
 
-	txDAGGenerateTimer = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+	txDAGGenerateTimer   = metrics.NewRegisteredTimer("chain/block/txdag/gen", nil)
+	txDAGReaderChanGauge = metrics.NewRegisteredGauge("chain/block/txdag/reader/chan", nil)
+
+	// expensive metrics
+	// metrics of reasons why a block is processed in a parallel EVM or serial EVM
+	parallelConditionTooDeep   = metrics.NewRegisteredMeter("chain/parallel/condition/toodeep", nil)
+	parallelConditionTxDAGMiss = metrics.NewRegisteredMeter("chain/parallel/condition/txdagmiss", nil)
+	parallelConditionByzantium = metrics.NewRegisteredMeter("chain/parallel/condition/byzantium", nil)
+
+	// metrics to identify whether a block is processed in parallel EVM or serial EVM
+	parallelInSequencial = metrics.NewRegisteredMeter("chain/parallel/sequencial", nil)
+	parallelTxDepth      = metrics.NewRegisteredGauge("chain/parallel/txdepth", nil)
+	// TxDepthRatio = TxDepth / TxNum * 100
+	parallelTxDepthRatio = metrics.NewRegisteredGauge("chain/parallel/txdepth/ratio", nil)
+
+	parallelTxNumMeter             = metrics.NewRegisteredMeter("chain/parallel/txs", nil)
+	parallelEnableMeter            = metrics.NewRegisteredMeter("chain/parallel/enable", nil)
+	parallelFallbackMeter          = metrics.NewRegisteredMeter("chain/parallel/fallback", nil)
+	parallelConflictTxNumMeter     = metrics.NewRegisteredMeter("chain/parallel/conflicttxs", nil)
+	parallelExecutionTimer         = metrics.NewRegisteredTimer("chain/parallel/exec", nil)
+	parallelConfirmTimer           = metrics.NewRegisteredTimer("chain/parallel/confirm", nil)
+	parallelConfirmConcurrentTimer = metrics.NewRegisteredTimer("chain/parallel/confirm/concurrent", nil)
+	parallelConfirmAfterTimer      = metrics.NewRegisteredTimer("chain/parallel/confirm/after", nil)
+	parallelTxLevelsSizeMeter      = metrics.NewRegisteredGauge("chain/parallel/txlevel/size", nil)
+	parallelTxLevelTxSizeMeter     = metrics.NewRegisteredGauge("chain/parallel/txlevel/txsize", nil)
 
 	blockGasUsedGauge = metrics.NewRegisteredGauge("chain/block/gas/used", nil)
 	mgaspsGauge       = metrics.NewRegisteredGauge("chain/mgas/ps", nil)
+
+	pevmBuildLevelsTimer = metrics.NewRegisteredTimer("chain/pevm/buildlevels", nil)
+	pevmRunTimer         = metrics.NewRegisteredTimer("chain/pevm/run", nil)
 
 	blockReorgMeter     = metrics.NewRegisteredMeter("chain/reorg/executes", nil)
 	blockReorgAddMeter  = metrics.NewRegisteredMeter("chain/reorg/add", nil)
@@ -283,7 +314,7 @@ type BlockChain struct {
 
 	miningReceiptsCache *lru.Cache[common.Hash, []*types.Receipt]
 	miningTxLogsCache   *lru.Cache[common.Hash, []*types.Log]
-	miningStateCache    *lru.Cache[common.Hash, *state.StateDB]
+	miningStateCache    *lru.Cache[common.Hash, state.StateDBer]
 
 	// future blocks are blocks added for later processing
 	futureBlocks *lru.Cache[common.Hash, *types.Block]
@@ -302,7 +333,10 @@ type BlockChain struct {
 	vmConfig   vm.Config
 
 	// parallel EVM related
-	enableTxDAG bool
+	enableTxDAG     bool
+	txDAGWriteCh    chan TxDAGOutputItem
+	txDAGReader     *TxDAGFileReader
+	serialProcessor Processor
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -357,7 +391,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		txLookupCache:       lru.NewCache[common.Hash, txLookup](txLookupCacheLimit),
 		miningReceiptsCache: lru.NewCache[common.Hash, []*types.Receipt](receiptsCacheLimit),
 		miningTxLogsCache:   lru.NewCache[common.Hash, []*types.Log](txLogsCacheLimit),
-		miningStateCache:    lru.NewCache[common.Hash, *state.StateDB](miningStateCacheLimit),
+		miningStateCache:    lru.NewCache[common.Hash, state.StateDBer](miningStateCacheLimit),
 		futureBlocks:        lru.NewCache[common.Hash, *types.Block](maxFutureBlocks),
 		engine:              engine,
 		vmConfig:            vmConfig,
@@ -367,7 +401,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
-	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	err := proofKeeper.Start(bc, db)
 	if err != nil {
@@ -546,6 +579,14 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		bc.snaps, _ = snapshot.New(snapconfig, bc.db, bc.triedb, head.Root)
 	}
 
+	if bc.vmConfig.EnableParallelExec {
+		bc.processor = newPEVMProcessor(chainConfig, bc, engine)
+		bc.serialProcessor = NewStateProcessor(chainConfig, bc, engine)
+		log.Info("Parallel V2 enabled", "parallelNum", ParallelNum(), "TxDepthRation", bc.vmConfig.TxDAGMaxDepthRatio)
+	} else {
+		bc.processor = NewStateProcessor(chainConfig, bc, engine)
+		bc.serialProcessor = bc.processor
+	}
 	// Start future block processor.
 	bc.wg.Add(1)
 	go bc.updateFutureBlocks()
@@ -895,6 +936,13 @@ func (bc *BlockChain) setHeadBeyondRoot(head uint64, time uint64, root common.Ha
 	bc.miningStateCache.Purge()
 	bc.futureBlocks.Purge()
 
+	if bc.txDAGReader != nil {
+		err := bc.txDAGReader.Reset(head)
+		if err != nil {
+			log.Error("reset txDAG reader fail", "err", err)
+		}
+	}
+
 	// Clear safe block, finalized block if needed
 	if safe := bc.CurrentSafeBlock(); safe != nil && head < safe.Number.Uint64() {
 		log.Warn("SetHead invalidated safe block")
@@ -1094,6 +1142,9 @@ func (bc *BlockChain) stopWithoutSaving() {
 // Stop stops the blockchain service. If any imports are currently in progress
 // it will abort them using the procInterrupt.
 func (bc *BlockChain) Stop() {
+	if bc.txDAGReader != nil {
+		bc.txDAGReader.Close()
+	}
 	bc.stopWithoutSaving()
 
 	// Ensure that the entirety of the state snapshot is journaled to disk.
@@ -1497,7 +1548,7 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 
 // writeBlockWithState writes block, metadata and corresponding state data to the
 // database.
-func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.StateDB) error {
+func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state state.StateDBer) error {
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
@@ -1623,7 +1674,7 @@ func (bc *BlockChain) WriteBlockAndSetHead(block *types.Block, receipts []*types
 
 // writeBlockAndSetHead is the internal implementation of WriteBlockAndSetHead.
 // This function expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB, emitHeadEvent bool) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state state.StateDBer, emitHeadEvent bool) (status WriteStatus, err error) {
 	if err := bc.writeBlockWithState(block, receipts, state); err != nil {
 		return NonStatTy, err
 	}
@@ -1722,6 +1773,73 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	return bc.insertChain(chain, true)
 }
 
+// userSerialProcessor decides whether or not to use serial processor for the block
+// these are the reasons to use serial processor:
+//  0. the parallel flag is not enabled
+//  1. the block is empty
+//  2. the block is not byzantium
+//  3. the block is too deep in the dependency graph
+//  4. the TxDAG is nil and parallel merge is enabled
+func (bc *BlockChain) useSerialProcessor(block *types.Block) (useSerialProcessor bool) {
+	var (
+		enableParallel        bool
+		txCount               int
+		depth                 int
+		depthRatio            float64
+		tooDeep               bool
+		isByzantium           bool
+		txDAGMissButNecessary bool
+	)
+	// mark the metrics
+	defer func() {
+		parallelTxDepth.Update(int64(depth))
+		parallelTxDepthRatio.Update(int64(depthRatio * 100))
+		// put reasons in expensive metrics
+		if metrics.EnabledExpensive {
+			if tooDeep {
+				parallelConditionTooDeep.Mark(1)
+			}
+			if bc.vmConfig.TxDAG == nil {
+				parallelConditionTxDAGMiss.Mark(1)
+			}
+			if isByzantium {
+				parallelConditionByzantium.Mark(1)
+			}
+		}
+		log.Info("run in parallel or sequencial", "block", block.Number(), "useSerialProcessor", useSerialProcessor, "depthRatio", depthRatio, "depth", depth, "txCount", txCount, "txDAG", bc.vmConfig.TxDAG != nil, "byz", isByzantium, "tooDeep", tooDeep,
+			"enableParallel", enableParallel, "enableParallelExec", bc.vmConfig.EnableParallelExec)
+	}()
+
+	txCount = len(block.Transactions())
+	_, depth = BuildTxLevels(txCount, bc.vmConfig.TxDAG)
+	if txCount > 0 {
+		depthRatio = float64(depth) / float64(txCount)
+	} else {
+		depthRatio = 0
+	}
+	// switch to serial processor if the block is empty
+	if txCount <= 1 {
+		return true
+	}
+	// switch to serial processor if parallel flag not enabled
+	if enableParallel = bc.vmConfig.EnableParallelExec; !enableParallel {
+		return true
+	}
+	// switch to serial processor if the block is not byzantium
+	if isByzantium = bc.chainConfig.IsByzantium(block.Number()); !isByzantium {
+		return true
+	}
+	// switch to serial processor if the block is too deep in the dependency graph
+	if tooDeep = (depthRatio > bc.vmConfig.TxDAGMaxDepthRatio); tooDeep {
+		return true
+	}
+	// switch to serial processor if the TxDAG is nil and parallel merge is enabled
+	if txDAGMissButNecessary = (bc.vmConfig.TxDAG == nil && (bc.vmConfig.EnableParallelUnorderedMerge || bc.vmConfig.EnableTxParallelMerge)); txDAGMissButNecessary {
+		return true
+	}
+	return false
+}
+
 // insertChain is the internal implementation of InsertChain, which assumes that
 // 1) chains are contiguous, and 2) The chain mutex is held.
 //
@@ -1806,7 +1924,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 			lastCanon = block
-
 			block, err = it.next()
 		}
 		// Falls through to the block import
@@ -1849,7 +1966,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		return it.index, err
 	}
 	// No validation errors for the first block (or chain prefix skipped)
-	var activeState *state.StateDB
+	var activeState state.StateDBer
 	defer func() {
 		// The chain importer is starting and stopping trie prefetchers. If a bad
 		// block or other error is hit however, an early return may not properly
@@ -1863,6 +1980,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	defer func() {
 		DebugInnerExecutionDuration = 0
 	}()
+
+	if bc.serialProcessor == nil {
+		bc.serialProcessor = bc.processor
+	}
+
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
 		DebugInnerExecutionDuration = 0
 		// If the chain is terminating, stop processing blocks
@@ -1928,6 +2050,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			err               error
 		)
 
+		blockProcessedInParallel := false
+		var (
+			useSerialProcessor bool
+		)
 		// skip block process if we already have the state, receipts and logs from mining work
 		if !(receiptExist && logExist && stateExist) {
 			// Retrieve the parent block and it's state to execute on top
@@ -1935,17 +2061,28 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if parent == nil {
 				parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
 			}
-			statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
+
+			if bc.vmConfig.EnableParallelExec {
+				bc.parseTxDAG(block)
+			}
+
+			useSerialProcessor = bc.useSerialProcessor(block)
+			if !useSerialProcessor && bc.vmConfig.TxDAG != nil && bc.vmConfig.EnableTxParallelMerge {
+				//ParallelStateDB is used for parallel merge, and it works only when the block's TxDAG is not nil
+				statedb, err = state.NewParallel(parent.Root, bc.stateCache, bc.snaps)
+			} else {
+				statedb, err = state.New(parent.Root, bc.stateCache, bc.snaps)
+			}
 			if err != nil {
 				return it.index, err
 			}
-
 			// Enable prefetching to pull in trie node paths while processing transactions
 			statedb.StartPrefetcher("chain")
 			activeState = statedb
 
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
+			// parallel mode has a pipeline, similar to this prefetch, to save CPU we disable this prefetch for parallel
 			if !bc.cacheConfig.TrieCleanNoPrefetch {
 				if followup, err := it.peek(); followup != nil && err == nil {
 					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
@@ -1965,7 +2102,32 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Process block using the parent state as reference point
 			pstart = time.Now()
-			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
+			if useSerialProcessor {
+				parallelInSequencial.Mark(1)
+				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
+				blockProcessedInParallel = false
+			} else {
+				parallelEnableMeter.Mark(1)
+				receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
+				blockProcessedInParallel = true
+				if err != nil {
+					// parallel processing fail , fallback to serial with new statDB.
+					log.Warn("ParallelEVM fallback to serial process", "error", err.Error())
+					parallelFallbackMeter.Mark(1)
+					execErr := err
+					statedb, err = bc.reGenerateStateForFallBack(parent.Root, block.Root(), statedb)
+					if err != nil {
+						// Can not get new statedb for serial run, report the process error.
+						bc.reportBlock(block, receipts, execErr)
+						followupInterrupt.Store(true)
+						return it.index, err
+					}
+					statedb.StartPrefetcher("chain")
+					activeState = statedb
+					receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
+					blockProcessedInParallel = false
+				}
+			}
 			if err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
@@ -1976,29 +2138,75 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		vstart := time.Now()
 		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
-			bc.reportBlock(block, receipts, err)
-			followupInterrupt.Store(true)
-			return it.index, err
+			if blockProcessedInParallel {
+				// invalid parallel execution, try serial
+				log.Warn("ParallelEVM fallback to serial process after ValidateState", "error", err.Error())
+				parallelFallbackMeter.Mark(1)
+				parent := it.previous()
+				if parent == nil {
+					parent = bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
+				}
+
+				validateErr := err
+				statedb, err = bc.reGenerateStateForFallBack(parent.Root, block.Root(), statedb)
+				if err != nil {
+					// can not get new statedb for serial run, report the validate error.
+					bc.reportBlock(block, receipts, validateErr)
+					followupInterrupt.Store(true)
+					return it.index, err
+				}
+				statedb.StartPrefetcher("chain")
+				activeState = statedb
+				receipts, logs, usedGas, err = bc.serialProcessor.Process(block, statedb, bc.vmConfig)
+				if err != nil {
+					// serial process with process error.
+					bc.reportBlock(block, receipts, err)
+					followupInterrupt.Store(true)
+					return it.index, err
+				}
+				blockProcessedInParallel = false
+				if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
+					// serial process with validation error.
+					bc.reportBlock(block, receipts, err)
+					followupInterrupt.Store(true)
+					return it.index, err
+				}
+			} else {
+				bc.reportBlock(block, receipts, err)
+				followupInterrupt.Store(true)
+				return it.index, err
+			}
 		}
+
 		vtime := time.Since(vstart)
 		proctime := time.Since(start) // processing + validation
 
 		// Update the metrics touched during block processing and validation
-		accountReadTimer.Update(statedb.AccountReads)                 // Account reads are complete(in processing)
-		storageReadTimer.Update(statedb.StorageReads)                 // Storage reads are complete(in processing)
-		snapshotAccountReadTimer.Update(statedb.SnapshotAccountReads) // Account reads are complete(in processing)
-		snapshotStorageReadTimer.Update(statedb.SnapshotStorageReads) // Storage reads are complete(in processing)
-		accountUpdateTimer.Update(statedb.AccountUpdates)             // Account updates are complete(in validation)
-		storageUpdateTimer.Update(statedb.StorageUpdates)             // Storage updates are complete(in validation)
-		accountHashTimer.Update(statedb.AccountHashes)                // Account hashes are complete(in validation)
-		storageHashTimer.Update(statedb.StorageHashes)                // Storage hashes are complete(in validation)
-		txDAGGenerateTimer.Update(statedb.TxDAGGenerate)
+		timers := statedb.Timers()
+		accountReadTimer.Update(timers.AccountReads)                 // Account reads are complete(in processing)
+		storageReadTimer.Update(timers.StorageReads)                 // Storage reads are complete(in processing)
+		snapshotAccountReadTimer.Update(timers.SnapshotAccountReads) // Account reads are complete(in processing)
+		snapshotStorageReadTimer.Update(timers.SnapshotStorageReads) // Storage reads are complete(in processing)
+		accountUpdateTimer.Update(timers.AccountUpdates)             // Account updates are complete(in validation)
+		storageUpdateTimer.Update(timers.StorageUpdates)             // Storage updates are complete(in validation)
+		accountHashTimer.Update(timers.AccountHashes)                // Account hashes are complete(in validation)
+		storageHashTimer.Update(timers.StorageHashes)                // Storage hashes are complete(in validation)
+		txDAGGenerateTimer.Update(timers.TxDAGGenerate)
 		blockExecutionTimer.Update(ptime)  // The time spent on block execution
 		blockValidationTimer.Update(vtime) // The time spent on block validation
 
 		innerExecutionTimer.Update(DebugInnerExecutionDuration)
 
-		log.Debug("New payload execution and validation metrics", "hash", block.Hash(), "execution", common.PrettyDuration(ptime), "validation", common.PrettyDuration(vtime), "accountReads", common.PrettyDuration(statedb.AccountReads), "storageReads", common.PrettyDuration(statedb.StorageReads), "snapshotAccountReads", common.PrettyDuration(statedb.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(statedb.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(statedb.AccountUpdates), "storageUpdates", common.PrettyDuration(statedb.StorageUpdates), "accountHashes", common.PrettyDuration(statedb.AccountHashes), "storageHashes", common.PrettyDuration(statedb.StorageHashes))
+		log.Debug("New payload execution and validation metrics", "hash", block.Hash(), "execution",
+			common.PrettyDuration(ptime), "validation", common.PrettyDuration(vtime), "accountReads",
+			common.PrettyDuration(timers.AccountReads), "storageReads", common.PrettyDuration(timers.StorageReads),
+			"snapshotAccountReads", common.PrettyDuration(timers.SnapshotAccountReads),
+			"snapshotStorageReads", common.PrettyDuration(timers.SnapshotStorageReads),
+			"accountUpdates", common.PrettyDuration(timers.AccountUpdates),
+			"storageUpdates", common.PrettyDuration(timers.StorageUpdates),
+			"accountHashes", common.PrettyDuration(timers.AccountHashes),
+			"storageHashes", common.PrettyDuration(timers.StorageHashes),
+		)
 
 		// Write the block to the chain and get the status.
 		var (
@@ -2015,18 +2223,25 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if err != nil {
 			return it.index, err
 		}
+		timers = statedb.Timers()
 		// Update the metrics touched during block commit
-		accountCommitTimer.Update(statedb.AccountCommits)   // Account commits are complete, we can mark them
-		storageCommitTimer.Update(statedb.StorageCommits)   // Storage commits are complete, we can mark them
-		snapshotCommitTimer.Update(statedb.SnapshotCommits) // Snapshot commits are complete, we can mark them
-		triedbCommitTimer.Update(statedb.TrieDBCommits)     // Trie database commits are complete, we can mark them
-		trieCommitTimer.Update(statedb.TrieCommits)
-		codeCommitTimer.Update(statedb.CodeCommits)
+		accountCommitTimer.Update(timers.AccountCommits)   // Account commits are complete, we can mark them
+		storageCommitTimer.Update(timers.StorageCommits)   // Storage commits are complete, we can mark them
+		snapshotCommitTimer.Update(timers.SnapshotCommits) // Snapshot commits are complete, we can mark them
+		triedbCommitTimer.Update(timers.TrieDBCommits)     // Trie database commits are complete, we can mark them
+		trieCommitTimer.Update(timers.TrieCommits)
+		codeCommitTimer.Update(timers.CodeCommits)
 
 		blockWriteTimer.UpdateSince(wstart)
 		blockInsertTimer.UpdateSince(start)
 
-		log.Debug("New payload db write metrics", "hash", block.Hash(), "insert", common.PrettyDuration(time.Since(start)), "writeDB", common.PrettyDuration(time.Since(wstart)), "writeBlock", common.PrettyDuration(time.Since(wstart)), "accountCommit", common.PrettyDuration(statedb.AccountCommits), "storageCommit", common.PrettyDuration(statedb.StorageCommits), "snapshotCommits", common.PrettyDuration(statedb.SnapshotCommits), "triedbCommit", common.PrettyDuration(statedb.TrieDBCommits))
+		log.Debug("New payload db write metrics", "hash", block.Hash(),
+			"insert", common.PrettyDuration(time.Since(start)), "writeDB", common.PrettyDuration(time.Since(wstart)),
+			"writeBlock", common.PrettyDuration(time.Since(wstart)),
+			"accountCommit", common.PrettyDuration(timers.AccountCommits),
+			"storageCommit", common.PrettyDuration(timers.StorageCommits),
+			"snapshotCommits", common.PrettyDuration(timers.SnapshotCommits),
+			"triedbCommit", common.PrettyDuration(timers.TrieDBCommits))
 
 		// Report the import stats before returning the various results
 		stats.processed++
@@ -2092,6 +2307,40 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	stats.ignored += it.remaining()
 
 	return it.index, err
+}
+
+func (bc *BlockChain) parseTxDAG(block *types.Block) {
+	if !bc.enableTxDAG {
+		return
+	}
+	var (
+		txDAG types.TxDAG
+		err   error
+	)
+	if bc.txDAGReader != nil {
+		// load cache txDAG from file first
+		txDAG = bc.txDAGReader.TxDAG(block.NumberU64())
+	}
+	if txDAG == nil {
+		// load TxDAG from block
+		txDAG, err = types.GetTxDAG(block)
+		if err != nil {
+			log.Warn("pevm decode txdag failed", "block", block.NumberU64(), "err", err)
+		}
+	}
+	if err := types.ValidateTxDAG(txDAG, len(block.Transactions())); err != nil {
+		log.Warn("pevm cannot apply wrong txdag",
+			"block", block.NumberU64(), "txs", len(block.Transactions()), "err", err)
+		txDAG = nil
+	}
+	bc.vmConfig.TxDAG = txDAG
+}
+
+func (bc *BlockChain) isEmptyTxDAG() bool {
+	if bc.vmConfig.TxDAG != nil && bc.vmConfig.TxDAG.Type() == types.EmptyTxDAGType {
+		return true
+	}
+	return false
 }
 
 // insertSideChain is called when an import batch hits upon a pruned ancestor
@@ -2766,10 +3015,85 @@ func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 }
 
 func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
-	return bc.enableTxDAG
+	return bc.enableTxDAG && bc.txDAGWriteCh == nil && bc.txDAGReader == nil && !bc.vmConfig.EnableParallelExec
 }
 
-func (bc *BlockChain) SetupTxDAGGeneration() {
-	log.Info("node enable TxDAG feature")
+func (bc *BlockChain) SetupTxDAGGeneration(output string, readFile bool) {
+	log.Info("node enable TxDAG feature", "output", output)
 	bc.enableTxDAG = true
+	if len(output) == 0 {
+		return
+	}
+	// read TxDAG file, and cache in mem
+	if readFile {
+		var err error
+		bc.txDAGReader, err = NewTxDAGFileReader(output)
+		if err != nil {
+			log.Error("read TxDAG err", "err", err)
+		}
+		// startup with latest block
+		curHeader := bc.CurrentBlock()
+		if curHeader != nil && bc.txDAGReader != nil {
+			err := bc.txDAGReader.InitAndStartReadingLock(curHeader.Number.Uint64())
+			if err != nil {
+				log.Error("load TxDAG from file err", "err", err, "output", output, "block", curHeader.Number, "latest", bc.txDAGReader.Latest())
+			} else {
+				log.Info("load TxDAG from file", "output", output, "block", curHeader.Number, "latest", bc.txDAGReader.Latest())
+			}
+		}
+		return
+	} else {
+		// write handler
+		go func() {
+			writeHandle, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0666)
+			if err != nil {
+				log.Error("OpenFile when open the txDAG output file", "file", output, "err", err)
+				return
+			}
+			bc.txDAGWriteCh = make(chan TxDAGOutputItem, 10000)
+			defer writeHandle.Close()
+			for {
+				select {
+				case <-bc.quit:
+					return
+				case item := <-bc.txDAGWriteCh:
+					if err := writeTxDAGToFile(writeHandle, item); err != nil {
+						log.Error("encode TxDAG err in OutputHandler", "err", err)
+						continue
+					}
+				}
+			}
+		}()
+	}
+
+}
+
+func (bc *BlockChain) reGenerateStateForFallBack(parentRoot common.Hash, blockRoot common.Hash, oldDB state.StateDBer) (state.StateDBer, error) {
+	oldDB.StopPrefetcher()
+	statedb, err := state.New(parentRoot, bc.stateCache, bc.snaps)
+	if err != nil {
+		return nil, err
+	}
+
+	statedb.SetExpectedStateRoot(blockRoot)
+	return statedb, nil
+}
+
+type TxDAGOutputItem struct {
+	blockNumber uint64
+	txDAG       types.TxDAG
+}
+
+func writeTxDAGToFile(writeHandle *os.File, item TxDAGOutputItem) error {
+	var buf bytes.Buffer
+	buf.WriteString(strconv.FormatUint(item.blockNumber, 10))
+	buf.WriteByte(',')
+	enc, err := types.EncodeTxDAG(item.txDAG)
+	if err != nil {
+		return err
+	}
+	buf.WriteString(hex.EncodeToString(enc))
+	buf.WriteByte('\n')
+	_, err = writeHandle.Write(buf.Bytes())
+	return err
 }

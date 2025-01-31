@@ -92,7 +92,7 @@ func blockTestCmd(ctx *cli.Context) error {
 					fmt.Println(string(state.Dump(nil)))
 				}
 			}
-		}); err != nil {
+		}, "", true, false, false); err != nil {
 			return fmt.Errorf("test %v: %w", name, err)
 		}
 	}

@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/state"
 	"math"
 	"math/big"
 	"time"
@@ -41,6 +42,7 @@ type ExecutionResult struct {
 	RefundedGas uint64 // Total gas refunded after execution
 	Err         error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	ReturnData  []byte // Returned data from evm(function result or data supplied with revert opcode)
+	delayFees   *state.DelayedGasFee
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -197,6 +199,12 @@ func ApplyMessage(evm *vm.EVM, msg *Message, gp *GasPool) (*ExecutionResult, err
 	return NewStateTransition(evm, msg, gp).TransitionDb()
 }
 
+func ApplyMessageDelayGasFee(evm *vm.EVM, msg *Message, gp *GasPool) (*ExecutionResult, error) {
+	transition := NewStateTransition(evm, msg, gp)
+	transition.delayGasFee = true
+	return transition.TransitionDb()
+}
+
 // StateTransition represents a state transition.
 //
 // == The State Transitioning Model
@@ -226,6 +234,7 @@ type StateTransition struct {
 	initialGas   uint64
 	state        vm.StateDB
 	evm          *vm.EVM
+	delayGasFee  bool
 }
 
 // NewStateTransition initialises and returns a new state transition object.
@@ -556,6 +565,11 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		}, nil
 	}
 
+	var (
+		tipFee  *uint256.Int
+		baseFee *uint256.Int
+		l1Fee   *uint256.Int
+	)
 	// check fee receiver rwSet here
 	st.state.CheckFeeReceiversRWSet()
 
@@ -565,6 +579,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	}
 	effectiveTipU256, _ := uint256.FromBig(effectiveTip)
 
+	// delay gas fee calculation, provide from TxDAG
 	if st.evm.Config.NoBaseFee && msg.GasFeeCap.Sign() == 0 && msg.GasTipCap.Sign() == 0 {
 		// Skip fee payment when NoBaseFee is set and the fee fields
 		// are 0. This avoids a negative effectiveTip being applied to
@@ -572,7 +587,11 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	} else {
 		fee := new(uint256.Int).SetUint64(st.gasUsed())
 		fee.Mul(fee, effectiveTipU256)
-		st.state.AddBalance(st.evm.Context.Coinbase, fee)
+		if st.delayGasFee {
+			tipFee = fee
+		} else {
+			st.state.AddBalance(st.evm.Context.Coinbase, fee)
+		}
 	}
 
 	// Check that we are post bedrock to enable op-geth to be able to create pseudo pre-bedrock blocks (these are pre-bedrock, but don't follow l2 geth rules)
@@ -583,23 +602,40 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		if overflow {
 			return nil, fmt.Errorf("optimism gas cost overflows U256: %d", gasCost)
 		}
-		st.state.AddBalance(params.OptimismBaseFeeRecipient, amtU256)
+		if st.delayGasFee {
+			baseFee = amtU256
+		} else {
+			st.state.AddBalance(params.OptimismBaseFeeRecipient, amtU256)
+		}
 		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.Time) {
-			st.state.AddBalance(params.OptimismL1FeeRecipient, uint256.NewInt(0))
+			if st.delayGasFee {
+				l1Fee = uint256.NewInt(0)
+			} else {
+				st.state.AddBalance(params.OptimismL1FeeRecipient, uint256.NewInt(0))
+			}
 		} else if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
 			amtU256, overflow = uint256.FromBig(l1Cost)
 			if overflow {
 				return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)
 			}
-			st.state.AddBalance(params.OptimismL1FeeRecipient, amtU256)
+			if st.delayGasFee {
+				l1Fee = amtU256
+			} else {
+				st.state.AddBalance(params.OptimismL1FeeRecipient, amtU256)
+			}
 		}
 	}
-
 	return &ExecutionResult{
 		UsedGas:     st.gasUsed(),
 		RefundedGas: gasRefund,
 		Err:         vmerr,
 		ReturnData:  ret,
+		delayFees: &state.DelayedGasFee{
+			TipFee:   tipFee,
+			BaseFee:  baseFee,
+			L1Fee:    l1Fee,
+			Coinbase: st.evm.Context.Coinbase,
+		},
 	}, nil
 }
 

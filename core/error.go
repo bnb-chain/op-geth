@@ -113,4 +113,7 @@ var (
 
 	// ErrSystemTxNotSupported is returned for any deposit tx with IsSystemTx=true after the Regolith fork
 	ErrSystemTxNotSupported = errors.New("system tx not supported")
+
+	// ErrParallelUnexpectedConflict is returned when execution finally get conflict error that should not occur
+	ErrParallelUnexpectedConflict = errors.New("parallel execution unexpected conflict")
 )

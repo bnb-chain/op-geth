@@ -255,7 +255,7 @@ func generateTxDAGGaslessBlock(t *testing.T, enableMev, enableTxDAG bool) {
 	w, b := newTestWorker(t, &config, engine, db, 0, &cfg, &vmConfig)
 	defer w.close()
 	if enableTxDAG {
-		w.chain.SetupTxDAGGeneration()
+		w.chain.SetupTxDAGGeneration("", false)
 	}
 
 	// Ignore empty commit here for less noise.

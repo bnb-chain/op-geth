@@ -17,6 +17,8 @@
 package state
 
 import (
+	"sync"
+
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -133,4 +135,130 @@ func (al *accessList) DeleteSlot(address common.Address, slot common.Hash) {
 // operations.
 func (al *accessList) DeleteAddress(address common.Address) {
 	delete(al.addresses, address)
+}
+
+// Copy creates an independent copy of an accessList.
+func (dest *accessList) Append(src *accessList) *accessList {
+	for addr, sIdx := range src.addresses {
+		if i, present := dest.addresses[addr]; present {
+			// dest already has addr.
+			if sIdx >= 0 {
+				// has slot in list
+				if i == -1 {
+					dest.addresses[addr] = len(dest.slots)
+					slotmap := src.slots[sIdx]
+					dest.slots = append(dest.slots, slotmap)
+				} else {
+					slotmap := src.slots[sIdx]
+					for hash := range slotmap {
+						if _, ok := dest.slots[i][hash]; !ok {
+							dest.slots[i][hash] = struct{}{}
+						}
+					}
+				}
+			}
+		} else {
+			// dest doesn't have the address
+			dest.addresses[addr] = -1
+			if sIdx >= 0 {
+				dest.addresses[addr] = len(dest.slots)
+				slotmap := src.slots[sIdx]
+				dest.slots = append(dest.slots, slotmap)
+			}
+		}
+	}
+	return dest
+}
+
+type parallelAccessList struct {
+	addresses *sync.Map
+	slots     []*sync.Map
+}
+
+func (p *parallelAccessList) ContainsAddress(address common.Address) bool {
+	_, ok := p.addresses.Load(address)
+	return ok
+}
+
+func (p *parallelAccessList) Contains(address common.Address, slot common.Hash) (bool, bool) {
+	idx, ok := p.addresses.Load(address)
+	if !ok {
+		// no such address (and hence zero slots)
+		return false, false
+	}
+	if idx == -1 {
+		// address yes, but no slots
+		return true, false
+	}
+	_, slotPresent := p.slots[idx.(int)].Load(slot)
+	return true, slotPresent
+}
+
+func (p *parallelAccessList) AddAddress(address common.Address) bool {
+	if _, present := p.addresses.Load(address); present {
+		return false
+	}
+	p.addresses.Store(address, -1)
+	return true
+}
+
+func (p *parallelAccessList) AddSlot(address common.Address, slot common.Hash) (addrChange bool, slotChange bool) {
+	idx, addrPresent := p.addresses.Load(address)
+	if !addrPresent || idx == -1 {
+		// Address not present, or addr present but no slots there
+		p.addresses.Store(address, len(p.slots))
+		slotmap := sync.Map{}
+		slotmap.Store(slot, struct{}{})
+		p.slots = append(p.slots, &slotmap)
+		return !addrPresent, true
+	}
+	// There is already an (address,slot) mapping
+	slotmap := p.slots[idx.(int)]
+	if _, ok := slotmap.Load(slot); !ok {
+		slotmap.Store(slot, struct{}{})
+		// Journal add slot change
+		return false, true
+	}
+	// No changes required
+	return false, false
+}
+
+func (p *parallelAccessList) Copy() *accessList {
+	cp := newAccessList()
+	p.addresses.Range(func(key, value interface{}) bool {
+		cp.addresses[key.(common.Address)] = value.(int)
+		return true
+	})
+	cp.slots = make([]map[common.Hash]struct{}, len(p.slots))
+	for i, slotMap := range p.slots {
+		newSlotmap := make(map[common.Hash]struct{})
+		slotMap.Range(func(key, value interface{}) bool {
+			newSlotmap[key.(common.Hash)] = struct{}{}
+			return true
+		})
+		cp.slots[i] = newSlotmap
+	}
+	return cp
+}
+
+func (p *parallelAccessList) setByAccessList(list *accessList) {
+	p.addresses = &sync.Map{}
+	for key, value := range list.addresses {
+		p.addresses.Store(key, value)
+	}
+	p.slots = make([]*sync.Map, len(list.slots))
+	for idx, slot := range list.slots {
+		slotmap := sync.Map{}
+		for key := range slot {
+			slotmap.Store(key, struct{}{})
+		}
+		p.slots[idx] = &slotmap
+	}
+}
+
+// newAccessList creates a new accessList.
+func newParallelAccessList() *parallelAccessList {
+	return &parallelAccessList{
+		addresses: &sync.Map{},
+	}
 }

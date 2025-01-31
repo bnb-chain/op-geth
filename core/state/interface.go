@@ -14,19 +14,25 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package vm
+package state
 
 import (
-	"math/big"
+	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
 
-// StateDB is an EVM database for full state querying.
-type StateDB interface {
+// StateDBer is copied from vm/interface.go
+// It is used by StateObject & Journal right now, to abstract StateDB & ParallelStateDB
+type StateDBer interface {
+	getBaseStateDB() *StateDB
+	getStateObject(common.Address) *stateObject // only accessible for journal
+	storeStateObj(common.Address, *stateObject) // only accessible for journal
+
 	CreateAccount(common.Address)
 
 	SubBalance(common.Address, *uint256.Int)
@@ -49,21 +55,17 @@ type StateDB interface {
 	GetState(common.Address, common.Hash) common.Hash
 	SetState(common.Address, common.Hash, common.Hash)
 
-	GetTransientState(addr common.Address, key common.Hash) common.Hash
-	SetTransientState(addr common.Address, key, value common.Hash)
-
 	SelfDestruct(common.Address)
 	HasSelfDestructed(common.Address) bool
 
-	Selfdestruct6780(common.Address)
-
 	// Exist reports whether the given account exists in state.
-	// Notably this should also return true for self-destructed accounts.
+	// Notably this should also return true for suicided accounts.
 	Exist(common.Address) bool
 	// Empty returns whether the given account is empty. Empty
 	// is defined according to EIP161 (balance = nonce = code = 0).
 	Empty(common.Address) bool
 
+	//PrepareAccessList(sender common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList)
 	AddressInAccessList(addr common.Address) bool
 	SlotInAccessList(addr common.Address, slot common.Hash) (addressOk bool, slotOk bool)
 	// AddAddressToAccessList adds the given address to the access list. This operation is safe to perform
@@ -72,28 +74,53 @@ type StateDB interface {
 	// AddSlotToAccessList adds the given (address,slot) to the access list. This operation is safe to perform
 	// even if the feature/fork is not active yet
 	AddSlotToAccessList(addr common.Address, slot common.Hash)
-	Prepare(rules params.Rules, sender, coinbase common.Address, dest *common.Address, precompiles []common.Address, txAccesses types.AccessList)
 
 	RevertToSnapshot(int)
 	Snapshot() int
 
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
-
-	TxIndex() int
-	// parallel DAG related
+	GetPreimage(common.Hash) ([]byte, bool)
+	StopPrefetcher()
+	StartPrefetcher(namespace string)
+	SetExpectedStateRoot(root common.Hash)
+	IntermediateRoot(deleteEmptyObjects bool) common.Hash
+	Error() error
+	Timers() *Timers
+	Preimages() map[common.Hash][]byte
+	Commit(block uint64, deleteEmptyObjects bool) (common.Hash, error)
+	SetBalance(addr common.Address, amount *uint256.Int)
+	PrepareForParallel()
+	Finalise(deleteEmptyObjects bool)
+	MarkFullProcessed()
+	AccessListCopy() *accessList
+	SetTxContext(hash common.Hash, index int)
+	SetAccessList(list *accessList)
+	getDeletedStateObject(addr common.Address) *stateObject
+	appendJournal(journalEntry journalEntry)
+	addJournalDirty(address common.Address)
+	getPrefetcher() *triePrefetcher
+	getDB() Database
+	getOriginalRoot() common.Hash
+	getTrie() Trie
+	getStateObjectDestructLock() *sync.RWMutex
+	getStateObjectsDestruct(addr common.Address) (*types.StateAccount, bool)
+	getSnap() snapshot.Snapshot
+	timeAddSnapshotStorageReads(du time.Duration)
+	setError(err error)
+	getTrieParallelLock() *sync.Mutex
+	timeAddStorageReads(du time.Duration)
+	timeAddStorageUpdates(du time.Duration)
+	countAddStorageDeleted(diff int)
+	countAddStorageUpdated(diff int)
+	getStorageMux() *sync.Mutex
+	getStorages(hash common.Hash) map[common.Hash][]byte
+	setStorages(hash common.Hash, storage map[common.Hash][]byte)
+	getStoragesOrigin(address common.Address) map[common.Hash][]byte
+	setStoragesOrigin(address common.Address, origin map[common.Hash][]byte)
+	timeAddStorageHashes(du time.Duration)
+	timeAddStorageCommits(du time.Duration)
+	getOrNewStateObject(addr common.Address) *stateObject
+	prefetchAccount(address common.Address)
 	CheckFeeReceiversRWSet()
-}
-
-// CallContext provides a basic interface for the EVM calling conventions. The EVM
-// depends on this context being implemented for doing subcalls and initialising new EVM contracts.
-type CallContext interface {
-	// Call calls another contract.
-	Call(env *EVM, me ContractRef, addr common.Address, data []byte, gas, value *big.Int) ([]byte, error)
-	// CallCode takes another contracts code and execute within our own context
-	CallCode(env *EVM, me ContractRef, addr common.Address, data []byte, gas, value *big.Int) ([]byte, error)
-	// DelegateCall is same as CallCode except sender and value is propagated from parent to child scope
-	DelegateCall(env *EVM, me ContractRef, addr common.Address, data []byte, gas *big.Int) ([]byte, error)
-	// Create creates a new contract
-	Create(env *EVM, me ContractRef, data []byte, gas, value *big.Int) ([]byte, common.Address, error)
 }

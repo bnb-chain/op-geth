@@ -1099,9 +1099,47 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.MetricsCategory,
 	}
 
+	ParallelTxFlag = &cli.BoolFlag{
+		Name:     "parallel",
+		Usage:    "Enable the experimental parallel transaction execution mode, only valid in full sync mode (default = false)",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxUnorderedMergeFlag = &cli.BoolFlag{
+		Name:     "parallel.unordered-merge",
+		Usage:    "Enable unordered merge mode, during the parallel confirm phase, merge transaction execution results without following the transaction order.",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxParallelMergeFlag = &cli.BoolFlag{
+		Name:     "parallel.parallel-merge",
+		Usage:    "Enable concurrent merge mode, during the parallel confirm phase, multiple goroutines will be used to perform concurrent merging of execution results. This option will override parallel.unordered-merge",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxNumFlag = &cli.IntFlag{
+		Name:     "parallel.num",
+		Usage:    "Number of slot for transaction execution, only valid in parallel mode (runtime calculated, no fixed default value)",
+		Category: flags.VMCategory,
+	}
+
 	ParallelTxDAGFlag = &cli.BoolFlag{
 		Name:     "parallel.txdag",
 		Usage:    "Enable the experimental parallel TxDAG generation (default = false)",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxDAGFileFlag = &cli.StringFlag{
+		Name:     "parallel.txdagfile",
+		Usage:    "It indicates the TxDAG file path",
+		Value:    "./parallel-txdag-output.csv",
+		Category: flags.VMCategory,
+	}
+
+	ParallelTxDATMaxDepthRatioFlag = &cli.Float64Flag{
+		Name:     "parallel.txdag-max-depth-ratio",
+		Usage:    "A ratio to decide whether or not to execute transactions in parallel, it will fallback to sequencial processor if the depth is larger than this value (default = 0.9)",
+		Value:    0.9,
 		Category: flags.VMCategory,
 	}
 
@@ -2002,8 +2040,33 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		cfg.EnablePreimageRecording = ctx.Bool(VMEnableDebugFlag.Name)
 	}
 
+	if ctx.IsSet(ParallelTxFlag.Name) {
+		cfg.ParallelTxMode = ctx.Bool(ParallelTxFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxUnorderedMergeFlag.Name) {
+		cfg.ParallelTxUnorderedMerge = ctx.Bool(ParallelTxUnorderedMergeFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxParallelMergeFlag.Name) {
+		cfg.ParallelTxParallelMerge = ctx.Bool(ParallelTxParallelMergeFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxNumFlag.Name) {
+		cfg.ParallelTxNum = ctx.Int(ParallelTxNumFlag.Name)
+	}
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {
 		cfg.EnableParallelTxDAG = ctx.Bool(ParallelTxDAGFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDAGFileFlag.Name) {
+		cfg.ParallelTxDAGFile = ctx.String(ParallelTxDAGFileFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDATMaxDepthRatioFlag.Name) {
+		cfg.ParallelTxDAGMaxDepthRatio = ctx.Float64(ParallelTxDATMaxDepthRatioFlag.Name)
+	} else {
+		cfg.ParallelTxDAGMaxDepthRatio = ParallelTxDATMaxDepthRatioFlag.Value
 	}
 
 	if ctx.IsSet(ParallelTxDAGSenderPrivFlag.Name) {

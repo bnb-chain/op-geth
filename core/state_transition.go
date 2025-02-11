@@ -150,6 +150,14 @@ type Message struct {
 	BlobHashes            []common.Hash
 	SetCodeAuthorizations []types.SetCodeAuthorization
 
+	// When SkipNonceChecks is true, the message nonce is not checked against the
+	// account nonce in state.
+	// This field will be set to true for operations like RPC eth_call.
+	SkipNonceChecks bool
+
+	// When SkipFromEOACheck is true, the message sender is not checked to be an EOA.
+	SkipFromEOACheck bool
+
 	// When SkipAccountChecks is true, the message nonce is not checked against the
 	// account nonce in state. It also disables checking that the sender is an EOA.
 	// This field will be set to true for operations like RPC eth_call.
@@ -164,24 +172,24 @@ type Message struct {
 // TransactionToMessage converts a transaction into a Message.
 func TransactionToMessage(tx *types.Transaction, s types.Signer, baseFee *big.Int) (*Message, error) {
 	msg := &Message{
-		Nonce:          tx.Nonce(),
-		GasLimit:       tx.Gas(),
-		GasPrice:       new(big.Int).Set(tx.GasPrice()),
-		GasFeeCap:      new(big.Int).Set(tx.GasFeeCap()),
-		GasTipCap:      new(big.Int).Set(tx.GasTipCap()),
-		To:             tx.To(),
-		Value:          tx.Value(),
-		Data:           tx.Data(),
-		AccessList:     tx.AccessList(),
-		SetCodeAuthorizations:       tx.AuthList(),
-		IsSystemTx:     tx.IsSystemTx(),
-		IsDepositTx:    tx.IsDepositTx(),
-		Mint:           tx.Mint(),
-		RollupCostData: tx.RollupCostData(),
+		Nonce:                 tx.Nonce(),
+		GasLimit:              tx.Gas(),
+		GasPrice:              new(big.Int).Set(tx.GasPrice()),
+		GasFeeCap:             new(big.Int).Set(tx.GasFeeCap()),
+		GasTipCap:             new(big.Int).Set(tx.GasTipCap()),
+		To:                    tx.To(),
+		Value:                 tx.Value(),
+		Data:                  tx.Data(),
+		AccessList:            tx.AccessList(),
+		SetCodeAuthorizations: tx.SetCodeAuthorizations(),
+		IsSystemTx:            tx.IsSystemTx(),
+		IsDepositTx:           tx.IsDepositTx(),
+		Mint:                  tx.Mint(),
+		RollupCostData:        tx.RollupCostData(),
 
 		SkipAccountChecks: false,
-		SkipNonceChecks:       false,
-		SkipFromEOACheck:      false,
+		SkipNonceChecks:   false,
+		SkipFromEOACheck:  false,
 		BlobHashes:        tx.BlobHashes(),
 		BlobGasFeeCap:     tx.BlobGasFeeCap(),
 	}

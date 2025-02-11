@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -34,7 +36,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/holiman/uint256"
 )
 
 var (
@@ -441,21 +442,19 @@ func (args *TransactionArgs) ToMessage(globalGasCap uint64, baseFee *big.Int) (*
 		accessList = *args.AccessList
 	}
 	msg := &core.Message{
-		From:              addr,
-		To:                args.To,
-		Value:             value,
-		GasLimit:          gas,
-		GasPrice:          gasPrice,
-		GasFeeCap:         gasFeeCap,
-		GasTipCap:         gasTipCap,
-		Data:              data,
-		AccessList:        accessList,
-		BlobGasFeeCap:     blobFeeCap,
-		BlobHashes:        args.BlobHashes,
-		SkipAccountChecks: true,
+		From:                  addr,
+		To:                    args.To,
+		Value:                 value,
+		GasLimit:              gas,
+		GasPrice:              gasPrice,
+		GasFeeCap:             gasFeeCap,
+		GasTipCap:             gasTipCap,
+		Data:                  data,
+		AccessList:            accessList,
+		BlobGasFeeCap:         blobFeeCap,
+		BlobHashes:            args.BlobHashes,
+		SkipAccountChecks:     true,
 		SetCodeAuthorizations: args.AuthorizationList,
-		SkipNonceChecks:       skipNonceCheck,
-		SkipFromEOACheck:      skipEoACheck,
 	}
 	return msg, nil
 }

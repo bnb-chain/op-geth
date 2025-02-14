@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.5.5
+## v0.5.6
 
 This is a minor release for opBNB Mainnet and Testnet.
 
@@ -19,6 +19,16 @@ Upgrading is optional.
 * Txpool optimization: filter out staled transactions of "nonce too low" when providing all pending list to miner by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/244
 * Txpool opt async priced by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/246
 * chore: txpool optimization metrics by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/247
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.6
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.5...v0.5.6
+
+## v0.5.5
+
+This is a hot fix release, the detail about this fix will be revealed later.
+Please upgrade your node to this version if your node is exposed to the public network via p2p.
 
 ### Docker Images
 ghcr.io/bnb-chain/op-geth:v0.5.5

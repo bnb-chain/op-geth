@@ -217,6 +217,7 @@ func doInstall(cmdline []string) {
 	// check for something in env instead.
 	if env.CI && runtime.GOARCH == "arm64" {
 		gobuild.Args = append(gobuild.Args, "-p", "1")
+		//
 	}
 	// We use -trimpath to avoid leaking local paths into the built executables.
 	gobuild.Args = append(gobuild.Args, "-trimpath")
@@ -260,6 +261,7 @@ func buildFlags(env build.Environment, staticLinking bool, buildTags []string) (
 		// Enforce the stacksize to 8M, which is the case on most platforms apart from
 		// alpine Linux.
 		extld := []string{"-Wl,-z,stack-size=0x800000"}
+		// extld := []string{"-Wl,-z,stack-size=0x800000,--build-id=none,--strip-all"}
 		if staticLinking {
 			extld = append(extld, "-static")
 			// Under static linking, use of certain glibc features must be

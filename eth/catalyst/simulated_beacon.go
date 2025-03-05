@@ -17,7 +17,6 @@
 package catalyst
 
 import (
-	"crypto/rand"
 	"errors"
 	"math/big"
 	"sync"
@@ -154,13 +153,12 @@ func (c *SimulatedBeacon) sealBlock(withdrawals []*types.Withdrawal, timestamp u
 		c.setCurrentState(header.Hash(), *finalizedHash)
 	}
 
-	var random [32]byte
-	rand.Read(random[:])
+	//var random [32]byte
+	//rand.Read(random[:])
 	fcResponse, err := c.engineAPI.forkchoiceUpdated(c.curForkchoiceState, &engine.PayloadAttributes{
 		Timestamp:             timestamp,
 		SuggestedFeeRecipient: feeRecipient,
 		Withdrawals:           withdrawals,
-		Random:                random,
 	}, engine.PayloadV2, true)
 	if err != nil {
 		return err

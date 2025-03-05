@@ -26,12 +26,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
-	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
+	"github.com/holiman/uint256"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/txpool"
@@ -347,13 +348,20 @@ func (miner *Miner) SimulateGaslessBundle(bundle *types.Bundle) (*types.Simulate
 
 func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	parent := miner.eth.BlockChain().CurrentBlock()
-	timestamp := int64(parent.Time + 1)
+	// fork check
+	timestamp := parent.NextMilliTimestamp()
+
+	var mixDigest common.Hash
+	milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
+	mixDigest[0] = milliPartBytes[30]
+	mixDigest[1] = milliPartBytes[31]
 
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     new(big.Int).Add(parent.Number, common.Big1),
 		GasLimit:   core.CalcGasLimit(parent.GasLimit, miner.worker.config.GasCeil),
-		Time:       uint64(timestamp),
+		Time:       timestamp / 1000,
+		MixDigest:  mixDigest,
 		Coinbase:   defaultCoinBaseAddress,
 	}
 

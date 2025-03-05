@@ -217,6 +217,7 @@ func (b *BlockGen) TxNonce(addr common.Address) uint64 {
 func (b *BlockGen) AddUncle(h *types.Header) {
 	// The uncle will have the same timestamp and auto-generated difficulty
 	h.Time = b.header.Time
+	h.MixDigest = b.header.MixDigest
 
 	var parent *types.Header
 	for i := b.i - 1; i >= 0; i-- {

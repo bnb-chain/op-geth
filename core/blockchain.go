@@ -116,7 +116,7 @@ const (
 	receiptsCacheLimit  = 512
 	txLookupCacheLimit  = 1024
 	maxFutureBlocks     = 256
-	maxTimeFutureBlocks = 30
+	maxTimeFutureBlocks = 30 * 1000
 	TriesInMemory       = 128
 
 	txLogsCacheLimit      = 512
@@ -642,16 +642,16 @@ func (bc *BlockChain) loadLastState() error {
 		blockTd  = bc.GetTd(headBlock.Hash(), headBlock.NumberU64())
 	)
 	if headHeader.Hash() != headBlock.Hash() {
-		log.Info("Loaded most recent local header", "number", headHeader.Number, "hash", headHeader.Hash(), "td", headerTd, "age", common.PrettyAge(time.Unix(int64(headHeader.Time), 0)))
+		log.Info("Loaded most recent local header", "number", headHeader.Number, "hash", headHeader.Hash(), "td", headerTd, "age", common.PrettyAge(time.Unix(int64(headHeader.Milliseconds()), 0)))
 	}
-	log.Info("Loaded most recent local block", "number", headBlock.Number(), "hash", headBlock.Hash(), "td", blockTd, "age", common.PrettyAge(time.Unix(int64(headBlock.Time()), 0)))
+	log.Info("Loaded most recent local block", "number", headBlock.Number(), "hash", headBlock.Hash(), "td", blockTd, "age", common.PrettyAge(time.Unix(int64(headBlock.Milliseconds()), 0)))
 	if headBlock.Hash() != currentSnapBlock.Hash() {
 		snapTd := bc.GetTd(currentSnapBlock.Hash(), currentSnapBlock.Number.Uint64())
-		log.Info("Loaded most recent local snap block", "number", currentSnapBlock.Number, "hash", currentSnapBlock.Hash(), "td", snapTd, "age", common.PrettyAge(time.Unix(int64(currentSnapBlock.Time), 0)))
+		log.Info("Loaded most recent local snap block", "number", currentSnapBlock.Number, "hash", currentSnapBlock.Hash(), "td", snapTd, "age", common.PrettyAge(time.Unix(int64(currentSnapBlock.Milliseconds()), 0)))
 	}
 	if currentFinalBlock != nil {
 		finalTd := bc.GetTd(currentFinalBlock.Hash(), currentFinalBlock.Number.Uint64())
-		log.Info("Loaded most recent local finalized block", "number", currentFinalBlock.Number, "hash", currentFinalBlock.Hash(), "td", finalTd, "age", common.PrettyAge(time.Unix(int64(currentFinalBlock.Time), 0)))
+		log.Info("Loaded most recent local finalized block", "number", currentFinalBlock.Number, "hash", currentFinalBlock.Hash(), "td", finalTd, "age", common.PrettyAge(time.Unix(int64(currentFinalBlock.Milliseconds()), 0)))
 	}
 	if pivot := rawdb.ReadLastPivotNumber(bc.db); pivot != nil {
 		log.Info("Loaded last snap-sync pivot marker", "number", *pivot)
@@ -1461,7 +1461,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		head    = blockChain[len(blockChain)-1]
 		context = []interface{}{
 			"count", stats.processed, "elapsed", common.PrettyDuration(time.Since(start)),
-			"number", head.Number(), "hash", head.Hash(), "age", common.PrettyAge(time.Unix(int64(head.Time()), 0)),
+			"number", head.Number(), "hash", head.Hash(), "age", common.PrettyAge(time.Unix(int64(head.Milliseconds()), 0)),
 			"size", common.StorageSize(size),
 		}
 	)
@@ -1682,9 +1682,9 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 // TODO after the transition, the future block shouldn't be kept. Because
 // it's not checked in the Geth side anymore.
 func (bc *BlockChain) addFutureBlock(block *types.Block) error {
-	max := uint64(time.Now().Unix() + maxTimeFutureBlocks)
-	if block.Time() > max {
-		return fmt.Errorf("future block timestamp %v > allowed %v", block.Time(), max)
+	max := uint64(time.Now().UnixMilli() + maxTimeFutureBlocks)
+	if block.Milliseconds() > max {
+		return fmt.Errorf("future block timestamp %v > allowed %v", block.Milliseconds(), max)
 	}
 	if block.Difficulty().Cmp(common.Big0) == 0 {
 		// Never add PoS blocks into the future queue
@@ -1753,7 +1753,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	}
 
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
-	SenderCacher.RecoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number(), chain[0].Time()), chain)
+	SenderCacher.RecoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number(), chain[0].CurrentTime()), chain)
 
 	var (
 		stats     = insertStats{startTime: mclock.Now()}
@@ -2083,7 +2083,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		if bc.snaps != nil && !minerMode {
 			snapDiffItems, snapBufItems = bc.snaps.Size()
 		}
-		
+
 		var trieDiffNodes, trieBufNodes, trieImmutableBufNodes common.StorageSize
 		if !minerMode {
 			trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ = bc.triedb.Size()
@@ -2355,7 +2355,7 @@ func (bc *BlockChain) collectLogs(b *types.Block, removed bool) []*types.Log {
 		blobGasPrice = eip4844.CalcBlobFee(*excessBlobGas)
 	}
 	receipts := rawdb.ReadRawReceipts(bc.db, b.Hash(), b.NumberU64())
-	if err := receipts.DeriveFields(bc.chainConfig, b.Hash(), b.NumberU64(), b.Time(), b.BaseFee(), blobGasPrice, b.Transactions()); err != nil {
+	if err := receipts.DeriveFields(bc.chainConfig, b.Hash(), b.NumberU64(), b.CurrentTime(), b.BaseFee(), blobGasPrice, b.Transactions()); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", b.Hash(), "number", b.NumberU64(), "err", err)
 	}
 	var logs []*types.Log
@@ -2610,7 +2610,7 @@ func (bc *BlockChain) SetCanonical(head *types.Block) (common.Hash, error) {
 		"root", head.Root(),
 		"elapsed", time.Since(start),
 	}
-	if timestamp := time.Unix(int64(head.Time()), 0); time.Since(timestamp) > time.Minute {
+	if timestamp := time.Unix(int64(head.TimeInSeconds()), 0); time.Since(timestamp) > time.Minute {
 		context = append(context, []interface{}{"age", common.PrettyAge(timestamp)}...)
 	}
 	log.Info("Chain head was updated", context...)

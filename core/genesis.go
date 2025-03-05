@@ -111,7 +111,7 @@ func ReadGenesis(db ethdb.Database) (*Genesis, error) {
 	}
 	genesisHeader := genesisBlock.Header()
 	genesis.Nonce = genesisHeader.Nonce.Uint64()
-	genesis.Timestamp = genesisHeader.Time
+	genesis.Timestamp = genesisHeader.TimeInSeconds()
 	genesis.ExtraData = genesisHeader.Extra
 	genesis.GasLimit = genesisHeader.GasLimit
 	genesis.Difficulty = genesisHeader.Difficulty
@@ -387,8 +387,8 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, triedb *triedb.Database, g
 	if head == nil {
 		return newcfg, stored, errors.New("missing head header")
 	}
-	compatErr := storedcfg.CheckCompatible(newcfg, head.Number.Uint64(), head.Time)
-	if compatErr != nil && ((head.Number.Uint64() != 0 && compatErr.RewindToBlock != 0) || (head.Time != 0 && compatErr.RewindToTime != 0)) {
+	compatErr := storedcfg.CheckCompatible(newcfg, head.Number.Uint64(), head.CurrentTime())
+	if compatErr != nil && ((head.Number.Uint64() != 0 && compatErr.RewindToBlock != 0) || (head.CurrentTime() != 0 && compatErr.RewindToTime != 0)) {
 		return newcfg, stored, compatErr
 	}
 	// Don't overwrite if the old is identical to the new
@@ -476,7 +476,7 @@ func (g *Genesis) ToBlock() *types.Block {
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
 		Nonce:      types.EncodeNonce(g.Nonce),
-		Time:       g.Timestamp,
+		TempTime:   g.Timestamp,
 		ParentHash: g.ParentHash,
 		Extra:      g.ExtraData,
 		GasLimit:   g.GasLimit,

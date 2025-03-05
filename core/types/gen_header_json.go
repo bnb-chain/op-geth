@@ -50,7 +50,7 @@ func (h Header) MarshalJSON() ([]byte, error) {
 	enc.Number = (*hexutil.Big)(h.Number)
 	enc.GasLimit = hexutil.Uint64(h.GasLimit)
 	enc.GasUsed = hexutil.Uint64(h.GasUsed)
-	enc.Time = hexutil.Uint64(h.Time)
+	enc.Time = hexutil.Uint64(h.TempTime)
 	enc.Extra = h.Extra
 	enc.MixDigest = h.MixDigest
 	enc.Nonce = h.Nonce
@@ -137,7 +137,7 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 	if dec.Time == nil {
 		return errors.New("missing required field 'timestamp' for Header")
 	}
-	h.Time = uint64(*dec.Time)
+	h.TempTime = uint64(*dec.Time)
 	if dec.Extra == nil {
 		return errors.New("missing required field 'extraData' for Header")
 	}

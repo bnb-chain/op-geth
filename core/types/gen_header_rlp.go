@@ -33,7 +33,7 @@ func (obj *Header) EncodeRLP(_w io.Writer) error {
 	}
 	w.WriteUint64(obj.GasLimit)
 	w.WriteUint64(obj.GasUsed)
-	w.WriteUint64(obj.Time)
+	w.WriteUint64(obj.TempTime)
 	w.WriteBytes(obj.Extra)
 	w.WriteBytes(obj.MixDigest[:])
 	w.WriteBytes(obj.Nonce[:])

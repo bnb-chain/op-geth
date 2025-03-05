@@ -81,12 +81,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		misc.ApplyPreContractHardFork(statedb)
 	}
 
-	misc.EnsureCreate2Deployer(p.config, block.Time(), statedb)
+	misc.EnsureCreate2Deployer(p.config, block.CurrentTime(), statedb)
 
 	var (
 		context = NewEVMBlockContext(header, p.bc, nil, p.config, statedb)
 		vmenv   = vm.NewEVM(context, vm.TxContext{}, statedb, p.config, cfg)
-		signer  = types.MakeSigner(p.config, header.Number, header.Time)
+		signer  = types.MakeSigner(p.config, header.Number, header.CurrentTime())
 	)
 	if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
@@ -119,7 +119,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.
 	withdrawals := block.Withdrawals()
-	if len(withdrawals) > 0 && !p.config.IsShanghai(block.Number(), block.Time()) {
+	if len(withdrawals) > 0 && !p.config.IsShanghai(block.Number(), block.CurrentTime()) {
 		return nil, nil, 0, errors.New("withdrawals before shanghai")
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
@@ -151,7 +151,7 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	defer statedb.StopTxRecorder()
 
 	nonce := tx.Nonce()
-	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.Time) {
+	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.CurrentTime()) {
 		nonce = statedb.GetNonce(msg.From)
 	}
 
@@ -181,13 +181,13 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	receipt.TxHash = tx.Hash()
 	receipt.GasUsed = result.UsedGas
 
-	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.Time) {
+	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.CurrentTime()) {
 		// The actual nonce for deposit transactions is only recorded from Regolith onwards and
 		// otherwise must be nil.
 		receipt.DepositNonce = &nonce
 		// The DepositReceiptVersion for deposit transactions is only recorded from Canyon onwards
 		// and otherwise must be nil.
-		if config.IsOptimismCanyon(evm.Context.Time) {
+		if config.IsOptimismCanyon(evm.Context.CurrentTime()) {
 			receipt.DepositReceiptVersion = new(uint64)
 			*receipt.DepositReceiptVersion = types.CanyonDepositReceiptVersion
 		}
@@ -216,7 +216,7 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
-	msg, err := TransactionToMessage(tx, types.MakeSigner(config, header.Number, header.Time), header.BaseFee)
+	msg, err := TransactionToMessage(tx, types.MakeSigner(config, header.Number, header.CurrentTime()), header.BaseFee)
 	if err != nil {
 		return nil, err
 	}

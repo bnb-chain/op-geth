@@ -177,7 +177,7 @@ func (b *BlockGen) Number() *big.Int {
 
 // Timestamp returns the timestamp of the block being generated.
 func (b *BlockGen) Timestamp() uint64 {
-	return b.header.Time
+	return b.header.CurrentTime()
 }
 
 // BaseFee returns the EIP-1559 base fee of the block being generated.
@@ -192,7 +192,7 @@ func (b *BlockGen) Gas() uint64 {
 
 // Signer returns a valid signer instance for the current block.
 func (b *BlockGen) Signer() types.Signer {
-	return types.MakeSigner(b.cm.config, b.header.Number, b.header.Time)
+	return types.MakeSigner(b.cm.config, b.header.Number, b.header.CurrentTime())
 }
 
 // AddUncheckedReceipt forcefully adds a receipts to the block without a
@@ -216,7 +216,8 @@ func (b *BlockGen) TxNonce(addr common.Address) uint64 {
 // AddUncle adds an uncle header to the generated block.
 func (b *BlockGen) AddUncle(h *types.Header) {
 	// The uncle will have the same timestamp and auto-generated difficulty
-	h.Time = b.header.Time
+	h.TempTime = b.header.TempTime
+	h.MixDigest = b.header.MixDigest
 
 	var parent *types.Header
 	for i := b.i - 1; i >= 0; i-- {
@@ -225,12 +226,12 @@ func (b *BlockGen) AddUncle(h *types.Header) {
 			break
 		}
 	}
-	h.Difficulty = b.engine.CalcDifficulty(b.cm, b.header.Time, parent)
+	h.Difficulty = b.engine.CalcDifficulty(b.cm, b.header.CurrentTime(), parent)
 
 	// The gas limit and price should be derived from the parent
 	h.GasLimit = parent.GasLimit
 	if b.cm.config.IsLondon(h.Number) {
-		h.BaseFee = eip1559.CalcBaseFee(b.cm.config, parent, h.Time)
+		h.BaseFee = eip1559.CalcBaseFee(b.cm.config, parent, h.CurrentTime())
 		if !b.cm.config.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * b.cm.config.ElasticityMultiplier()
 			h.GasLimit = CalcGasLimit(parentGasLimit, parentGasLimit)
@@ -284,11 +285,11 @@ func (b *BlockGen) PrevBlock(index int) *types.Block {
 // associated difficulty. It's useful to test scenarios where forking is not
 // tied to chain length directly.
 func (b *BlockGen) OffsetTime(seconds int64) {
-	b.header.Time += uint64(seconds)
-	if b.header.Time <= b.cm.bottom.Header().Time {
+	b.header.TempTime += uint64(seconds)
+	if b.header.TempTime <= b.cm.bottom.Header().TempTime {
 		panic("block time out of range")
 	}
-	b.header.Difficulty = b.engine.CalcDifficulty(b.cm, b.header.Time, b.parent.Header())
+	b.header.Difficulty = b.engine.CalcDifficulty(b.cm, b.header.CurrentTime(), b.parent.Header())
 }
 
 // GenerateChain creates a chain of n blocks. The first block's
@@ -391,7 +392,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		if block.ExcessBlobGas() != nil {
 			blobGasPrice = eip4844.CalcBlobFee(*block.ExcessBlobGas())
 		}
-		if err := receipts.DeriveFields(config, block.Hash(), block.NumberU64(), block.Time(), block.BaseFee(), blobGasPrice, txs); err != nil {
+		if err := receipts.DeriveFields(config, block.Hash(), block.NumberU64(), block.CurrentTime(), block.BaseFee(), blobGasPrice, txs); err != nil {
 			panic(err)
 		}
 
@@ -421,7 +422,7 @@ func GenerateChainWithGenesis(genesis *Genesis, engine consensus.Engine, n int, 
 }
 
 func (cm *chainMaker) makeHeader(parent *types.Block, state *state.StateDB, engine consensus.Engine) *types.Header {
-	time := parent.Time() + 10 // block time is fixed at 10 seconds
+	time := parent.TimeInSeconds() + 10 // block time is fixed at 10 seconds
 	header := &types.Header{
 		Root:       state.IntermediateRoot(cm.config.IsEIP158(parent.Number())),
 		ParentHash: parent.Hash(),
@@ -429,17 +430,17 @@ func (cm *chainMaker) makeHeader(parent *types.Block, state *state.StateDB, engi
 		Difficulty: engine.CalcDifficulty(cm, time, parent.Header()),
 		GasLimit:   parent.GasLimit(),
 		Number:     new(big.Int).Add(parent.Number(), common.Big1),
-		Time:       time,
+		TempTime:   time,
 	}
 
 	if cm.config.IsLondon(header.Number) {
-		header.BaseFee = eip1559.CalcBaseFee(cm.config, parent.Header(), header.Time)
+		header.BaseFee = eip1559.CalcBaseFee(cm.config, parent.Header(), header.CurrentTime())
 		if !cm.config.IsLondon(parent.Number()) {
 			parentGasLimit := parent.GasLimit() * cm.config.ElasticityMultiplier()
 			header.GasLimit = CalcGasLimit(parentGasLimit, parentGasLimit)
 		}
 	}
-	if cm.config.IsCancun(header.Number, header.Time) {
+	if cm.config.IsCancun(header.Number, header.CurrentTime()) {
 		var (
 			parentExcessBlobGas uint64
 			parentBlobGasUsed   uint64

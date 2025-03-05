@@ -45,7 +45,7 @@ func (e ExecutableData) MarshalJSON() ([]byte, error) {
 	enc.Number = hexutil.Uint64(e.Number)
 	enc.GasLimit = hexutil.Uint64(e.GasLimit)
 	enc.GasUsed = hexutil.Uint64(e.GasUsed)
-	enc.Timestamp = hexutil.Uint64(e.Timestamp)
+	enc.Timestamp = hexutil.Uint64(e.TimeInSeconds())
 	enc.ExtraData = e.ExtraData
 	enc.BaseFeePerGas = (*hexutil.Big)(e.BaseFeePerGas)
 	enc.BlockHash = e.BlockHash
@@ -125,7 +125,7 @@ func (e *ExecutableData) UnmarshalJSON(input []byte) error {
 	if dec.Timestamp == nil {
 		return errors.New("missing required field 'timestamp' for ExecutableData")
 	}
-	e.Timestamp = uint64(*dec.Timestamp)
+	e.TempTimestamp = uint64(*dec.Timestamp)
 	if dec.ExtraData == nil {
 		return errors.New("missing required field 'extraData' for ExecutableData")
 	}

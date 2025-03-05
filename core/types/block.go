@@ -20,6 +20,7 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/holiman/uint256"
 	"io"
 	"math/big"
 	"reflect"
@@ -74,10 +75,11 @@ type Header struct {
 	Number      *big.Int       `json:"number"           gencodec:"required"`
 	GasLimit    uint64         `json:"gasLimit"         gencodec:"required"`
 	GasUsed     uint64         `json:"gasUsed"          gencodec:"required"`
-	Time        uint64         `json:"timestamp"        gencodec:"required"`
-	Extra       []byte         `json:"extraData"        gencodec:"required"`
-	MixDigest   common.Hash    `json:"mixHash"`
-	Nonce       BlockNonce     `json:"nonce"`
+	// temp change 'Time' to 'TempTime' for debugging
+	TempTime  uint64      `json:"timestamp"        gencodec:"required"`
+	Extra     []byte      `json:"extraData"        gencodec:"required"`
+	MixDigest common.Hash `json:"mixHash"`
+	Nonce     BlockNonce  `json:"nonce"`
 
 	// BaseFee was added by EIP-1559 and is ignored in legacy headers.
 	BaseFee *big.Int `json:"baseFeePerGas" rlp:"optional"`
@@ -101,12 +103,35 @@ type headerMarshaling struct {
 	Number        *hexutil.Big
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
-	Time          hexutil.Uint64
+	TempTime      hexutil.Uint64 // temp change 'Time' to 'TempTime' for debugging
+	MixDigest     hexutil.Bytes  // MixDigest store the milliseconds
 	Extra         hexutil.Bytes
 	BaseFee       *hexutil.Big
 	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 	BlobGasUsed   *hexutil.Uint64
 	ExcessBlobGas *hexutil.Uint64
+}
+
+func (h *Header) Milliseconds() uint64 {
+	if h.MixDigest == (common.Hash{}) {
+		return 0
+	}
+	return uint256.NewInt(0).SetBytes2(h.MixDigest[:2]).Uint64()
+}
+
+func (h *Header) TimeInMilliseconds() uint64 {
+	return h.TempTime*1000 + h.Milliseconds()
+}
+
+func (h *Header) CurrentTime() uint64 {
+	if h.MixDigest == (common.Hash{}) {
+		return h.TempTime
+	}
+	return h.TimeInMilliseconds()
+}
+
+func (h *Header) TimeInSeconds() uint64 {
+	return h.TempTime
 }
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
@@ -358,11 +383,14 @@ func (b *Block) Header() *Header {
 
 // Header value accessors. These do copy!
 
-func (b *Block) Number() *big.Int     { return new(big.Int).Set(b.header.Number) }
-func (b *Block) GasLimit() uint64     { return b.header.GasLimit }
-func (b *Block) GasUsed() uint64      { return b.header.GasUsed }
-func (b *Block) Difficulty() *big.Int { return new(big.Int).Set(b.header.Difficulty) }
-func (b *Block) Time() uint64         { return b.header.Time }
+func (b *Block) Number() *big.Int           { return new(big.Int).Set(b.header.Number) }
+func (b *Block) GasLimit() uint64           { return b.header.GasLimit }
+func (b *Block) GasUsed() uint64            { return b.header.GasUsed }
+func (b *Block) Difficulty() *big.Int       { return new(big.Int).Set(b.header.Difficulty) }
+func (b *Block) TimeInSeconds() uint64      { return b.header.TimeInSeconds() }
+func (b *Block) Milliseconds() uint64       { return b.header.Milliseconds() }
+func (b *Block) TimeInMilliseconds() uint64 { return b.header.TimeInMilliseconds() }
+func (b *Block) CurrentTime() uint64        { return b.header.CurrentTime() }
 
 func (b *Block) NumberU64() uint64        { return b.header.Number.Uint64() }
 func (b *Block) MixDigest() common.Hash   { return b.header.MixDigest }

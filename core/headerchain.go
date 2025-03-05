@@ -367,7 +367,7 @@ func (hc *HeaderChain) InsertHeaderChain(chain []*types.Header, start time.Time,
 	}
 	if last := res.lastHeader; last != nil {
 		context = append(context, "number", last.Number, "hash", res.lastHash)
-		if timestamp := time.Unix(int64(last.Time), 0); time.Since(timestamp) > time.Minute {
+		if timestamp := time.Unix(int64(last.TimeInSeconds()), 0); time.Since(timestamp) > time.Minute {
 			context = append(context, []interface{}{"age", common.PrettyAge(timestamp)}...)
 		}
 	}
@@ -562,19 +562,22 @@ func (hc *HeaderChain) SetHeadWithTimestamp(time uint64, updateFn UpdateHeadBloc
 
 // setHead rewinds the local chain to a new head block or a head timestamp.
 // Everything above the new head will be deleted and the new one set.
+// ******************* //
+// should double check , headTime //
+// ******************* //
 func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
 	// Sanity check that there's no attempt to undo the genesis block. This is
 	// a fairly synthetic case where someone enables a timestamp based fork
 	// below the genesis timestamp. It's nice to not allow that instead of the
 	// entire chain getting deleted.
-	if headTime > 0 && hc.genesisHeader.Time > headTime {
+	if headTime > 0 && hc.genesisHeader.CurrentTime() > headTime {
 		// Note, a critical error is quite brutal, but we should really not reach
 		// this point. Since pre-timestamp based forks it was impossible to have
 		// a fork before block 0, the setHead would always work. With timestamp
 		// forks it becomes possible to specify below the genesis. That said, the
 		// only time we setHead via timestamp is with chain config changes on the
 		// startup, so failing hard there is ok.
-		log.Crit("Rejecting genesis rewind via timestamp", "target", headTime, "genesis", hc.genesisHeader.Time)
+		log.Crit("Rejecting genesis rewind via timestamp", "target", headTime, "genesis", hc.genesisHeader.CurrentTime())
 	}
 	var (
 		parentHash common.Hash
@@ -583,7 +586,7 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 	)
 	done := func(header *types.Header) bool {
 		if headTime > 0 {
-			return header.Time <= headTime
+			return header.CurrentTime() <= headTime
 		}
 		return header.Number.Uint64() <= headBlock
 	}
@@ -607,7 +610,7 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 		markerBatch := hc.chainDb.BlockStore().NewBatch()
 		if updateFn != nil {
 			newHead, force := updateFn(markerBatch, parent)
-			if force && ((headTime > 0 && newHead.Time < headTime) || (headTime == 0 && newHead.Number.Uint64() < headBlock)) {
+			if force && ((headTime > 0 && newHead.CurrentTime() < headTime) || (headTime == 0 && newHead.Number.Uint64() < headBlock)) {
 				log.Warn("Force rewinding till ancient limit", "head", newHead.Number.Uint64())
 				headBlock, headTime = newHead.Number.Uint64(), 0 // Target timestamp passed, continue rewind in block mode (cleaner)
 			}

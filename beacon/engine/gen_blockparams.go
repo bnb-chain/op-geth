@@ -26,7 +26,7 @@ func (p PayloadAttributes) MarshalJSON() ([]byte, error) {
 		GasLimit              *hexutil.Uint64     `json:"gasLimit,omitempty" gencodec:"optional"`
 	}
 	var enc PayloadAttributes
-	enc.Timestamp = hexutil.Uint64(p.Timestamp)
+	enc.Timestamp = hexutil.Uint64(p.TimeInSeconds())
 	enc.Random = p.Random
 	enc.SuggestedFeeRecipient = p.SuggestedFeeRecipient
 	enc.Withdrawals = p.Withdrawals
@@ -61,7 +61,7 @@ func (p *PayloadAttributes) UnmarshalJSON(input []byte) error {
 	if dec.Timestamp == nil {
 		return errors.New("missing required field 'timestamp' for PayloadAttributes")
 	}
-	p.Timestamp = uint64(*dec.Timestamp)
+	p.TempTimestamp = uint64(*dec.Timestamp)
 	if dec.Random == nil {
 		return errors.New("missing required field 'prevRandao' for PayloadAttributes")
 	}

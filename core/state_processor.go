@@ -151,7 +151,7 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	defer statedb.StopTxRecorder()
 
 	nonce := tx.Nonce()
-	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.TempTempTime) {
+	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.Time) {
 		nonce = statedb.GetNonce(msg.From)
 	}
 
@@ -181,13 +181,13 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	receipt.TxHash = tx.Hash()
 	receipt.GasUsed = result.UsedGas
 
-	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.TempTempTime) {
+	if msg.IsDepositTx && config.IsOptimismRegolith(evm.Context.Time) {
 		// The actual nonce for deposit transactions is only recorded from Regolith onwards and
 		// otherwise must be nil.
 		receipt.DepositNonce = &nonce
 		// The DepositReceiptVersion for deposit transactions is only recorded from Canyon onwards
 		// and otherwise must be nil.
-		if config.IsOptimismCanyon(evm.Context.TempTempTime) {
+		if config.IsOptimismCanyon(evm.Context.Time) {
 			receipt.DepositReceiptVersion = new(uint64)
 			*receipt.DepositReceiptVersion = types.CanyonDepositReceiptVersion
 		}

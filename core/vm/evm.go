@@ -84,27 +84,16 @@ type BlockContext struct {
 	L1CostFunc types.L1CostFunc
 
 	// Block information
-	Coinbase     common.Address // Provides information for COINBASE
-	GasLimit     uint64         // Provides information for GASLIMIT
-	BlockNumber  *big.Int       // Provides information for NUMBER
-	TempTempTime uint64         // Provides information for TIME
-	//MixDigest    common.Hash
+	Coinbase    common.Address // Provides information for COINBASE
+	GasLimit    uint64         // Provides information for GASLIMIT
+	BlockNumber *big.Int       // Provides information for NUMBER
+	// Time is used for checking fork, so the seconds timestamp is enough.
+	Time        uint64       // Provides information for TIME
 	Difficulty  *big.Int     // Provides information for DIFFICULTY
 	BaseFee     *big.Int     // Provides information for BASEFEE (0 if vm runs with NoBaseFee flag and 0 gas price)
 	BlobBaseFee *big.Int     // Provides information for BLOBBASEFEE (0 if vm runs with NoBaseFee flag and 0 blob gas price)
 	Random      *common.Hash // Provides information for PREVRANDAO
 }
-
-//func (b *BlockContext) millisecondes() uint64 {
-//	if b.MixDigest == (common.Hash{}) {
-//		return 0
-//	}
-//	return uint256.NewInt(0).SetBytes2(b.MixDigest[:2]).Uint64()
-//}
-//
-//func (b *BlockContext) MilliTimestamp() uint64 { return b.TempTempTime*1000 + b.millisecondes() }
-//
-//func (b *BlockContext) SecondsTimestamp() uint64 { return b.TempTempTime }
 
 // TxContext provides the EVM with information about a transaction.
 // All fields can change between transactions.
@@ -172,7 +161,7 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig
 		StateDB:     statedb,
 		Config:      config,
 		chainConfig: chainConfig,
-		chainRules:  chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Random != nil, blockCtx.TempTempTime),
+		chainRules:  chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Random != nil, blockCtx.Time),
 	}
 	evm.interpreter = NewEVMInterpreter(evm)
 	if config.EnableOpcodeOptimizations {

@@ -251,10 +251,10 @@ func (st *StateTransition) buyGas() error {
 	mgval = mgval.Mul(mgval, st.msg.GasPrice)
 	var l1Cost *big.Int
 	if st.evm.Context.L1CostFunc != nil && !st.msg.SkipAccountChecks {
-		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.TempTempTime) {
+		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.Time) {
 			l1Cost = big.NewInt(0)
 		} else {
-			l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.TempTempTime)
+			l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time)
 		}
 		if l1Cost != nil {
 			mgval = mgval.Add(mgval, l1Cost)
@@ -269,7 +269,7 @@ func (st *StateTransition) buyGas() error {
 			balanceCheck.Add(balanceCheck, l1Cost)
 		}
 	}
-	if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.TempTempTime) {
+	if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.Time) {
 		if blobGas := st.blobGasUsed(); blobGas > 0 {
 			// Check that the user has enough funds to cover blobGasUsed * tx.BlobGasFeeCap
 			blobBalanceCheck := new(big.Int).SetUint64(blobGas)
@@ -307,7 +307,7 @@ func (st *StateTransition) preCheck() error {
 		st.gasRemaining += st.msg.GasLimit // Add gas here in order to be able to execute calls.
 		// Don't touch the gas pool for system transactions
 		if st.msg.IsSystemTx {
-			if st.evm.ChainConfig().IsOptimismRegolith(st.evm.Context.TempTempTime) {
+			if st.evm.ChainConfig().IsOptimismRegolith(st.evm.Context.Time) {
 				return fmt.Errorf("%w: address %v", ErrSystemTxNotSupported,
 					st.msg.From.Hex())
 			}
@@ -380,7 +380,7 @@ func (st *StateTransition) preCheck() error {
 		}
 	}
 	// Check that the user is paying at least the current blob fee
-	if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.TempTempTime) {
+	if st.evm.ChainConfig().IsCancun(st.evm.Context.BlockNumber, st.evm.Context.Time) {
 		if st.blobGasUsed() > 0 {
 			// Skip the checks if gas fields are zero and blobBaseFee was explicitly disabled (eth_call)
 			skipCheck := st.evm.Config.NoBaseFee && msg.BlobGasFeeCap.BitLen() == 0
@@ -429,7 +429,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		// Regolith changes this behaviour so the actual gas used is reported.
 		// In this case the tx is invalid so is recorded as using all gas.
 		gasUsed := st.msg.GasLimit
-		if st.msg.IsSystemTx && !st.evm.ChainConfig().IsRegolith(st.evm.Context.TempTempTime) {
+		if st.msg.IsSystemTx && !st.evm.ChainConfig().IsRegolith(st.evm.Context.Time) {
 			gasUsed = 0
 		}
 		result = &ExecutionResult{
@@ -472,7 +472,7 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	var (
 		msg              = st.msg
 		sender           = vm.AccountRef(msg.From)
-		rules            = st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.TempTempTime)
+		rules            = st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil, st.evm.Context.Time)
 		contractCreation = msg.To == nil
 	)
 
@@ -584,9 +584,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 			return nil, fmt.Errorf("optimism gas cost overflows U256: %d", gasCost)
 		}
 		st.state.AddBalance(params.OptimismBaseFeeRecipient, amtU256)
-		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.TempTempTime) {
+		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.Time) {
 			st.state.AddBalance(params.OptimismL1FeeRecipient, uint256.NewInt(0))
-		} else if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.TempTempTime); l1Cost != nil {
+		} else if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.Time); l1Cost != nil {
 			amtU256, overflow = uint256.FromBig(l1Cost)
 			if overflow {
 				return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)

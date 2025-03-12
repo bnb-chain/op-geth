@@ -1222,7 +1222,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 			genParams.random[1] = milliPartBytes[31]
 		}
 	}
-	timestamp = genParams.SecondsTimestamp()
+	timestamp = timestamp / 1000
 
 	// Construct the sealing block header.
 	header := &types.Header{

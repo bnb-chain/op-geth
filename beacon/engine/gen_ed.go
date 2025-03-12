@@ -125,7 +125,7 @@ func (e *ExecutableData) UnmarshalJSON(input []byte) error {
 	if dec.Timestamp == nil {
 		return errors.New("missing required field 'timestamp' for ExecutableData")
 	}
-	e.TempTimestamp = uint64(*dec.Timestamp)
+	e.Timestamp = uint64(*dec.Timestamp)
 	if dec.ExtraData == nil {
 		return errors.New("missing required field 'extraData' for ExecutableData")
 	}

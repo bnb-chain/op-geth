@@ -61,7 +61,7 @@ func (p *PayloadAttributes) UnmarshalJSON(input []byte) error {
 	if dec.Timestamp == nil {
 		return errors.New("missing required field 'timestamp' for PayloadAttributes")
 	}
-	p.TempTimestamp = uint64(*dec.Timestamp)
+	p.Timestamp = uint64(*dec.Timestamp)
 	if dec.Random == nil {
 		return errors.New("missing required field 'prevRandao' for PayloadAttributes")
 	}

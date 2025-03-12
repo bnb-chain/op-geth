@@ -54,8 +54,7 @@ var (
 // PayloadAttributes describes the environment context in which a block should
 // be built.
 type PayloadAttributes struct {
-	// temp change 'Timestamp' to 'TempTimestamp' for debugging
-	TempTimestamp         uint64              `json:"timestamp"             gencodec:"required"`
+	Timestamp             uint64              `json:"timestamp"             gencodec:"required"`
 	Random                common.Hash         `json:"prevRandao"            gencodec:"required"`
 	SuggestedFeeRecipient common.Address      `json:"suggestedFeeRecipient" gencodec:"required"`
 	Withdrawals           []*types.Withdrawal `json:"withdrawals"`
@@ -86,13 +85,13 @@ func (p *PayloadAttributes) millisecondes() uint64 {
 	return uint256.NewInt(0).SetBytes2(p.Random[:2]).Uint64()
 }
 
-func (p *PayloadAttributes) MilliTimestamp() uint64 { return p.TempTimestamp*1000 + p.millisecondes() }
+func (p *PayloadAttributes) MilliTimestamp() uint64 { return p.Timestamp*1000 + p.millisecondes() }
 
-func (p *PayloadAttributes) SecondsTimestamp() uint64 { return p.TempTimestamp }
+func (p *PayloadAttributes) SecondsTimestamp() uint64 { return p.Timestamp }
 
 func (p *PayloadAttributes) NextMilliTimestamp() uint64 {
 	if p.Random == (common.Hash{}) {
-		return p.TempTimestamp*1000 + OldBlockMillisecondsInterval
+		return p.Timestamp*1000 + OldBlockMillisecondsInterval
 	}
 	return p.MilliTimestamp() + NewBlockMillisecondsInterval
 }
@@ -103,17 +102,16 @@ func (p *PayloadAttributes) NextSecondsTimestamp() uint64 { return p.NextMilliTi
 
 // ExecutableData is the data necessary to execute an EL payload.
 type ExecutableData struct {
-	ParentHash   common.Hash    `json:"parentHash"    gencodec:"required"`
-	FeeRecipient common.Address `json:"feeRecipient"  gencodec:"required"`
-	StateRoot    common.Hash    `json:"stateRoot"     gencodec:"required"`
-	ReceiptsRoot common.Hash    `json:"receiptsRoot"  gencodec:"required"`
-	LogsBloom    []byte         `json:"logsBloom"     gencodec:"required"`
-	Random       common.Hash    `json:"prevRandao"    gencodec:"required"`
-	Number       uint64         `json:"blockNumber"   gencodec:"required"`
-	GasLimit     uint64         `json:"gasLimit"      gencodec:"required"`
-	GasUsed      uint64         `json:"gasUsed"       gencodec:"required"`
-	// temp change 'Timestamp' to 'TempTimestamp' for debugging
-	TempTimestamp uint64              `json:"timestamp"     gencodec:"required"`
+	ParentHash    common.Hash         `json:"parentHash"    gencodec:"required"`
+	FeeRecipient  common.Address      `json:"feeRecipient"  gencodec:"required"`
+	StateRoot     common.Hash         `json:"stateRoot"     gencodec:"required"`
+	ReceiptsRoot  common.Hash         `json:"receiptsRoot"  gencodec:"required"`
+	LogsBloom     []byte              `json:"logsBloom"     gencodec:"required"`
+	Random        common.Hash         `json:"prevRandao"    gencodec:"required"`
+	Number        uint64              `json:"blockNumber"   gencodec:"required"`
+	GasLimit      uint64              `json:"gasLimit"      gencodec:"required"`
+	GasUsed       uint64              `json:"gasUsed"       gencodec:"required"`
+	Timestamp     uint64              `json:"timestamp"     gencodec:"required"`
 	ExtraData     []byte              `json:"extraData"     gencodec:"required"`
 	BaseFeePerGas *big.Int            `json:"baseFeePerGas" gencodec:"required"`
 	BlockHash     common.Hash         `json:"blockHash"     gencodec:"required"`
@@ -130,13 +128,13 @@ func (e *ExecutableData) millisecondes() uint64 {
 	return uint256.NewInt(0).SetBytes2(e.Random[:2]).Uint64()
 }
 
-func (e *ExecutableData) MilliTimestamp() uint64 { return e.TempTimestamp*1000 + e.millisecondes() }
+func (e *ExecutableData) MilliTimestamp() uint64 { return e.Timestamp*1000 + e.millisecondes() }
 
-func (e *ExecutableData) SecondsTimestamp() uint64 { return e.TempTimestamp }
+func (e *ExecutableData) SecondsTimestamp() uint64 { return e.Timestamp }
 
 func (e *ExecutableData) NextMilliTimestamp() uint64 {
 	if e.Random == (common.Hash{}) {
-		return e.TempTimestamp*1000 + OldBlockMillisecondsInterval
+		return e.Timestamp*1000 + OldBlockMillisecondsInterval
 	}
 	return e.MilliTimestamp() + NewBlockMillisecondsInterval
 }
@@ -145,11 +143,10 @@ func (e *ExecutableData) NextSecondsTimestamp() uint64 { return e.NextMilliTimes
 
 // JSON type overrides for executableData.
 type executableDataMarshaling struct {
-	Number   hexutil.Uint64
-	GasLimit hexutil.Uint64
-	GasUsed  hexutil.Uint64
-	// temp change 'Timestamp' to 'TempTimestamp' for debugging
-	TempTimestamp hexutil.Uint64
+	Number        hexutil.Uint64
+	GasLimit      hexutil.Uint64
+	GasUsed       hexutil.Uint64
+	Timestamp     hexutil.Uint64
 	Random        hexutil.Bytes // Random store the milliseconds
 	BaseFeePerGas *hexutil.Big
 	ExtraData     hexutil.Bytes
@@ -351,7 +348,7 @@ func BlockToExecutableData(block *types.Block, fees *big.Int, sidecars []*types.
 		GasLimit:      block.GasLimit(),
 		GasUsed:       block.GasUsed(),
 		BaseFeePerGas: block.BaseFee(),
-		TempTimestamp: block.MilliTimestamp(),
+		Timestamp:     block.MilliTimestamp(),
 		ReceiptsRoot:  block.ReceiptHash(),
 		LogsBloom:     block.Bloom().Bytes(),
 		Transactions:  encodeTransactions(block.Transactions()),

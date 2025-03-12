@@ -112,26 +112,22 @@ type headerMarshaling struct {
 	ExcessBlobGas *hexutil.Uint64
 }
 
-func (h *Header) Milliseconds() uint64 {
+func (h *Header) millisecondes() uint64 {
 	if h.MixDigest == (common.Hash{}) {
 		return 0
 	}
 	return uint256.NewInt(0).SetBytes2(h.MixDigest[:2]).Uint64()
 }
 
-func (h *Header) TimeInMilliseconds() uint64 {
-	return h.TempTime*1000 + h.Milliseconds()
-}
+func (h *Header) MilliTimestamp() uint64 { return h.TempTime*1000 + h.millisecondes() }
 
-func (h *Header) CurrentTime() uint64 {
+func (h *Header) SecondsTimestamp() uint64 { return h.TempTime }
+
+func (h *Header) UsingTimestamp() uint64 {
 	if h.MixDigest == (common.Hash{}) {
-		return h.TempTime
+		return h.SecondsTimestamp()
 	}
-	return h.TimeInMilliseconds()
-}
-
-func (h *Header) TimeInSeconds() uint64 {
-	return h.TempTime
+	return h.MilliTimestamp()
 }
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
@@ -383,14 +379,13 @@ func (b *Block) Header() *Header {
 
 // Header value accessors. These do copy!
 
-func (b *Block) Number() *big.Int           { return new(big.Int).Set(b.header.Number) }
-func (b *Block) GasLimit() uint64           { return b.header.GasLimit }
-func (b *Block) GasUsed() uint64            { return b.header.GasUsed }
-func (b *Block) Difficulty() *big.Int       { return new(big.Int).Set(b.header.Difficulty) }
-func (b *Block) TimeInSeconds() uint64      { return b.header.TimeInSeconds() }
-func (b *Block) Milliseconds() uint64       { return b.header.Milliseconds() }
-func (b *Block) TimeInMilliseconds() uint64 { return b.header.TimeInMilliseconds() }
-func (b *Block) CurrentTime() uint64        { return b.header.CurrentTime() }
+func (b *Block) Number() *big.Int         { return new(big.Int).Set(b.header.Number) }
+func (b *Block) GasLimit() uint64         { return b.header.GasLimit }
+func (b *Block) GasUsed() uint64          { return b.header.GasUsed }
+func (b *Block) Difficulty() *big.Int     { return new(big.Int).Set(b.header.Difficulty) }
+func (b *Block) MilliTimestamp() uint64   { return b.header.millisecondes() }
+func (b *Block) SecondsTimestamp() uint64 { return b.header.SecondsTimestamp() }
+func (b *Block) UsingTimestamp() uint64   { return b.header.UsingTimestamp() }
 
 func (b *Block) NumberU64() uint64        { return b.header.Number.Uint64() }
 func (b *Block) MixDigest() common.Hash   { return b.header.MixDigest }

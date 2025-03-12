@@ -462,7 +462,7 @@ func opCoinbase(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 // should be double confirm //
 // **************************//
 func opTimestamp(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
-	scope.Stack.push(new(uint256.Int).SetUint64(interpreter.evm.Context.CurrentTime()))
+	scope.Stack.push(new(uint256.Int).SetUint64(interpreter.evm.Context.TempTempTime))
 	return nil, nil
 }
 

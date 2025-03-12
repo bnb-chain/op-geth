@@ -37,7 +37,7 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 		}
 	}
 
-	bundles := w.eth.TxPool().PendingBundles(env.header.Number.Uint64(), env.header.Time)
+	bundles := w.eth.TxPool().PendingBundles(env.header.Number.Uint64(), env.header.SecondsTimestamp())
 
 	// if no bundles, not necessary to fill transactions
 	if len(bundles) == 0 {

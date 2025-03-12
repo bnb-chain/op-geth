@@ -255,7 +255,7 @@ func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return errInvalidUncleHash
 	}
 	// Verify the timestamp
-	if header.CurrentTime() <= parent.CurrentTime() {
+	if header.UsingTimestamp() <= parent.UsingTimestamp() {
 		return errInvalidTimestamp
 	}
 	// Verify the block's difficulty to ensure it's the default constant
@@ -279,7 +279,7 @@ func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return err
 	}
 	// Verify existence / non-existence of withdrawalsHash.
-	shanghai := chain.Config().IsShanghai(header.Number, header.CurrentTime())
+	shanghai := chain.Config().IsShanghai(header.Number, header.SecondsTimestamp())
 	if shanghai && header.WithdrawalsHash == nil {
 		return errors.New("missing withdrawalsHash")
 	}
@@ -287,7 +287,7 @@ func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return fmt.Errorf("invalid withdrawalsHash: have %x, expected nil", header.WithdrawalsHash)
 	}
 	// Verify the existence / non-existence of cancun-specific header fields
-	cancun := chain.Config().IsCancun(header.Number, header.CurrentTime())
+	cancun := chain.Config().IsCancun(header.Number, header.SecondsTimestamp())
 	if !cancun {
 		switch {
 		case header.ExcessBlobGas != nil:
@@ -385,7 +385,7 @@ func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, hea
 	if !beacon.IsPoSHeader(header) {
 		return beacon.ethone.FinalizeAndAssemble(chain, header, state, txs, uncles, receipts, nil)
 	}
-	shanghai := chain.Config().IsShanghai(header.Number, header.CurrentTime())
+	shanghai := chain.Config().IsShanghai(header.Number, header.SecondsTimestamp())
 	if shanghai {
 		// All blocks after Shanghai must include a withdrawals root.
 		if withdrawals == nil {

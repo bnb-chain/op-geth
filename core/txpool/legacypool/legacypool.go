@@ -1546,7 +1546,8 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 		var pendingBaseFee = pool.priced.GetBaseFee()
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
-				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
+				// maybe add 500ms
+				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.SecondsTimestamp()+1)
 				pool.priced.SetBaseFee(pendingBaseFee)
 			} else {
 				pool.priced.Reheap()
@@ -1717,7 +1718,7 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) (demoteAddrs []com
 
 	if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
 		pool.l1CostFn = func(rollupCostData types.RollupCostData) *big.Int {
-			return costFn(rollupCostData, newHead.Time)
+			return costFn(rollupCostData, newHead.SecondsTimestamp())
 		}
 	}
 

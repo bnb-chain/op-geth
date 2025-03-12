@@ -74,27 +74,16 @@ type payloadAttributesMarshaling struct {
 	GasLimit     *hexutil.Uint64
 }
 
-func (p *PayloadAttributes) Milliseconds() uint64 {
+func (p *PayloadAttributes) millisecondes() uint64 {
 	if p.Random == (common.Hash{}) {
 		return 0
 	}
 	return uint256.NewInt(0).SetBytes2(p.Random[:2]).Uint64()
 }
 
-func (p *PayloadAttributes) TimeInMilliseconds() uint64 {
-	return p.TempTimestamp*1000 + p.Milliseconds()
-}
+func (p *PayloadAttributes) MilliTimestamp() uint64 { return p.TempTimestamp*1000 + p.millisecondes() }
 
-func (p *PayloadAttributes) CurrentTime() uint64 {
-	if p.Random == (common.Hash{}) {
-		return p.TempTimestamp
-	}
-	return p.TimeInMilliseconds()
-}
-
-func (p *PayloadAttributes) TimeInSeconds() uint64 {
-	return p.TempTimestamp
-}
+func (p *PayloadAttributes) SecondsTimestamp() uint64 { return p.TempTimestamp }
 
 //go:generate go run github.com/fjl/gencodec -type ExecutableData -field-override executableDataMarshaling -out gen_ed.go
 
@@ -120,27 +109,16 @@ type ExecutableData struct {
 	ExcessBlobGas *uint64             `json:"excessBlobGas"`
 }
 
-func (e *ExecutableData) Milliseconds() uint64 {
+func (e *ExecutableData) millisecondes() uint64 {
 	if e.Random == (common.Hash{}) {
 		return 0
 	}
 	return uint256.NewInt(0).SetBytes2(e.Random[:2]).Uint64()
 }
 
-func (e *ExecutableData) TimeInMilliseconds() uint64 {
-	return e.TempTimestamp*1000 + e.Milliseconds()
-}
+func (e *ExecutableData) MilliTimestamp() uint64 { return e.TempTimestamp*1000 + e.millisecondes() }
 
-func (e *ExecutableData) CurrentTime() uint64 {
-	if e.Random == (common.Hash{}) {
-		return e.TempTimestamp
-	}
-	return e.TimeInMilliseconds()
-}
-
-func (e *ExecutableData) TimeInSeconds() uint64 {
-	return e.TempTimestamp
-}
+func (e *ExecutableData) SecondsTimestamp() uint64 { return e.TempTimestamp }
 
 // JSON type overrides for executableData.
 type executableDataMarshaling struct {
@@ -322,7 +300,7 @@ func ExecutableDataToBlock(params ExecutableData, versionedHashes []common.Hash,
 		Number:           new(big.Int).SetUint64(params.Number),
 		GasLimit:         params.GasLimit,
 		GasUsed:          params.GasUsed,
-		TempTime:         params.TimeInSeconds(),
+		TempTime:         params.SecondsTimestamp(),
 		BaseFee:          params.BaseFeePerGas,
 		Extra:            params.ExtraData,
 		MixDigest:        params.Random,
@@ -350,7 +328,7 @@ func BlockToExecutableData(block *types.Block, fees *big.Int, sidecars []*types.
 		GasLimit:      block.GasLimit(),
 		GasUsed:       block.GasUsed(),
 		BaseFeePerGas: block.BaseFee(),
-		TempTimestamp: block.TimeInSeconds(),
+		TempTimestamp: block.MilliTimestamp(),
 		ReceiptsRoot:  block.ReceiptHash(),
 		LogsBloom:     block.Bloom().Bytes(),
 		Transactions:  encodeTransactions(block.Transactions()),

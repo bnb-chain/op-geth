@@ -347,19 +347,21 @@ func (miner *Miner) SimulateGaslessBundle(bundle *types.Bundle) (*types.Simulate
 
 func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	parent := miner.eth.BlockChain().CurrentBlock()
-	timestamp := int64(parent.Time + 1)
+	// double check may be add 500ms
+	timestamp := int64(parent.SecondsTimestamp() + 1)
 
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     new(big.Int).Add(parent.Number, common.Big1),
 		GasLimit:   core.CalcGasLimit(parent.GasLimit, miner.worker.config.GasCeil),
-		Time:       uint64(timestamp),
+		TempTime:   uint64(timestamp),
 		Coinbase:   defaultCoinBaseAddress,
 	}
 
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if miner.worker.chainConfig.IsLondon(header.Number) {
-		header.BaseFee = eip1559.CalcBaseFee(miner.worker.chainConfig, parent, header.Time)
+		// double check may be use the millseconds
+		header.BaseFee = eip1559.CalcBaseFee(miner.worker.chainConfig, parent, header.SecondsTimestamp())
 	}
 
 	if miner.worker.chainConfig.Optimism != nil && miner.worker.config.GasCeil != 0 {
@@ -368,9 +370,9 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	}
 
 	// Apply EIP-4844, EIP-4788.
-	if miner.worker.chainConfig.IsCancun(header.Number, header.Time) {
+	if miner.worker.chainConfig.IsCancun(header.Number, header.SecondsTimestamp()) {
 		var excessBlobGas uint64
-		if miner.worker.chainConfig.IsCancun(parent.Number, parent.Time) {
+		if miner.worker.chainConfig.IsCancun(parent.Number, parent.SecondsTimestamp()) {
 			excessBlobGas = eip4844.CalcExcessBlobGas(*parent.ExcessBlobGas, *parent.BlobGasUsed)
 		} else {
 			// For the first post-fork block, both parent.data_gas_used and parent.excess_data_gas are evaluated as 0
@@ -393,7 +395,7 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	env := &environment{
 		header:  header,
 		state:   state.Copy(),
-		signer:  types.MakeSigner(miner.worker.chainConfig, header.Number, header.Time),
+		signer:  types.MakeSigner(miner.worker.chainConfig, header.Number, header.SecondsTimestamp()),
 		gasPool: prepareGasPool(),
 	}
 	return env, nil

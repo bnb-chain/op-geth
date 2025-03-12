@@ -302,16 +302,16 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 		// to deliver for not missing slot.
 		// In OP-Stack, the "empty" block is constructed from provided txs only, i.e. no tx-pool usage.
 		emptyParams := &generateParams{
-			timestamp:   args.Timestamp,
-			forceTime:   true,
-			parentHash:  args.Parent,
-			coinbase:    args.FeeRecipient,
-			random:      args.Random,
-			withdrawals: args.Withdrawals,
-			beaconRoot:  args.BeaconRoot,
-			noTxs:       true,
-			txs:         args.Transactions,
-			gasLimit:    args.GasLimit,
+			tempTimestamp: args.Timestamp,
+			forceTime:     true,
+			parentHash:    args.Parent,
+			coinbase:      args.FeeRecipient,
+			random:        args.Random,
+			withdrawals:   args.Withdrawals,
+			beaconRoot:    args.BeaconRoot,
+			noTxs:         true,
+			txs:           args.Transactions,
+			gasLimit:      args.GasLimit,
 		}
 		start := time.Now()
 		empty := w.getSealingBlock(emptyParams)
@@ -330,16 +330,16 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	}
 
 	fullParams := &generateParams{
-		timestamp:   args.Timestamp,
-		forceTime:   true,
-		parentHash:  args.Parent,
-		coinbase:    args.FeeRecipient,
-		random:      args.Random,
-		withdrawals: args.Withdrawals,
-		beaconRoot:  args.BeaconRoot,
-		noTxs:       false,
-		txs:         args.Transactions,
-		gasLimit:    args.GasLimit,
+		tempTimestamp: args.Timestamp,
+		forceTime:     true,
+		parentHash:    args.Parent,
+		coinbase:      args.FeeRecipient,
+		random:        args.Random,
+		withdrawals:   args.Withdrawals,
+		beaconRoot:    args.BeaconRoot,
+		noTxs:         false,
+		txs:           args.Transactions,
+		gasLimit:      args.GasLimit,
 	}
 
 	// Since we skip building the empty block when using the tx pool, we need to explicitly

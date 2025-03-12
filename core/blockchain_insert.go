@@ -61,7 +61,7 @@ func (st *insertStats) report(chain []*types.Block, index int, snapDiffItems, sn
 			"elapsed", common.PrettyDuration(elapsed), "mgasps", float64(st.usedGas) * 1000 / float64(elapsed),
 		}
 		mgaspsGauge.Update(int64(st.usedGas) * 1000 / int64(elapsed))
-		if timestamp := time.Unix(int64(end.TimeInSeconds()), 0); time.Since(timestamp) > time.Minute {
+		if timestamp := time.Unix(int64(end.SecondsTimestamp()), 0); time.Since(timestamp) > time.Minute {
 			context = append(context, []interface{}{"age", common.PrettyAge(timestamp)}...)
 		}
 		if snapDiffItems != 0 || snapBufItems != 0 { // snapshots enabled

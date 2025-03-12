@@ -45,7 +45,7 @@ func (e ExecutableData) MarshalJSON() ([]byte, error) {
 	enc.Number = hexutil.Uint64(e.Number)
 	enc.GasLimit = hexutil.Uint64(e.GasLimit)
 	enc.GasUsed = hexutil.Uint64(e.GasUsed)
-	enc.Timestamp = hexutil.Uint64(e.TimeInSeconds())
+	enc.Timestamp = hexutil.Uint64(e.SecondsTimestamp())
 	enc.ExtraData = e.ExtraData
 	enc.BaseFeePerGas = (*hexutil.Big)(e.BaseFeePerGas)
 	enc.BlockHash = e.BlockHash

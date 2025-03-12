@@ -38,8 +38,8 @@ import (
 )
 
 const (
-	headerCacheLimit = 512
-	tdCacheLimit     = 1024
+	headerCacheLimit = 1280
+	tdCacheLimit     = 1280
 	numberCacheLimit = 2048
 )
 

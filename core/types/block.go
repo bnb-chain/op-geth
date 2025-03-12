@@ -20,6 +20,7 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/holiman/uint256"
 	"io"
 	"math/big"
 	"reflect"
@@ -113,6 +114,17 @@ type headerMarshaling struct {
 // RLP encoding.
 func (h *Header) Hash() common.Hash {
 	return rlpHash(h)
+}
+
+// Ensure Milliseconds is less than 1000 when verifying the block header
+func (h *Header) MilliTimestamp() uint64 {
+	var milliPart uint64
+	if h.MixDigest == (common.Hash{}) {
+		milliPart = 0
+	} else {
+		milliPart = uint256.NewInt(0).SetBytes2(h.MixDigest[:2]).Uint64()
+	}
+	return h.Time*1000 + milliPart
 }
 
 var headerSize = common.StorageSize(reflect.TypeOf(Header{}).Size())
@@ -358,11 +370,12 @@ func (b *Block) Header() *Header {
 
 // Header value accessors. These do copy!
 
-func (b *Block) Number() *big.Int     { return new(big.Int).Set(b.header.Number) }
-func (b *Block) GasLimit() uint64     { return b.header.GasLimit }
-func (b *Block) GasUsed() uint64      { return b.header.GasUsed }
-func (b *Block) Difficulty() *big.Int { return new(big.Int).Set(b.header.Difficulty) }
-func (b *Block) Time() uint64         { return b.header.Time }
+func (b *Block) Number() *big.Int       { return new(big.Int).Set(b.header.Number) }
+func (b *Block) GasLimit() uint64       { return b.header.GasLimit }
+func (b *Block) GasUsed() uint64        { return b.header.GasUsed }
+func (b *Block) Difficulty() *big.Int   { return new(big.Int).Set(b.header.Difficulty) }
+func (b *Block) Time() uint64           { return b.header.Time }
+func (b *Block) MilliTimestamp() uint64 { return b.header.MilliTimestamp() }
 
 func (b *Block) NumberU64() uint64        { return b.header.Number.Uint64() }
 func (b *Block) MixDigest() common.Hash   { return b.header.MixDigest }

@@ -1185,7 +1185,7 @@ func (w *worker) validateParams(genParams *generateParams) (time.Duration, error
 		return 0, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), genParams.MilliTimestamp)
 	}
 
-	// minimum payload build time of 1s
+	// minimum payload build time of 1s -> 500ms
 	if blockTime < 500 {
 		blockTime = 500
 	}
@@ -1222,7 +1222,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 			genParams.random[1] = milliPartBytes[31]
 		}
 	}
-	timestamp = parent.MilliTimestamp() / 1000
+	timestamp = genParams.SecondsTimestamp()
 
 	// Construct the sealing block header.
 	header := &types.Header{

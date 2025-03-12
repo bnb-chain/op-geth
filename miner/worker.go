@@ -1215,13 +1215,11 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 		if genParams.forceTime {
 			return nil, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), timestamp)
 		}
+		timestamp = parent.NextMilliTimestamp()
 		if genParams.random != (common.Hash{}) {
-			timestamp = parent.MilliTimestamp() + 500
 			milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
 			genParams.random[0] = milliPartBytes[30]
 			genParams.random[1] = milliPartBytes[31]
-		} else {
-			timestamp = parent.MilliTimestamp() + 1000
 		}
 	}
 	timestamp = parent.MilliTimestamp() / 1000
@@ -1244,7 +1242,6 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	}
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if w.chainConfig.IsLondon(header.Number) {
-		// double check
 		header.BaseFee = eip1559.CalcBaseFee(w.chainConfig, parent, header.SecondsTimestamp())
 		if !w.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * w.chainConfig.ElasticityMultiplier()

@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"github.com/holiman/uint256"
 	"math/big"
 	"sync"
 	"time"
@@ -347,20 +348,25 @@ func (miner *Miner) SimulateGaslessBundle(bundle *types.Bundle) (*types.Simulate
 
 func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	parent := miner.eth.BlockChain().CurrentBlock()
-	// double check may be add 500ms
-	timestamp := int64(parent.SecondsTimestamp() + 1)
+	// fork check
+	timestamp := parent.NextMilliTimestamp()
+
+	var mixDigest common.Hash
+	milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
+	mixDigest[0] = milliPartBytes[30]
+	mixDigest[1] = milliPartBytes[31]
 
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     new(big.Int).Add(parent.Number, common.Big1),
 		GasLimit:   core.CalcGasLimit(parent.GasLimit, miner.worker.config.GasCeil),
-		TempTime:   uint64(timestamp),
+		TempTime:   timestamp / 1000,
+		MixDigest:  mixDigest,
 		Coinbase:   defaultCoinBaseAddress,
 	}
 
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if miner.worker.chainConfig.IsLondon(header.Number) {
-		// double check may be use the millseconds
 		header.BaseFee = eip1559.CalcBaseFee(miner.worker.chainConfig, parent, header.SecondsTimestamp())
 	}
 

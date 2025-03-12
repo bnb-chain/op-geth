@@ -562,9 +562,6 @@ func (hc *HeaderChain) SetHeadWithTimestamp(time uint64, updateFn UpdateHeadBloc
 
 // setHead rewinds the local chain to a new head block or a head timestamp.
 // Everything above the new head will be deleted and the new one set.
-// ******************* //
-// should double check , headTime //
-// ******************* //
 func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn UpdateHeadBlocksCallback, delFn DeleteBlockContentCallback) {
 	// Sanity check that there's no attempt to undo the genesis block. This is
 	// a fairly synthetic case where someone enables a timestamp based fork
@@ -610,7 +607,7 @@ func (hc *HeaderChain) setHead(headBlock uint64, headTime uint64, updateFn Updat
 		markerBatch := hc.chainDb.BlockStore().NewBatch()
 		if updateFn != nil {
 			newHead, force := updateFn(markerBatch, parent)
-			if force && ((headTime > 0 && newHead.UsingTimestamp() < headTime) || (headTime == 0 && newHead.Number.Uint64() < headBlock)) {
+			if force && ((headTime > 0 && newHead.SecondsTimestamp() < headTime) || (headTime == 0 && newHead.Number.Uint64() < headBlock)) {
 				log.Warn("Force rewinding till ancient limit", "head", newHead.Number.Uint64())
 				headBlock, headTime = newHead.Number.Uint64(), 0 // Target timestamp passed, continue rewind in block mode (cleaner)
 			}

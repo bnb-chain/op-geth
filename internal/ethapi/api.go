@@ -1586,8 +1586,7 @@ func NewRPCPendingTransaction(tx *types.Transaction, current *types.Header, conf
 		blockTime   = uint64(0)
 	)
 	if current != nil {
-		// should double check, maybe add 500ms?
-		baseFee = eip1559.CalcBaseFee(config, current, current.SecondsTimestamp()+1)
+		baseFee = eip1559.CalcBaseFee(config, current, current.NextSecondsTimestamp())
 		blockNumber = current.Number.Uint64()
 		blockTime = current.SecondsTimestamp()
 	}

@@ -254,9 +254,6 @@ func (st *StateTransition) buyGas() error {
 		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.TempTempTime) {
 			l1Cost = big.NewInt(0)
 		} else {
-			// ***************** //
-			// should double check the L1CostFunc params block time //
-			// ***************** //
 			l1Cost = st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.TempTempTime)
 		}
 		if l1Cost != nil {
@@ -590,9 +587,6 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		if st.msg.GasPrice.Cmp(big.NewInt(0)) == 0 && st.evm.ChainConfig().IsWright(st.evm.Context.TempTempTime) {
 			st.state.AddBalance(params.OptimismL1FeeRecipient, uint256.NewInt(0))
 		} else if l1Cost := st.evm.Context.L1CostFunc(st.msg.RollupCostData, st.evm.Context.TempTempTime); l1Cost != nil {
-			// *********** //
-			// L1CostFunc should double check //
-			// *********** //
 			amtU256, overflow = uint256.FromBig(l1Cost)
 			if overflow {
 				return nil, fmt.Errorf("optimism l1 cost overflows U256: %d", l1Cost)

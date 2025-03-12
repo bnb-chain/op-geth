@@ -28,6 +28,11 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
+var (
+	OldBlockMillisecondsInterval uint64 = 1000
+	NewBlockMillisecondsInterval uint64 = 500
+)
+
 // PayloadVersion denotes the version of PayloadAttributes used to request the
 // building of the payload to commence.
 type PayloadVersion byte
@@ -85,6 +90,15 @@ func (p *PayloadAttributes) MilliTimestamp() uint64 { return p.TempTimestamp*100
 
 func (p *PayloadAttributes) SecondsTimestamp() uint64 { return p.TempTimestamp }
 
+func (p *PayloadAttributes) NextMilliTimestamp() uint64 {
+	if p.Random == (common.Hash{}) {
+		return p.TempTimestamp*1000 + OldBlockMillisecondsInterval
+	}
+	return p.MilliTimestamp() + NewBlockMillisecondsInterval
+}
+
+func (p *PayloadAttributes) NextSecondsTimestamp() uint64 { return p.NextMilliTimestamp() / 1000 }
+
 //go:generate go run github.com/fjl/gencodec -type ExecutableData -field-override executableDataMarshaling -out gen_ed.go
 
 // ExecutableData is the data necessary to execute an EL payload.
@@ -119,6 +133,15 @@ func (e *ExecutableData) millisecondes() uint64 {
 func (e *ExecutableData) MilliTimestamp() uint64 { return e.TempTimestamp*1000 + e.millisecondes() }
 
 func (e *ExecutableData) SecondsTimestamp() uint64 { return e.TempTimestamp }
+
+func (e *ExecutableData) NextMilliTimestamp() uint64 {
+	if e.Random == (common.Hash{}) {
+		return e.TempTimestamp*1000 + OldBlockMillisecondsInterval
+	}
+	return e.MilliTimestamp() + NewBlockMillisecondsInterval
+}
+
+func (e *ExecutableData) NextSecondsTimestamp() uint64 { return e.NextMilliTimestamp() / 1000 }
 
 // JSON type overrides for executableData.
 type executableDataMarshaling struct {

@@ -401,8 +401,7 @@ func (p *BlobPool) Init(gasTip uint64, head *types.Header, reserve txpool.Addres
 		p.recheck(addr, nil)
 	}
 	var (
-		// need double check , maybe add 500ms
-		basefee = uint256.MustFromBig(eip1559.CalcBaseFee(p.chain.Config(), p.head, p.head.SecondsTimestamp()+1))
+		basefee = uint256.MustFromBig(eip1559.CalcBaseFee(p.chain.Config(), p.head, p.head.NextSecondsTimestamp()))
 		blobfee = uint256.NewInt(params.BlobTxMinBlobGasprice)
 	)
 	if p.head.ExcessBlobGas != nil {
@@ -823,8 +822,7 @@ func (p *BlobPool) Reset(oldHead, newHead *types.Header) {
 	}
 	// Reset the price heap for the new set of basefee/blobfee pairs
 	var (
-		// double check , may be add 500ms
-		basefee = uint256.MustFromBig(eip1559.CalcBaseFee(p.chain.Config(), newHead, newHead.SecondsTimestamp()+1))
+		basefee = uint256.MustFromBig(eip1559.CalcBaseFee(p.chain.Config(), newHead, newHead.NextSecondsTimestamp()))
 		blobfee = uint256.MustFromBig(big.NewInt(params.BlobTxMinBlobGasprice))
 	)
 	if newHead.ExcessBlobGas != nil {

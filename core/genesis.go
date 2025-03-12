@@ -476,7 +476,7 @@ func (g *Genesis) ToBlock() *types.Block {
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
 		Nonce:      types.EncodeNonce(g.Nonce),
-		TempTime:   g.Timestamp,
+		Time:       g.Timestamp,
 		ParentHash: g.ParentHash,
 		Extra:      g.ExtraData,
 		GasLimit:   g.GasLimit,

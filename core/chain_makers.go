@@ -216,7 +216,7 @@ func (b *BlockGen) TxNonce(addr common.Address) uint64 {
 // AddUncle adds an uncle header to the generated block.
 func (b *BlockGen) AddUncle(h *types.Header) {
 	// The uncle will have the same timestamp and auto-generated difficulty
-	h.TempTime = b.header.TempTime
+	h.Time = b.header.Time
 	h.MixDigest = b.header.MixDigest
 
 	var parent *types.Header
@@ -285,8 +285,8 @@ func (b *BlockGen) PrevBlock(index int) *types.Block {
 // associated difficulty. It's useful to test scenarios where forking is not
 // tied to chain length directly.
 func (b *BlockGen) OffsetTime(seconds int64) {
-	b.header.TempTime += uint64(seconds)
-	if b.header.TempTime <= b.cm.bottom.Header().TempTime {
+	b.header.Time += uint64(seconds)
+	if b.header.Time <= b.cm.bottom.Header().Time {
 		panic("block time out of range")
 	}
 	b.header.Difficulty = b.engine.CalcDifficulty(b.cm, b.header.SecondsTimestamp(), b.parent.Header())
@@ -430,7 +430,7 @@ func (cm *chainMaker) makeHeader(parent *types.Block, state *state.StateDB, engi
 		Difficulty: engine.CalcDifficulty(cm, time, parent.Header()),
 		GasLimit:   parent.GasLimit(),
 		Number:     new(big.Int).Add(parent.Number(), common.Big1),
-		TempTime:   time,
+		Time:       time,
 	}
 
 	if cm.config.IsLondon(header.Number) {

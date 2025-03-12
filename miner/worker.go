@@ -1229,7 +1229,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 		ParentHash: parent.Hash(),
 		Number:     new(big.Int).Add(parent.Number, common.Big1),
 		GasLimit:   core.CalcGasLimit(parent.GasLimit, w.config.GasCeil),
-		TempTime:   timestamp,
+		Time:       timestamp,
 		Coinbase:   genParams.coinbase,
 	}
 	// Set the extra field.

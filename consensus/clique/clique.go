@@ -571,9 +571,9 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	header.TempTime = parent.SecondsTimestamp() + c.config.Period
+	header.Time = parent.SecondsTimestamp() + c.config.Period
 	if header.SecondsTimestamp() < uint64(time.Now().Unix()) {
-		header.TempTime = uint64(time.Now().Unix())
+		header.Time = uint64(time.Now().Unix())
 	}
 	return nil
 }

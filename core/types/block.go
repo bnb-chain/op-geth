@@ -80,11 +80,10 @@ type Header struct {
 	Number      *big.Int       `json:"number"           gencodec:"required"`
 	GasLimit    uint64         `json:"gasLimit"         gencodec:"required"`
 	GasUsed     uint64         `json:"gasUsed"          gencodec:"required"`
-	// temp change 'Time' to 'TempTime' for debugging
-	TempTime  uint64      `json:"timestamp"        gencodec:"required"`
-	Extra     []byte      `json:"extraData"        gencodec:"required"`
-	MixDigest common.Hash `json:"mixHash"`
-	Nonce     BlockNonce  `json:"nonce"`
+	Time        uint64         `json:"timestamp"        gencodec:"required"`
+	Extra       []byte         `json:"extraData"        gencodec:"required"`
+	MixDigest   common.Hash    `json:"mixHash"`
+	Nonce       BlockNonce     `json:"nonce"`
 
 	// BaseFee was added by EIP-1559 and is ignored in legacy headers.
 	BaseFee *big.Int `json:"baseFeePerGas" rlp:"optional"`
@@ -124,13 +123,13 @@ func (h *Header) millisecondes() uint64 {
 	return uint256.NewInt(0).SetBytes2(h.MixDigest[:2]).Uint64()
 }
 
-func (h *Header) MilliTimestamp() uint64 { return h.TempTime*1000 + h.millisecondes() }
+func (h *Header) MilliTimestamp() uint64 { return h.Time*1000 + h.millisecondes() }
 
-func (h *Header) SecondsTimestamp() uint64 { return h.TempTime }
+func (h *Header) SecondsTimestamp() uint64 { return h.Time }
 
 func (h *Header) NextMilliTimestamp() uint64 {
 	if h.MixDigest == (common.Hash{}) {
-		return h.TempTime*1000 + OldBlockMillisecondsInterval
+		return h.Time*1000 + OldBlockMillisecondsInterval
 	}
 	return h.MilliTimestamp() + NewBlockMillisecondsInterval
 }

@@ -18,7 +18,6 @@ package catalyst
 
 import (
 	"errors"
-	"github.com/holiman/uint256"
 	"math/big"
 	"sync"
 	"time"
@@ -80,8 +79,7 @@ type SimulatedBeacon struct {
 
 	engineAPI          *ConsensusAPI
 	curForkchoiceState engine.ForkchoiceStateV1
-	// need double check
-	lastBlockMillTime uint64
+	lastBlockTime      uint64
 }
 
 // NewSimulatedBeacon constructs a new simulated beacon chain.
@@ -109,7 +107,7 @@ func NewSimulatedBeacon(period uint64, eth *eth.Ethereum) (*SimulatedBeacon, err
 		period:             period,
 		shutdownCh:         make(chan struct{}),
 		engineAPI:          engineAPI,
-		lastBlockMillTime:  block.MilliTimestamp(),
+		lastBlockTime:      block.SecondsTimestamp(),
 		curForkchoiceState: current,
 		withdrawals:        withdrawalQueue{make(chan *types.Withdrawal, 20)},
 	}, nil
@@ -142,8 +140,8 @@ func (c *SimulatedBeacon) Stop() error {
 // sealBlock initiates payload building for a new block and creates a new block
 // with the completed payload.
 func (c *SimulatedBeacon) sealBlock(withdrawals []*types.Withdrawal, timestamp uint64) error {
-	if timestamp*1000 <= c.lastBlockMillTime {
-		timestamp = c.lastBlockMillTime + 500
+	if timestamp <= c.lastBlockTime {
+		timestamp = c.lastBlockTime + 1
 	}
 	c.feeRecipientLock.Lock()
 	feeRecipient := c.feeRecipient
@@ -155,17 +153,13 @@ func (c *SimulatedBeacon) sealBlock(withdrawals []*types.Withdrawal, timestamp u
 		c.setCurrentState(header.Hash(), *finalizedHash)
 	}
 
-	var random [32]byte
+	//var random [32]byte
 	//rand.Read(random[:])
-	milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
-	random[0] = milliPartBytes[30]
-	random[1] = milliPartBytes[31]
-	timestamp = timestamp / 1000
 	fcResponse, err := c.engineAPI.forkchoiceUpdated(c.curForkchoiceState, &engine.PayloadAttributes{
 		TempTimestamp:         timestamp,
 		SuggestedFeeRecipient: feeRecipient,
 		Withdrawals:           withdrawals,
-		Random:                random,
+		//Random:                random,
 	}, engine.PayloadV2, true)
 	if err != nil {
 		return err
@@ -204,7 +198,7 @@ func (c *SimulatedBeacon) sealBlock(withdrawals []*types.Withdrawal, timestamp u
 	if _, err = c.engineAPI.ForkchoiceUpdatedV2(c.curForkchoiceState, nil); err != nil {
 		return err
 	}
-	c.lastBlockMillTime = payload.MilliTimestamp()
+	c.lastBlockTime = payload.SecondsTimestamp()
 	return nil
 }
 
@@ -293,7 +287,7 @@ func (c *SimulatedBeacon) AdjustTime(adjustment time.Duration) error {
 	}
 	withdrawals := c.withdrawals.gatherPending(10)
 	// need double check
-	return c.sealBlock(withdrawals, parent.MilliTimestamp()+uint64(adjustment)*1000)
+	return c.sealBlock(withdrawals, parent.SecondsTimestamp()+uint64(adjustment))
 }
 
 func RegisterSimulatedBeaconAPIs(stack *node.Node, sim *SimulatedBeacon) {

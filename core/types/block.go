@@ -136,13 +136,6 @@ func (h *Header) NextMilliTimestamp() uint64 {
 
 func (h *Header) NextSecondsTimestamp() uint64 { return h.NextMilliTimestamp() / 1000 }
 
-func (h *Header) UsingTimestamp() uint64 {
-	if h.MixDigest == (common.Hash{}) {
-		return h.SecondsTimestamp()
-	}
-	return h.MilliTimestamp()
-}
-
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
 func (h *Header) Hash() common.Hash {
@@ -396,9 +389,8 @@ func (b *Block) Number() *big.Int             { return new(big.Int).Set(b.header
 func (b *Block) GasLimit() uint64             { return b.header.GasLimit }
 func (b *Block) GasUsed() uint64              { return b.header.GasUsed }
 func (b *Block) Difficulty() *big.Int         { return new(big.Int).Set(b.header.Difficulty) }
-func (b *Block) MilliTimestamp() uint64       { return b.header.millisecondes() }
+func (b *Block) MilliTimestamp() uint64       { return b.header.MilliTimestamp() }
 func (b *Block) SecondsTimestamp() uint64     { return b.header.SecondsTimestamp() }
-func (b *Block) UsingTimestamp() uint64       { return b.header.UsingTimestamp() }
 func (b *Block) NextMilliTimestamp() uint64   { return b.header.NextMilliTimestamp() }
 func (b *Block) NextSecondsTimestamp() uint64 { return b.header.NextSecondsTimestamp() }
 

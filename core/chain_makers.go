@@ -392,7 +392,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		if block.ExcessBlobGas() != nil {
 			blobGasPrice = eip4844.CalcBlobFee(*block.ExcessBlobGas())
 		}
-		if err := receipts.DeriveFields(config, block.Hash(), block.NumberU64(), block.UsingTimestamp(), block.BaseFee(), blobGasPrice, txs); err != nil {
+		if err := receipts.DeriveFields(config, block.Hash(), block.NumberU64(), block.SecondsTimestamp(), block.BaseFee(), blobGasPrice, txs); err != nil {
 			panic(err)
 		}
 

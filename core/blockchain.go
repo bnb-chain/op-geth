@@ -116,7 +116,7 @@ const (
 	receiptsCacheLimit  = 512
 	txLookupCacheLimit  = 1024
 	maxFutureBlocks     = 256
-	maxTimeFutureBlocks = 30 * 1000
+	maxTimeFutureBlocks = 30
 	TriesInMemory       = 128
 
 	txLogsCacheLimit      = 512
@@ -1682,8 +1682,8 @@ func (bc *BlockChain) writeBlockAndSetHead(block *types.Block, receipts []*types
 // TODO after the transition, the future block shouldn't be kept. Because
 // it's not checked in the Geth side anymore.
 func (bc *BlockChain) addFutureBlock(block *types.Block) error {
-	max := uint64(time.Now().UnixMilli() + maxTimeFutureBlocks)
-	if block.MilliTimestamp() > max {
+	max := uint64(time.Now().Unix() + maxTimeFutureBlocks)
+	if block.SecondsTimestamp() > max {
 		return fmt.Errorf("future block timestamp %v > allowed %v", block.MilliTimestamp(), max)
 	}
 	if block.Difficulty().Cmp(common.Big0) == 0 {

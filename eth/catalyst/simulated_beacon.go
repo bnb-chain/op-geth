@@ -159,7 +159,6 @@ func (c *SimulatedBeacon) sealBlock(withdrawals []*types.Withdrawal, timestamp u
 		Timestamp:             timestamp,
 		SuggestedFeeRecipient: feeRecipient,
 		Withdrawals:           withdrawals,
-		//Random:                random,
 	}, engine.PayloadV2, true)
 	if err != nil {
 		return err
@@ -286,7 +285,6 @@ func (c *SimulatedBeacon) AdjustTime(adjustment time.Duration) error {
 		return errors.New("parent not found")
 	}
 	withdrawals := c.withdrawals.gatherPending(10)
-	// need double check
 	return c.sealBlock(withdrawals, parent.SecondsTimestamp()+uint64(adjustment))
 }
 

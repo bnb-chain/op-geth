@@ -905,7 +905,7 @@ func testFastVsFullChains(t *testing.T, scheme string) {
 
 	// Iterate over all chain data components, and cross reference
 	for i := 0; i < len(blocks); i++ {
-		num, hash, time := blocks[i].NumberU64(), blocks[i].Hash(), blocks[i].Time()
+		num, hash, time := blocks[i].NumberU64(), blocks[i].Hash(), blocks[i].SecondsTimestamp()
 
 		if ftd, atd := fast.GetTd(hash, num), archive.GetTd(hash, num); ftd.Cmp(atd) != 0 {
 			t.Errorf("block #%d [%x]: td mismatch: fastdb %v, archivedb %v", num, hash, ftd, atd)

@@ -120,7 +120,7 @@ func TestEth2AssembleBlock(t *testing.T) {
 	// we wait for the tx to be promoted into pending list in the txpool
 	time.Sleep(500 * time.Millisecond)
 	blockParams := engine.PayloadAttributes{
-		Timestamp: blocks[9].Time() + 5,
+		Timestamp: blocks[9].SecondsTimestamp() + 5,
 	}
 	// The miner needs to pick up on the txs in the pool, so a few retries might be
 	// needed.
@@ -159,7 +159,7 @@ func TestEth2AssembleBlockWithAnotherBlocksTxs(t *testing.T) {
 	// we wait for the tx to be promoted into pending list in the txpool
 	time.Sleep(500 * time.Millisecond)
 	blockParams := engine.PayloadAttributes{
-		Timestamp: blocks[8].Time() + 5,
+		Timestamp: blocks[8].SecondsTimestamp() + 5,
 	}
 	// The miner needs to pick up on the txs in the pool, so a few retries might be
 	// needed.
@@ -201,7 +201,7 @@ func TestEth2PrepareAndGetPayload(t *testing.T) {
 	// we wait for the txs to be promoted into pending list in the txpool
 	time.Sleep(500 * time.Millisecond)
 	blockParams := engine.PayloadAttributes{
-		Timestamp: blocks[8].Time() + 5,
+		Timestamp: blocks[8].SecondsTimestamp() + 5,
 	}
 	fcState := engine.ForkchoiceStateV1{
 		HeadBlockHash:      blocks[8].Hash(),
@@ -279,8 +279,8 @@ func TestInvalidPayloadTimestamp(t *testing.T) {
 	for i, test := range tests {
 		t.Run(fmt.Sprintf("Timestamp test: %v", i), func(t *testing.T) {
 			params := engine.PayloadAttributes{
-				Timestamp:             test.time,
-				Random:                crypto.Keccak256Hash([]byte{byte(123)}),
+				Timestamp: test.time,
+				//Random:                crypto.Keccak256Hash([]byte{byte(123)}),
 				SuggestedFeeRecipient: parent.Coinbase,
 			}
 			fcState := engine.ForkchoiceStateV1{
@@ -326,7 +326,7 @@ func TestEth2NewBlock(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 
 		execData, err := assembleWithTransactions(api, parent.Hash(), &engine.PayloadAttributes{
-			Timestamp: parent.Time() + 5,
+			Timestamp: parent.SecondsTimestamp() + 5,
 		}, 1)
 		if err != nil {
 			t.Fatalf("Failed to create the executable data %v", err)
@@ -368,7 +368,7 @@ func TestEth2NewBlock(t *testing.T) {
 	parent = preMergeBlocks[len(preMergeBlocks)-1]
 	for i := 0; i < 10; i++ {
 		execData, err := assembleBlock(api, parent.Hash(), &engine.PayloadAttributes{
-			Timestamp: parent.Time() + 6,
+			Timestamp: parent.SecondsTimestamp() + 6,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create the executable data %v", err)
@@ -419,7 +419,7 @@ func TestEth2DeepReorg(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			execData, err := api.assembleBlock(AssembleBlockParams{
 				ParentHash: parent.Hash(),
-				Timestamp:  parent.Time() + 5,
+				Timestamp:  parent.SecondsTimestamp() + 5,
 			})
 			if err != nil {
 				t.Fatalf("Failed to create the executable data %v", err)
@@ -630,8 +630,8 @@ func TestNewPayloadOnInvalidChain(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 		var (
 			params = engine.PayloadAttributes{
-				Timestamp:             parent.Time + 1,
-				Random:                crypto.Keccak256Hash([]byte{byte(i)}),
+				Timestamp: parent.Time + 1,
+				//Random:                crypto.Keccak256Hash([]byte{byte(i)}),
 				SuggestedFeeRecipient: parent.Coinbase,
 			}
 			fcState = engine.ForkchoiceStateV1{
@@ -929,7 +929,7 @@ func TestNewPayloadOnInvalidTerminalBlock(t *testing.T) {
 	// Test parent already post TTD in NewPayload
 	args := &miner.BuildPayloadArgs{
 		Parent:       parent.Hash(),
-		Timestamp:    parent.Time() + 1,
+		Timestamp:    parent.SecondsTimestamp() + 1,
 		Random:       crypto.Keccak256Hash([]byte{byte(1)}),
 		FeeRecipient: parent.Coinbase(),
 	}
@@ -984,7 +984,7 @@ func TestSimultaneousNewBlock(t *testing.T) {
 	)
 	for i := 0; i < 10; i++ {
 		execData, err := assembleBlock(api, parent.Hash(), &engine.PayloadAttributes{
-			Timestamp: parent.Time() + 5,
+			Timestamp: parent.SecondsTimestamp() + 5,
 		})
 		if err != nil {
 			t.Fatalf("Failed to create the executable data %v", err)
@@ -1063,7 +1063,7 @@ func TestSimultaneousNewBlock(t *testing.T) {
 func TestWithdrawals(t *testing.T) {
 	genesis, blocks := generateMergeChain(10, true)
 	// Set shanghai time to last block + 5 seconds (first post-merge block)
-	time := blocks[len(blocks)-1].Time() + 5
+	time := blocks[len(blocks)-1].SecondsTimestamp() + 5
 	genesis.Config.ShanghaiTime = &time
 
 	n, ethservice := startEthService(t, genesis, blocks)
@@ -1185,7 +1185,7 @@ func TestWithdrawals(t *testing.T) {
 func TestNilWithdrawals(t *testing.T) {
 	genesis, blocks := generateMergeChain(10, true)
 	// Set shanghai time to last block + 4 seconds (first post-merge block)
-	time := blocks[len(blocks)-1].Time() + 4
+	time := blocks[len(blocks)-1].SecondsTimestamp() + 4
 	genesis.Config.ShanghaiTime = &time
 
 	n, ethservice := startEthService(t, genesis, blocks)
@@ -1615,7 +1615,7 @@ func TestParentBeaconBlockRoot(t *testing.T) {
 	genesis, blocks := generateMergeChain(10, true)
 
 	// Set cancun time to last block + 5 seconds
-	time := blocks[len(blocks)-1].Time() + 5
+	time := blocks[len(blocks)-1].SecondsTimestamp() + 5
 	genesis.Config.ShanghaiTime = &time
 	genesis.Config.CancunTime = &time
 

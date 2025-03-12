@@ -1153,13 +1153,6 @@ func (g *generateParams) MilliTimestamp() uint64 { return g.timestamp*1000 + g.m
 
 func (g *generateParams) SecondsTimestamp() uint64 { return g.timestamp }
 
-func (g *generateParams) UsingTimestamp() uint64 {
-	if g.random == (common.Hash{}) {
-		return g.SecondsTimestamp()
-	}
-	return g.MilliTimestamp()
-}
-
 // validateParams validates the given parameters.
 // It currently checks that the parent block is known and that the timestamp is valid,
 // i.e., after the parent block's timestamp.
@@ -1182,12 +1175,17 @@ func (w *worker) validateParams(genParams *generateParams) (time.Duration, error
 	// Sanity check the timestamp correctness
 	blockTime := int64(genParams.MilliTimestamp()) - int64(parent.MilliTimestamp())
 	if blockTime <= 0 && genParams.forceTime {
-		return 0, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), genParams.MilliTimestamp)
+		return 0, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), genParams.MilliTimestamp())
 	}
 
-	// minimum payload build time of 1s -> 500ms
-	if blockTime < 500 {
-		blockTime = 500
+	if genParams.random == (common.Hash{}) {
+		if blockTime < 1000 {
+			blockTime = 1000
+		}
+	} else {
+		if blockTime < 500 {
+			blockTime = 500
+		}
 	}
 	return time.Duration(blockTime) * time.Millisecond, nil
 }

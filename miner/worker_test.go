@@ -470,10 +470,10 @@ func testGetSealingWork(t *testing.T, chainConfig *params.ChainConfig, engine co
 	}
 	timestamp := uint64(time.Now().Unix())
 	assertBlock := func(block *types.Block, number uint64, coinbase common.Address, random common.Hash) {
-		if block.Time() != timestamp {
+		if block.SecondsTimestamp() != timestamp {
 			// Sometime the timestamp will be mutated if the timestamp
 			// is even smaller than parent block's. It's OK.
-			t.Logf("Invalid timestamp, want %d, get %d", timestamp, block.Time())
+			t.Logf("Invalid timestamp, want %d, get %d", timestamp, block.SecondsTimestamp())
 		}
 		_, isClique := engine.(*clique.Clique)
 		if !isClique {

@@ -17,7 +17,7 @@ var (
 type pendingCache interface {
 	add(types.Transactions, types.Signer)
 	del(types.Transactions, types.Signer)
-	dump() map[common.Address]types.Transactions
+	dump() (map[common.Address]types.Transactions, map[common.Address]bool)
 	markLocal(common.Address)
 	flattenLocals() []common.Address
 }
@@ -75,8 +75,9 @@ func (pc *cacheForMiner) del(txs types.Transactions, signer types.Signer) {
 	}
 }
 
-func (pc *cacheForMiner) dump() map[common.Address]types.Transactions {
+func (pc *cacheForMiner) dump() (map[common.Address]types.Transactions, map[common.Address]bool) {
 	pending := make(map[common.Address]types.Transactions)
+	locals := make(map[common.Address]bool, len(pc.locals))
 	pc.txLock.Lock()
 	for addr, txlist := range pc.pending {
 		pending[addr] = make(types.Transactions, 0, len(txlist))
@@ -84,12 +85,15 @@ func (pc *cacheForMiner) dump() map[common.Address]types.Transactions {
 			pending[addr] = append(pending[addr], tx)
 		}
 	}
+	for addr := range pc.locals {
+		locals[addr] = true
+	}
 	pc.txLock.Unlock()
 	for _, txs := range pending {
 		// sorted by nonce
 		sort.Sort(types.TxByNonce(txs))
 	}
-	return pending
+	return pending, locals
 }
 
 func (pc *cacheForMiner) markLocal(addr common.Address) {

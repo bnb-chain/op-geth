@@ -179,7 +179,7 @@ func TestGeneratePOSChain(t *testing.T) {
 			t.Fatalf("block %d, wrong parent beacon root: got %s, want %s", i, got, want)
 		}
 		state, _ := blockchain.State()
-		idx := block.SecondsTimestamp()%8191 + 8191
+		idx := block.Time()%8191 + 8191
 		got := state.GetState(params.BeaconRootsStorageAddress, common.BigToHash(new(big.Int).SetUint64(idx)))
 		if got != want {
 			t.Fatalf("block %d, wrong parent beacon root in state: got %s, want %s", i, got, want)

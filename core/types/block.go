@@ -107,7 +107,7 @@ type headerMarshaling struct {
 	Number        *hexutil.Big
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
-	TempTime      hexutil.Uint64 // temp change 'Time' to 'TempTime' for debugging
+	Time          hexutil.Uint64 // temp change 'Time' to 'TempTime' for debugging
 	MixDigest     hexutil.Bytes  // MixDigest store the milliseconds
 	Extra         hexutil.Bytes
 	BaseFee       *hexutil.Big

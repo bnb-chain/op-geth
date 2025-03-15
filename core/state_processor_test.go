@@ -361,9 +361,9 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 	difficulty := big.NewInt(0)
 	if !config.TerminalTotalDifficultyPassed {
 		fakeChainReader := newChainMaker(nil, config, engine)
-		difficulty = engine.CalcDifficulty(fakeChainReader, parent.SecondsTimestamp()+10, &types.Header{
+		difficulty = engine.CalcDifficulty(fakeChainReader, parent.Time()+10, &types.Header{
 			Number:     parent.Number(),
-			Time:       parent.SecondsTimestamp(),
+			Time:       parent.Time(),
 			Difficulty: parent.Difficulty(),
 			UncleHash:  parent.UncleHash(),
 		})
@@ -375,7 +375,7 @@ func GenerateBadBlock(parent *types.Block, engine consensus.Engine, txs types.Tr
 		Difficulty: difficulty,
 		GasLimit:   parent.GasLimit(),
 		Number:     new(big.Int).Add(parent.Number(), common.Big1),
-		Time:       parent.SecondsTimestamp() + 10,
+		Time:       parent.Time() + 10,
 		UncleHash:  types.EmptyUncleHash,
 	}
 	if config.IsLondon(header.Number) {

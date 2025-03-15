@@ -138,7 +138,7 @@ func (c *Chain) Len() int {
 
 // ForkID gets the fork id of the chain.
 func (c *Chain) ForkID() forkid.ID {
-	return forkid.NewID(c.config, c.blocks[0], uint64(c.Len()), c.blocks[c.Len()-1].SecondsTimestamp())
+	return forkid.NewID(c.config, c.blocks[0], uint64(c.Len()), c.blocks[c.Len()-1].Time())
 }
 
 // TD calculates the total difficulty of the chain at the

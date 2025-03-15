@@ -262,7 +262,7 @@ func (oracle *Oracle) getBlockValues(ctx context.Context, blockNum uint64, limit
 		}
 		return
 	}
-	signer := types.MakeSigner(oracle.backend.ChainConfig(), block.Number(), block.SecondsTimestamp())
+	signer := types.MakeSigner(oracle.backend.ChainConfig(), block.Number(), block.Time())
 
 	// Sort the transaction by effective tip in ascending sort.
 	txs := block.Transactions()

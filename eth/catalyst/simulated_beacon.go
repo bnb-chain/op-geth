@@ -107,7 +107,7 @@ func NewSimulatedBeacon(period uint64, eth *eth.Ethereum) (*SimulatedBeacon, err
 		period:             period,
 		shutdownCh:         make(chan struct{}),
 		engineAPI:          engineAPI,
-		lastBlockTime:      block.SecondsTimestamp(),
+		lastBlockTime:      block.Time,
 		curForkchoiceState: current,
 		withdrawals:        withdrawalQueue{make(chan *types.Withdrawal, 20)},
 	}, nil
@@ -197,7 +197,7 @@ func (c *SimulatedBeacon) sealBlock(withdrawals []*types.Withdrawal, timestamp u
 	if _, err = c.engineAPI.ForkchoiceUpdatedV2(c.curForkchoiceState, nil); err != nil {
 		return err
 	}
-	c.lastBlockTime = payload.SecondsTimestamp()
+	c.lastBlockTime = payload.Timestamp
 	return nil
 }
 
@@ -285,7 +285,7 @@ func (c *SimulatedBeacon) AdjustTime(adjustment time.Duration) error {
 		return errors.New("parent not found")
 	}
 	withdrawals := c.withdrawals.gatherPending(10)
-	return c.sealBlock(withdrawals, parent.SecondsTimestamp()+uint64(adjustment))
+	return c.sealBlock(withdrawals, parent.Time+uint64(adjustment))
 }
 
 func RegisterSimulatedBeaconAPIs(stack *node.Node, sim *SimulatedBeacon) {

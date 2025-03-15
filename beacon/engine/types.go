@@ -18,9 +18,8 @@ package engine
 
 import (
 	"fmt"
-	"math/big"
-
 	"github.com/holiman/uint256"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -87,17 +86,6 @@ func (p *PayloadAttributes) millisecondes() uint64 {
 
 func (p *PayloadAttributes) MilliTimestamp() uint64 { return p.Timestamp*1000 + p.millisecondes() }
 
-func (p *PayloadAttributes) SecondsTimestamp() uint64 { return p.Timestamp }
-
-func (p *PayloadAttributes) NextMilliTimestamp() uint64 {
-	if p.Random == (common.Hash{}) {
-		return p.Timestamp*1000 + OldBlockMillisecondsInterval
-	}
-	return p.MilliTimestamp() + NewBlockMillisecondsInterval
-}
-
-func (p *PayloadAttributes) NextSecondsTimestamp() uint64 { return p.NextMilliTimestamp() / 1000 }
-
 //go:generate go run github.com/fjl/gencodec -type ExecutableData -field-override executableDataMarshaling -out gen_ed.go
 
 // ExecutableData is the data necessary to execute an EL payload.
@@ -120,26 +108,6 @@ type ExecutableData struct {
 	BlobGasUsed   *uint64             `json:"blobGasUsed"`
 	ExcessBlobGas *uint64             `json:"excessBlobGas"`
 }
-
-func (e *ExecutableData) millisecondes() uint64 {
-	if e.Random == (common.Hash{}) {
-		return 0
-	}
-	return uint256.NewInt(0).SetBytes2(e.Random[:2]).Uint64()
-}
-
-func (e *ExecutableData) MilliTimestamp() uint64 { return e.Timestamp*1000 + e.millisecondes() }
-
-func (e *ExecutableData) SecondsTimestamp() uint64 { return e.Timestamp }
-
-func (e *ExecutableData) NextMilliTimestamp() uint64 {
-	if e.Random == (common.Hash{}) {
-		return e.Timestamp*1000 + OldBlockMillisecondsInterval
-	}
-	return e.MilliTimestamp() + NewBlockMillisecondsInterval
-}
-
-func (e *ExecutableData) NextSecondsTimestamp() uint64 { return e.NextMilliTimestamp() / 1000 }
 
 // JSON type overrides for executableData.
 type executableDataMarshaling struct {
@@ -320,7 +288,7 @@ func ExecutableDataToBlock(params ExecutableData, versionedHashes []common.Hash,
 		Number:           new(big.Int).SetUint64(params.Number),
 		GasLimit:         params.GasLimit,
 		GasUsed:          params.GasUsed,
-		Time:             params.SecondsTimestamp(),
+		Time:             params.Timestamp,
 		BaseFee:          params.BaseFeePerGas,
 		Extra:            params.ExtraData,
 		MixDigest:        params.Random,
@@ -348,7 +316,7 @@ func BlockToExecutableData(block *types.Block, fees *big.Int, sidecars []*types.
 		GasLimit:      block.GasLimit(),
 		GasUsed:       block.GasUsed(),
 		BaseFeePerGas: block.BaseFee(),
-		Timestamp:     block.SecondsTimestamp(),
+		Timestamp:     block.Time(),
 		ReceiptsRoot:  block.ReceiptHash(),
 		LogsBloom:     block.Bloom().Bytes(),
 		Transactions:  encodeTransactions(block.Transactions()),

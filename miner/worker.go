@@ -825,7 +825,7 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 
 	// Note the passed coinbase may be different with header.Coinbase.
 	env := &environment{
-		signer:   types.MakeSigner(w.chainConfig, header.Number, header.SecondsTimestamp()),
+		signer:   types.MakeSigner(w.chainConfig, header.Number, header.Time),
 		state:    state,
 		coinbase: coinbase,
 		header:   header,
@@ -1151,8 +1151,6 @@ func (g *generateParams) millisecondes() uint64 {
 
 func (g *generateParams) MilliTimestamp() uint64 { return g.timestamp*1000 + g.millisecondes() }
 
-func (g *generateParams) SecondsTimestamp() uint64 { return g.timestamp }
-
 // validateParams validates the given parameters.
 // It currently checks that the parent block is known and that the timestamp is valid,
 // i.e., after the parent block's timestamp.
@@ -1240,7 +1238,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	}
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if w.chainConfig.IsLondon(header.Number) {
-		header.BaseFee = eip1559.CalcBaseFee(w.chainConfig, parent, header.SecondsTimestamp())
+		header.BaseFee = eip1559.CalcBaseFee(w.chainConfig, parent, header.Time)
 		if !w.chainConfig.IsLondon(parent.Number) {
 			parentGasLimit := parent.GasLimit * w.chainConfig.ElasticityMultiplier()
 			header.GasLimit = core.CalcGasLimit(parentGasLimit, w.config.GasCeil)
@@ -1253,9 +1251,9 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 		header.GasLimit = w.config.GasCeil
 	}
 	// Apply EIP-4844, EIP-4788.
-	if w.chainConfig.IsCancun(header.Number, header.SecondsTimestamp()) {
+	if w.chainConfig.IsCancun(header.Number, header.Time) {
 		var excessBlobGas uint64
-		if w.chainConfig.IsCancun(parent.Number, parent.SecondsTimestamp()) {
+		if w.chainConfig.IsCancun(parent.Number, parent.Time) {
 			excessBlobGas = eip4844.CalcExcessBlobGas(*parent.ExcessBlobGas, *parent.BlobGasUsed)
 		} else {
 			// For the first post-fork block, both parent.data_gas_used and parent.excess_data_gas are evaluated as 0
@@ -1405,7 +1403,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		misc.ApplyPreContractHardFork(work.state)
 	}
 
-	misc.EnsureCreate2Deployer(w.chainConfig, work.header.SecondsTimestamp(), work.state)
+	misc.EnsureCreate2Deployer(w.chainConfig, work.header.Time, work.state)
 
 	start := time.Now()
 	if w.chain.TxDAGEnabledWhenMine() {

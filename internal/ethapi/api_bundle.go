@@ -67,7 +67,7 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBund
 	currentHeader := s.b.CurrentHeader()
 
 	if args.MaxBlockNumber == 0 && (args.MaxTimestamp == nil || *args.MaxTimestamp == 0) {
-		maxTimeStamp := currentHeader.SecondsTimestamp() + types.MaxBundleAliveTime
+		maxTimeStamp := currentHeader.Time + types.MaxBundleAliveTime
 		args.MaxTimestamp = &maxTimeStamp
 	}
 
@@ -81,12 +81,12 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBund
 		}
 	}
 
-	if args.MaxTimestamp != nil && *args.MaxTimestamp != 0 && *args.MaxTimestamp < currentHeader.SecondsTimestamp() {
+	if args.MaxTimestamp != nil && *args.MaxTimestamp != 0 && *args.MaxTimestamp < currentHeader.Time {
 		return common.Hash{}, newBundleError(errors.New("the maxTimestamp should not be less than currentBlockTimestamp"))
 	}
 
-	if (args.MaxTimestamp != nil && *args.MaxTimestamp > currentHeader.SecondsTimestamp()+types.MaxBundleAliveTime) ||
-		(args.MinTimestamp != nil && *args.MinTimestamp > currentHeader.SecondsTimestamp()+types.MaxBundleAliveTime) {
+	if (args.MaxTimestamp != nil && *args.MaxTimestamp > currentHeader.Time+types.MaxBundleAliveTime) ||
+		(args.MinTimestamp != nil && *args.MinTimestamp > currentHeader.Time+types.MaxBundleAliveTime) {
 		return common.Hash{}, newBundleError(errors.New(fmt.Sprintf("the minTimestamp/maxTimestamp should not be later than currentBlockTimestamp + %d seconds", types.MaxBundleAliveTime)))
 	}
 

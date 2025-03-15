@@ -1717,7 +1717,7 @@ func (pool *LegacyPool) reset(oldHead, newHead *types.Header) (demoteAddrs []com
 
 	if costFn := types.NewL1CostFunc(pool.chainconfig, statedb); costFn != nil {
 		pool.l1CostFn = func(rollupCostData types.RollupCostData) *big.Int {
-			return costFn(rollupCostData, newHead.SecondsTimestamp())
+			return costFn(rollupCostData, newHead.Time)
 		}
 	}
 

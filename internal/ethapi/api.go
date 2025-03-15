@@ -1028,7 +1028,7 @@ func (s *BlockChainAPI) GetBlockReceipts(ctx context.Context, blockNrOrHash rpc.
 	}
 
 	// Derive the sender.
-	signer := types.MakeSigner(s.b.ChainConfig(), block.Number(), block.SecondsTimestamp())
+	signer := types.MakeSigner(s.b.ChainConfig(), block.Number(), block.Time())
 
 	result := make([]map[string]interface{}, len(receipts))
 	for i, receipt := range receipts {
@@ -1358,7 +1358,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"extraData":        hexutil.Bytes(head.Extra),
 		"gasLimit":         hexutil.Uint64(head.GasLimit),
 		"gasUsed":          hexutil.Uint64(head.GasUsed),
-		"timestamp":        hexutil.Uint64(head.SecondsTimestamp()),
+		"timestamp":        hexutil.Uint64(head.Time),
 		"transactionsRoot": head.TxHash,
 		"receiptsRoot":     head.ReceiptHash,
 	}
@@ -1587,7 +1587,7 @@ func NewRPCPendingTransaction(tx *types.Transaction, current *types.Header, conf
 	if current != nil {
 		baseFee = eip1559.CalcBaseFee(config, current, current.NextSecondsTimestamp())
 		blockNumber = current.Number.Uint64()
-		blockTime = current.SecondsTimestamp()
+		blockTime = current.Time
 	}
 	return newRPCTransaction(tx, common.Hash{}, blockNumber, blockTime, 0, baseFee, config, nil)
 }
@@ -1600,7 +1600,7 @@ func newRPCTransactionFromBlockIndex(ctx context.Context, b *types.Block, index 
 	}
 	tx := txs[index]
 	rcpt := depositTxReceipt(ctx, b.Hash(), index, backend, tx)
-	return newRPCTransaction(tx, b.Hash(), b.NumberU64(), b.SecondsTimestamp(), index, b.BaseFee(), config, rcpt)
+	return newRPCTransaction(tx, b.Hash(), b.NumberU64(), b.Time(), index, b.BaseFee(), config, rcpt)
 }
 
 func depositTxReceipt(ctx context.Context, blockHash common.Hash, index uint64, backend Backend, tx *types.Transaction) *types.Receipt {
@@ -1691,7 +1691,7 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 	}
 	isPostMerge := header.Difficulty.Cmp(common.Big0) == 0
 	// Retrieve the precompiles since they don't need to be added to the access list
-	precompiles := vm.ActivePrecompiles(b.ChainConfig().Rules(header.Number, isPostMerge, header.SecondsTimestamp()))
+	precompiles := vm.ActivePrecompiles(b.ChainConfig().Rules(header.Number, isPostMerge, header.Time))
 
 	// Create an initial tracer
 	prevTracer := logger.NewAccessListTracer(nil, args.from(), to, precompiles)
@@ -1849,7 +1849,7 @@ func (s *TransactionAPI) GetTransactionByHash(ctx context.Context, hash common.H
 		return nil, err
 	}
 	rcpt := depositTxReceipt(ctx, blockHash, index, s.b, tx)
-	return newRPCTransaction(tx, blockHash, blockNumber, header.SecondsTimestamp(), index, header.BaseFee, s.b.ChainConfig(), rcpt), nil
+	return newRPCTransaction(tx, blockHash, blockNumber, header.Time, index, header.BaseFee, s.b.ChainConfig(), rcpt), nil
 }
 
 // GetRawTransactionByHash returns the bytes of the transaction for the given hash.
@@ -1891,7 +1891,7 @@ func (s *TransactionAPI) GetTransactionReceipt(ctx context.Context, hash common.
 	receipt := receipts[index]
 
 	// Derive the sender.
-	signer := types.MakeSigner(s.b.ChainConfig(), header.Number, header.SecondsTimestamp())
+	signer := types.MakeSigner(s.b.ChainConfig(), header.Number, header.Time)
 	return marshalReceipt(receipt, blockHash, blockNumber, signer, tx, int(index), s.b.ChainConfig()), nil
 }
 
@@ -1992,7 +1992,7 @@ func SubmitTransaction(ctx context.Context, b Backend, tx *types.Transaction) (c
 	}
 	// Print a log with full tx details for manual investigations and interventions
 	head := b.CurrentBlock()
-	signer := types.MakeSigner(b.ChainConfig(), head.Number, head.SecondsTimestamp())
+	signer := types.MakeSigner(b.ChainConfig(), head.Number, head.Time)
 	from, err := types.Sender(signer, tx)
 	if err != nil {
 		return common.Hash{}, err

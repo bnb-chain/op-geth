@@ -26,7 +26,7 @@ func (p PayloadAttributes) MarshalJSON() ([]byte, error) {
 		GasLimit              *hexutil.Uint64     `json:"gasLimit,omitempty" gencodec:"optional"`
 	}
 	var enc PayloadAttributes
-	enc.Timestamp = hexutil.Uint64(p.SecondsTimestamp())
+	enc.Timestamp = hexutil.Uint64(p.Timestamp)
 	enc.Random = p.Random
 	enc.SuggestedFeeRecipient = p.SuggestedFeeRecipient
 	enc.Withdrawals = p.Withdrawals

@@ -61,6 +61,6 @@ func StartENRUpdater(chain *core.BlockChain, ln *enode.LocalNode) {
 func currentENREntry(chain *core.BlockChain) *enrEntry {
 	head := chain.CurrentHeader()
 	return &enrEntry{
-		ForkID: forkid.NewID(chain.Config(), chain.Genesis(), head.Number.Uint64(), head.SecondsTimestamp()),
+		ForkID: forkid.NewID(chain.Config(), chain.Genesis(), head.Number.Uint64(), head.Time),
 	}
 }

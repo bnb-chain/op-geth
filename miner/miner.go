@@ -367,7 +367,7 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain
 	if miner.worker.chainConfig.IsLondon(header.Number) {
-		header.BaseFee = eip1559.CalcBaseFee(miner.worker.chainConfig, parent, header.SecondsTimestamp())
+		header.BaseFee = eip1559.CalcBaseFee(miner.worker.chainConfig, parent, header.Time)
 	}
 
 	if miner.worker.chainConfig.Optimism != nil && miner.worker.config.GasCeil != 0 {
@@ -376,9 +376,9 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	}
 
 	// Apply EIP-4844, EIP-4788.
-	if miner.worker.chainConfig.IsCancun(header.Number, header.SecondsTimestamp()) {
+	if miner.worker.chainConfig.IsCancun(header.Number, header.Time) {
 		var excessBlobGas uint64
-		if miner.worker.chainConfig.IsCancun(parent.Number, parent.SecondsTimestamp()) {
+		if miner.worker.chainConfig.IsCancun(parent.Number, parent.Time) {
 			excessBlobGas = eip4844.CalcExcessBlobGas(*parent.ExcessBlobGas, *parent.BlobGasUsed)
 		} else {
 			// For the first post-fork block, both parent.data_gas_used and parent.excess_data_gas are evaluated as 0
@@ -401,7 +401,7 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	env := &environment{
 		header:  header,
 		state:   state.Copy(),
-		signer:  types.MakeSigner(miner.worker.chainConfig, header.Number, header.SecondsTimestamp()),
+		signer:  types.MakeSigner(miner.worker.chainConfig, header.Number, header.Time),
 		gasPool: prepareGasPool(),
 	}
 	return env, nil

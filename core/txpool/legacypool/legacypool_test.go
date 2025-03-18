@@ -2474,6 +2474,79 @@ func TestDeduplication(t *testing.T) {
 	}
 }
 
+// Tests that the pool rejects duplicate transactions.
+func TestConcurrentAccessLocal(t *testing.T) {
+	t.Parallel()
+	// Create the pool to test the pricing enforcement with
+	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	blockchain := newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
+
+	pool := New(testTxPoolConfig, blockchain)
+	pool.Init(testTxPoolConfig.PriceLimit, blockchain.CurrentBlock(), makeAddressReserver())
+	defer pool.Close()
+
+	// Create a test account to add transactions with
+	key, _ := crypto.GenerateKey()
+	testAddBalance(pool, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1000000000))
+
+	// Create a batch of transactions and add a few of them
+	txs := make([]*types.Transaction, 100)
+	for i := 0; i < len(txs); i++ {
+		txs[i] = pricedTransaction(uint64(i), 100000, big.NewInt(1), key)
+	}
+	var firsts []*types.Transaction
+	for i := 0; i < len(txs); i += 2 {
+		firsts = append(firsts, txs[i])
+	}
+	errs := pool.addLocals(firsts)
+	if len(errs) != len(firsts) {
+		t.Fatalf("first add mismatching result count: have %d, want %d", len(errs), len(firsts))
+	}
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("add %d failed: %v", i, err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	// Start a goroutine to write 100 transactions to the pool
+	go func() {
+		defer wg.Done()
+		start := time.Now()
+
+		for i := 0; i < 1000; i++ {
+			acc, _ := crypto.GenerateKey()
+			testAddBalance(pool, crypto.PubkeyToAddress(acc.PublicKey), big.NewInt(1000000000))
+			// Create a batch of transactions and add a few of them
+			txsToWrite := make([]*types.Transaction, 2)
+			for j := 0; j < len(txsToWrite); j++ {
+				txsToWrite[j] = pricedTransaction(uint64(j)+100, 200000, big.NewInt(1), acc)
+			}
+			for j := 0; j < len(txsToWrite); j++ {
+				pool.add(txsToWrite[j], true)
+			}
+		}
+
+		fmt.Println("write finish", "cost time", time.Since(start).Milliseconds())
+	}()
+
+	// Start a goroutine to randomly read 5000 transactions from the pool
+	go func() {
+		defer wg.Done()
+		start := time.Now()
+		txnNum := 0
+		for i := 0; i < 2000; i++ {
+			pool.Pending(txpool.PendingFilter{MinTip: uint256.NewInt(1)})
+
+		}
+		fmt.Println("read finish", "cost time", time.Since(start).Milliseconds(), "txnNum", txnNum)
+	}()
+
+	wg.Wait()
+}
+
 // Tests that the pool rejects replacement transactions that don't meet the minimum
 // price bump required.
 func TestReplacement(t *testing.T) {

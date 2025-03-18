@@ -85,10 +85,12 @@ func (pc *cacheForMiner) dump() (map[common.Address]types.Transactions, map[comm
 			pending[addr] = append(pending[addr], tx)
 		}
 	}
+	pc.txLock.Unlock()
+	pc.addrLock.Lock()
 	for addr := range pc.locals {
 		locals[addr] = true
 	}
-	pc.txLock.Unlock()
+	pc.addrLock.Unlock()
 	for _, txs := range pending {
 		// sorted by nonce
 		sort.Sort(types.TxByNonce(txs))

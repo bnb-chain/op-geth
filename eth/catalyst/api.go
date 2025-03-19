@@ -251,7 +251,20 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 	api.forkchoiceLock.Lock()
 	defer api.forkchoiceLock.Unlock()
 
-	log.Trace("Engine API request received", "method", "ForkchoiceUpdated", "head", update.HeadBlockHash, "finalized", update.FinalizedBlockHash, "safe", update.SafeBlockHash)
+	log.Info("Engine API request received",
+		"method", "ForkchoiceUpdated",
+		"head", update.HeadBlockHash,
+		"finalized", update.FinalizedBlockHash,
+		"safe", update.SafeBlockHash)
+	if payloadAttributes != nil {
+		log.Info("Engine API request received, attribute info",
+			"method", "ForkchoiceUpdated",
+			"millisecond_timestamp", payloadAttributes.MilliTimestamp(),
+			"random", payloadAttributes.Random,
+			"gas_limit", payloadAttributes.GasLimit,
+			"no_tx_pool", payloadAttributes.NoTxPool,
+			"tx_len", len(payloadAttributes.Transactions))
+	}
 	if update.HeadBlockHash == (common.Hash{}) {
 		log.Warn("Forkchoice requested update to zero hash")
 		return engine.STATUS_INVALID, nil // TODO(karalabe): Why does someone send us this?
@@ -445,7 +458,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 		}
 		api.localBlocks.put(id, payload)
 		forkchoiceUpdateAttributesTimer.UpdateSince(start)
-		log.Debug("forkchoiceUpdateAttributesTimer", "duration", common.PrettyDuration(time.Since(start)), "id", id)
+		log.Info("forkchoiceUpdateAttributesTimer", "duration", common.PrettyDuration(time.Since(start)), "id", id)
 		return valid(&id), nil
 	}
 	forkchoiceUpdateHeadsTimer.UpdateSince(start)
@@ -517,7 +530,9 @@ func (api *ConsensusAPI) getPayload(payloadID engine.PayloadID, full bool) (*eng
 		getPayloadTimer.UpdateSince(start)
 		log.Debug("getPayloadTimer", "duration", common.PrettyDuration(time.Since(start)), "id", payloadID)
 	}()
-	log.Trace("Engine API request received", "method", "GetPayload", "id", payloadID)
+	log.Info("Engine API request received",
+		"method", "GetPayload",
+		"id", payloadID)
 	data := api.localBlocks.get(payloadID, full)
 	if data == nil {
 		return nil, engine.UnknownPayload
@@ -604,7 +619,10 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	api.newPayloadLock.Lock()
 	defer api.newPayloadLock.Unlock()
 
-	log.Trace("Engine API request received", "method", "NewPayload", "number", params.Number, "hash", params.BlockHash)
+	log.Info("Engine API request received",
+		"method", "NewPayload",
+		"number", params.Number,
+		"hash", params.BlockHash)
 
 	block := api.localBlocks.getBlockByHash(params.BlockHash)
 	if block == nil {
@@ -615,6 +633,14 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 			return api.invalid(err, nil), nil
 		}
 	}
+
+	log.Info("Engine API request received, param info",
+		"method", "NewPayload",
+		"number", params.Number,
+		"hash", params.BlockHash,
+		"second_timestamp", block.Time(),
+		"millisecond_timestamp", block.MilliTimestamp(),
+		"mix_digest", block.MixDigest())
 
 	// Stash away the last update to warn the user if the beacon client goes offline
 	api.lastNewPayloadLock.Lock()
@@ -640,6 +666,7 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	// update after legit payload executions.
 	parent := api.eth.BlockChain().GetBlock(block.ParentHash(), block.NumberU64()-1)
 	if parent == nil {
+		log.Info("trigger to delay payload import due to failed to get parent block", "parent_hash", block.ParentHash(), "parent_id", block.NumberU64()-1, "sync_mode", api.eth.SyncMode())
 		return api.delayPayloadImport(block)
 	}
 	// We have an existing parent, do some sanity checks to avoid the beacon client
@@ -666,6 +693,7 @@ func (api *ConsensusAPI) newPayload(params engine.ExecutableData, versionedHashe
 	// into the database directly will conflict with the assumptions of snap sync
 	// that it has an empty db that it can fill itself.
 	if api.eth.SyncMode() != downloader.FullSync {
+		log.Info("trigger to delay payload import due to sync mode is not fullsync", "parent_hash", block.ParentHash(), "parent_id", block.NumberU64()-1, "sync_mode", api.eth.SyncMode())
 		return api.delayPayloadImport(block)
 	}
 	if !api.eth.BlockChain().HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
@@ -804,7 +832,7 @@ func (api *ConsensusAPI) delayPayloadImport(block *types.Block) (engine.PayloadS
 	// some strain from the forkchoice update.
 	err := api.eth.Downloader().BeaconExtend(api.eth.SyncMode(), block.Header())
 	if err == nil {
-		log.Debug("Payload accepted for sync extension", "number", block.NumberU64(), "hash", block.Hash())
+		log.Info("Payload accepted for sync extension", "number", block.NumberU64(), "hash", block.Hash(), "sync_mode", api.eth.SyncMode())
 		return engine.PayloadStatusV1{Status: engine.SYNCING}, nil
 	}
 	// Either no beacon sync was started yet, or it rejected the delivered

@@ -25,7 +25,7 @@ func (nc *noneCacheForMiner) del(txs types.Transactions, signer types.Signer) {
 	// do nothing
 }
 
-func (nc *noneCacheForMiner) dump() map[common.Address]types.Transactions {
+func (nc *noneCacheForMiner) dump() (map[common.Address]types.Transactions, map[common.Address]bool) {
 	// dump all pending transactions from the pool
 	nc.pool.mu.RLock()
 	defer nc.pool.mu.RUnlock()
@@ -33,7 +33,11 @@ func (nc *noneCacheForMiner) dump() map[common.Address]types.Transactions {
 	for addr, txlist := range nc.pool.pending {
 		pending[addr] = txlist.Flatten()
 	}
-	return pending
+	locals := make(map[common.Address]bool, len(nc.pool.locals.accounts))
+	for addr := range nc.pool.locals.accounts {
+		locals[addr] = true
+	}
+	return pending, locals
 }
 
 func (nc *noneCacheForMiner) markLocal(addr common.Address) {

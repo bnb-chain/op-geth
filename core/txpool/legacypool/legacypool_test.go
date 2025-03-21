@@ -2474,6 +2474,75 @@ func TestDeduplication(t *testing.T) {
 	}
 }
 
+// Tests concurrent reads and writes of local account set in legacypool
+func TestConcurrentAccessLocalAccount(t *testing.T) {
+	t.Parallel()
+	// Create the pool to test the pricing enforcement with
+	statedb, _ := state.New(types.EmptyRootHash, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	blockchain := newTestBlockChain(params.TestChainConfig, 1000000, statedb, new(event.Feed))
+
+	testTxPoolConfig.EnableCache = true
+	pool := New(testTxPoolConfig, blockchain)
+	testTxPoolConfig.EnableCache = false
+	pool.Init(testTxPoolConfig.PriceLimit, blockchain.CurrentBlock(), makeAddressReserver())
+	defer pool.Close()
+
+	// Create test accounts
+	key, _ := crypto.GenerateKey()
+	testAddBalance(pool, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1000000000))
+
+	// Create a batch of transactions and add a few of them
+	txs := make([]*types.Transaction, 100)
+	for i := 0; i < len(txs); i++ {
+		txs[i] = pricedTransaction(uint64(i), 100000, big.NewInt(1), key)
+	}
+	var firsts []*types.Transaction
+	for i := 0; i < len(txs); i += 2 {
+		firsts = append(firsts, txs[i])
+	}
+	errs := pool.addLocals(firsts)
+	if len(errs) != len(firsts) {
+		t.Fatalf("first add mismatching result count: have %d, want %d", len(errs), len(firsts))
+	}
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("add %d failed: %v", i, err)
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	finished := make(chan struct{})
+	// Start a goroutine to read transactions from the pool which access the locals map
+	go func() {
+		defer wg.Done()
+
+		for {
+			select {
+			case <-finished:
+				return
+			default:
+				pool.Pending(txpool.PendingFilter{MinTip: uint256.NewInt(1)})
+			}
+		}
+	}()
+
+	// It is expected that no concurrent map read and map write error happen
+	for i := 0; i < 10000; i++ {
+		acc, _ := crypto.GenerateKey()
+		testAddBalance(pool, crypto.PubkeyToAddress(acc.PublicKey), big.NewInt(1000000000))
+		txsList := make([]*types.Transaction, 1)
+		for j := 0; j < len(txsList); j++ {
+			txsList[j] = pricedTransaction(uint64(j)+100, 200000, big.NewInt(1), acc)
+		}
+		pool.Add(txsList, true, true)
+	}
+	close(finished)
+
+	wg.Wait()
+}
+
 // Tests that the pool rejects replacement transactions that don't meet the minimum
 // price bump required.
 func TestReplacement(t *testing.T) {

@@ -7,16 +7,19 @@ This enhancement significantly improves transaction efficiency and overall netwo
 
 It is set to be activated on both the opBNB Mainnet and Testnet environments according to the following schedule:
 
-- Testnet: Apr-02-2025 11:00 AM +UTC
+- Testnet: Apr-02-2025 03:00 AM +UTC
 - Mainnet: Mid-Apr-2025
 
 All mainnet and testnet nodes must upgrade to this release before the hardfork time.
 
 ### What's Changed
 
-* feat: change block internal to 500ms by @joey in https://github.com/bnb-chain/op-geth/pull/269
-* fix: concurrent issue of local account set in legacypool by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/270
-* feat: add millisecond to rpc field by @will-2012 https://github.com/bnb-chain/op-geth/pull/273
+#### FEATURE
+* [\#269](https://github.com/bnb-chain/op-geth/pull/269) change block internal to 500ms
+* [\#273](https://github.com/bnb-chain/op-geth/pull/273) add millisecond to rpc field
+
+### BUGFIX
+* [\#270](https://github.com/bnb-chain/op-geth/pull/270) concurrent issue of local account set in legacypool
 
 ### Docker Images
 ghcr.io/bnb-chain/op-geth:v0.5.7

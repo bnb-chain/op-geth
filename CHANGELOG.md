@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.5.7
+
+This release introduces the implementation of [BEP-543](https://github.com/bnb-chain/BEPs/blob/master/BEPs/BEP-543.md), effectively reducing the block time from 1 second to an impressive 500 milliseconds.
+This enhancement significantly improves transaction efficiency and overall network performance, allowing for faster processing and a more seamless experience for users.
+
+It is set to be activated on both the opBNB Mainnet and Testnet environments according to the following schedule:
+
+- Testnet: Apr-02-2025 11:00 AM +UTC
+- Mainnet: Mid-Apr-2025
+
+All mainnet and testnet nodes must upgrade to this release before the hardfork time.
+
+### What's Changed
+
+* feat: change block internal to 500ms by @joey in https://github.com/bnb-chain/op-geth/pull/269
+* fix: concurrent issue of local account set in legacypool by @andyzhang2023 in https://github.com/bnb-chain/op-geth/pull/270
+* feat: add millisecond to rpc field by @will-2012 https://github.com/bnb-chain/op-geth/pull/273
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.7
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.6...v0.5.7
+
 ## v0.5.6
 
 This is a minor release for opBNB Mainnet and Testnet.

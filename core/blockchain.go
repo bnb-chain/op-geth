@@ -2252,10 +2252,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			snapDiffItems, snapBufItems = bc.snaps.Size()
 		}
 
-		var trieDiffNodes, trieBufNodes, trieImmutableBufNodes common.StorageSize
-		if !minerMode {
-			trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ = bc.triedb.Size()
-		}
+		trieDiffNodes, trieBufNodes, trieImmutableBufNodes, _ := bc.triedb.Size()
 		stats.report(chain, it.index, snapDiffItems, snapBufItems, trieDiffNodes, trieBufNodes, trieImmutableBufNodes, setHead)
 		blockGasUsedGauge.Update(int64(block.GasUsed()) / 1000000)
 

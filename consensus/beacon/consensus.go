@@ -255,7 +255,7 @@ func (beacon *Beacon) verifyHeader(chain consensus.ChainHeaderReader, header, pa
 		return errInvalidUncleHash
 	}
 	// Verify the timestamp
-	if header.Time <= parent.Time {
+	if header.MilliTimestamp() <= parent.MilliTimestamp() {
 		return errInvalidTimestamp
 	}
 	// Verify the block's difficulty to ensure it's the default constant

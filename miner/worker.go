@@ -1142,6 +1142,15 @@ type generateParams struct {
 	isUpdate  bool               // Optional flag indicating that this is building a discardable update
 }
 
+func (g *generateParams) millisecondes() uint64 {
+	if g.random == (common.Hash{}) {
+		return 0
+	}
+	return uint256.NewInt(0).SetBytes2(g.random[:2]).Uint64()
+}
+
+func (g *generateParams) MilliTimestamp() uint64 { return g.timestamp*1000 + g.millisecondes() }
+
 // validateParams validates the given parameters.
 // It currently checks that the parent block is known and that the timestamp is valid,
 // i.e., after the parent block's timestamp.
@@ -1162,16 +1171,21 @@ func (w *worker) validateParams(genParams *generateParams) (time.Duration, error
 	}
 
 	// Sanity check the timestamp correctness
-	blockTime := int64(genParams.timestamp) - int64(parent.Time)
+	blockTime := int64(genParams.MilliTimestamp()) - int64(parent.MilliTimestamp())
 	if blockTime <= 0 && genParams.forceTime {
-		return 0, fmt.Errorf("invalid timestamp, parent %d given %d", parent.Time, genParams.timestamp)
+		return 0, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), genParams.MilliTimestamp())
 	}
 
-	// minimum payload build time of 1s
-	if blockTime < 1 {
-		blockTime = 1
+	if genParams.random == (common.Hash{}) {
+		if blockTime < 1000 {
+			blockTime = 1000
+		}
+	} else {
+		if blockTime < 500 {
+			blockTime = 500
+		}
 	}
-	return time.Duration(blockTime) * time.Second, nil
+	return time.Duration(blockTime) * time.Millisecond, nil
 }
 
 // prepareWork constructs the sealing task according to the given parameters,
@@ -1192,13 +1206,20 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	}
 	// Sanity check the timestamp correctness, recap the timestamp
 	// to parent+1 if the mutation is allowed.
-	timestamp := genParams.timestamp
-	if parent.Time >= timestamp {
+	timestamp := genParams.MilliTimestamp()
+	if parent.MilliTimestamp() >= timestamp {
 		if genParams.forceTime {
-			return nil, fmt.Errorf("invalid timestamp, parent %d given %d", parent.Time, timestamp)
+			return nil, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), timestamp)
 		}
-		timestamp = parent.Time + 1
+		timestamp = parent.NextMilliTimestamp()
+		if genParams.random != (common.Hash{}) {
+			milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
+			genParams.random[0] = milliPartBytes[30]
+			genParams.random[1] = milliPartBytes[31]
+		}
 	}
+	timestamp = timestamp / 1000
+
 	// Construct the sealing block header.
 	header := &types.Header{
 		ParentHash: parent.Hash(),

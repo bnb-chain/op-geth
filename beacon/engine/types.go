@@ -18,12 +18,18 @@ package engine
 
 import (
 	"fmt"
+	"github.com/holiman/uint256"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/trie"
+)
+
+var (
+	OldBlockMillisecondsInterval uint64 = 1000
+	NewBlockMillisecondsInterval uint64 = 500
 )
 
 // PayloadVersion denotes the version of PayloadAttributes used to request the
@@ -58,11 +64,21 @@ type PayloadAttributes struct {
 
 // JSON type overrides for PayloadAttributes.
 type payloadAttributesMarshaling struct {
-	Timestamp hexutil.Uint64
+	TempTimestamp hexutil.Uint64 // temp change 'Timestamp' to 'TempTimestamp' for debugging
+	Random        hexutil.Bytes  // Random store the milliseconds
 
 	Transactions []hexutil.Bytes
 	GasLimit     *hexutil.Uint64
 }
+
+func (p *PayloadAttributes) millisecondes() uint64 {
+	if p.Random == (common.Hash{}) {
+		return 0
+	}
+	return uint256.NewInt(0).SetBytes2(p.Random[:2]).Uint64()
+}
+
+func (p *PayloadAttributes) MilliTimestamp() uint64 { return p.Timestamp*1000 + p.millisecondes() }
 
 //go:generate go run github.com/fjl/gencodec -type ExecutableData -field-override executableDataMarshaling -out gen_ed.go
 
@@ -93,6 +109,7 @@ type executableDataMarshaling struct {
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
 	Timestamp     hexutil.Uint64
+	Random        hexutil.Bytes // Random store the milliseconds
 	BaseFeePerGas *hexutil.Big
 	ExtraData     hexutil.Bytes
 	LogsBloom     hexutil.Bytes

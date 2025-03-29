@@ -690,7 +690,8 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 			staled[tx.Hash()] = struct{}{}
 		}
 	}
-	for addr, txs := range pool.pendingCache.dump() {
+	pendingTxs, localAddrs := pool.pendingCache.dump()
+	for addr, txs := range pendingTxs {
 		// remove nonce too low transactions
 		if len(staled) > 0 {
 			noncetoolow := -1
@@ -705,7 +706,7 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 		}
 
 		// If the miner requests tip enforcement, cap the lists now
-		if minTipBig != nil && !pool.locals.contains(addr) {
+		if minTipBig != nil && !localAddrs[addr] {
 			for i, tx := range txs {
 				if tx.EffectiveGasTipIntCmp(minTipBig, baseFeeBig) < 0 {
 					txs = txs[:i]
@@ -1546,7 +1547,7 @@ func (pool *LegacyPool) runReorg(done chan struct{}, reset *txpoolResetRequest, 
 		var pendingBaseFee = pool.priced.GetBaseFee()
 		if reset.newHead != nil {
 			if pool.chainconfig.IsLondon(new(big.Int).Add(reset.newHead.Number, big.NewInt(1))) {
-				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.Time+1)
+				pendingBaseFee = eip1559.CalcBaseFee(pool.chainconfig, reset.newHead, reset.newHead.NextSecondsTimestamp())
 				pool.priced.SetBaseFee(pendingBaseFee)
 			} else {
 				pool.priced.Reheap()

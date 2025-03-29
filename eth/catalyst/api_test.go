@@ -279,8 +279,8 @@ func TestInvalidPayloadTimestamp(t *testing.T) {
 	for i, test := range tests {
 		t.Run(fmt.Sprintf("Timestamp test: %v", i), func(t *testing.T) {
 			params := engine.PayloadAttributes{
-				Timestamp:             test.time,
-				Random:                crypto.Keccak256Hash([]byte{byte(123)}),
+				Timestamp: test.time,
+				//Random:                crypto.Keccak256Hash([]byte{byte(123)}),
 				SuggestedFeeRecipient: parent.Coinbase,
 			}
 			fcState := engine.ForkchoiceStateV1{
@@ -630,8 +630,8 @@ func TestNewPayloadOnInvalidChain(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 		var (
 			params = engine.PayloadAttributes{
-				Timestamp:             parent.Time + 1,
-				Random:                crypto.Keccak256Hash([]byte{byte(i)}),
+				Timestamp: parent.Time + 1,
+				//Random:                crypto.Keccak256Hash([]byte{byte(i)}),
 				SuggestedFeeRecipient: parent.Coinbase,
 			}
 			fcState = engine.ForkchoiceStateV1{

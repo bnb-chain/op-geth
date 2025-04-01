@@ -27,11 +27,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
-var (
-	OldBlockMillisecondsInterval uint64 = 1000
-	NewBlockMillisecondsInterval uint64 = 500
-)
-
 // PayloadVersion denotes the version of PayloadAttributes used to request the
 // building of the payload to commence.
 type PayloadVersion byte

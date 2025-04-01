@@ -1151,6 +1151,21 @@ func (g *generateParams) millisecondes() uint64 {
 
 func (g *generateParams) MilliTimestamp() uint64 { return g.timestamp*1000 + g.millisecondes() }
 
+func (g *generateParams) BlockMillisecondTimeUnit() uint64 {
+	if g.random == (common.Hash{}) {
+		return types.DefaultBlockIntervalUintCount
+	}
+	count := uint256.NewInt(0).SetBytes2(g.random[2:2]).Uint64()
+	if count == 0 {
+		return types.DefaultBlockIntervalUintCount
+	}
+	return count
+}
+
+func (g *generateParams) BlockMillisecondTime() uint64 {
+	return g.BlockMillisecondTimeUnit() * types.BlockMillisecondsIntervalUint
+}
+
 // validateParams validates the given parameters.
 // It currently checks that the parent block is known and that the timestamp is valid,
 // i.e., after the parent block's timestamp.
@@ -1176,14 +1191,8 @@ func (w *worker) validateParams(genParams *generateParams) (time.Duration, error
 		return 0, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), genParams.MilliTimestamp())
 	}
 
-	if genParams.random == (common.Hash{}) {
-		if blockTime < 1000 {
-			blockTime = 1000
-		}
-	} else {
-		if blockTime < 500 {
-			blockTime = 500
-		}
+	if blockTime < int64(genParams.BlockMillisecondTime()) {
+		blockTime = int64(genParams.BlockMillisecondTime())
 	}
 	return time.Duration(blockTime) * time.Millisecond, nil
 }
@@ -1216,6 +1225,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 			milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
 			genParams.random[0] = milliPartBytes[30]
 			genParams.random[1] = milliPartBytes[31]
+			genParams.random[2] = parent.MixDigest[2]
 		}
 	}
 	timestamp = timestamp / 1000

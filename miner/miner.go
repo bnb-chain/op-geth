@@ -355,6 +355,7 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
 	mixDigest[0] = milliPartBytes[30]
 	mixDigest[1] = milliPartBytes[31]
+	mixDigest[2] = parent.MixDigest[2]
 
 	header := &types.Header{
 		ParentHash: parent.Hash(),

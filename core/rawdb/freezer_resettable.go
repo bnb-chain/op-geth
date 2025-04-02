@@ -52,6 +52,8 @@ func NewResettableFreezer(datadir string, namespace string, readonly, writeTrieN
 	if err := cleanup(datadir); err != nil {
 		return nil, err
 	}
+
+	log.Info("debug123: datadir is", "dir", datadir, "namespace", namespace, " max table  size", maxTableSize)
 	opener := func() (*Freezer, error) {
 		return NewFreezer(datadir, namespace, readonly, writeTrieNodes, maxTableSize, tables)
 	}

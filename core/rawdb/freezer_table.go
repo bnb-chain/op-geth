@@ -179,6 +179,8 @@ func newTable(path string, name string, readMeter metrics.Meter, writeMeter metr
 		readonly:      readonly,
 		maxFileSize:   maxFilesize,
 	}
+	log.Info("debug123: freeze table info:", "index:", index, "meta", meta,
+		"name", name, "path:", path, "max file size", maxFilesize)
 	if err := tab.repair(); err != nil {
 		tab.Close()
 		return nil, err
@@ -398,6 +400,7 @@ func (t *freezerTable) truncateHead(items uint64) error {
 		return nil
 	}
 	if items < t.itemHidden.Load() {
+		log.Error("debug123: tables item compare err", "items:", items, "itemHidden:", t.itemHidden.Load())
 		return errors.New("truncation below tail")
 	}
 	// We need to truncate, save the old size for metrics tracking

@@ -388,6 +388,7 @@ func (f *Freezer) repair() error {
 		}
 	}
 	for _, table := range f.tables {
+		log.Info("debug123: truncate head deal with table", "table name", table.name)
 		if err := table.truncateHead(head); err != nil {
 			return err
 		}

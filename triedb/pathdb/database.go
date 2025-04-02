@@ -185,6 +185,9 @@ func New(diskdb ethdb.Database, config *Config) *Database {
 	// ancient store. Otherwise, all the relevant functionalities are disabled.
 	if ancient, err := diskdb.AncientDatadir(); err == nil && ancient != "" && !db.readOnly {
 		db.fastRecovery = checkAncientAndNodeBuffer(ancient, config.TrieNodeBufferType)
+		if db.fastRecovery {
+			log.Info("debug123: fast recovery set when new state freezer")
+		}
 		freezer, err := rawdb.NewStateFreezer(ancient, false, db.fastRecovery)
 		if err != nil {
 			log.Crit("Failed to open state history freezer", "err", err)

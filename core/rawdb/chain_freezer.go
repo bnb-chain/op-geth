@@ -184,6 +184,7 @@ func (f *chainFreezer) freeze(db ethdb.KeyValueStore) {
 
 		// use finalized block as the chain freeze indicator was used for multiDatabase feature, if multiDatabase is false, keep 9W blocks in db
 		if f.multiDatabase {
+			log.Error("should not use multidatabase here")
 			hash = ReadHeadBlockHash(nfdb)
 			if hash == (common.Hash{}) {
 				log.Debug("Current full block hash unavailable") // new chain, empty database

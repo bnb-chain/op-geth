@@ -133,7 +133,7 @@ func (h *Header) BlockMillisecondTimeUnit() uint64 {
 	if h.MixDigest == (common.Hash{}) {
 		return DefaultBlockIntervalUintCount
 	}
-	count := uint256.NewInt(0).SetBytes2(h.MixDigest[2:2]).Uint64()
+	count := uint256.NewInt(0).SetBytes1(h.MixDigest[2:3]).Uint64()
 	if count == 0 {
 		return DefaultBlockIntervalUintCount
 	}

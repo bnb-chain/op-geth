@@ -1155,7 +1155,7 @@ func (g *generateParams) BlockMillisecondTimeUnit() uint64 {
 	if g.random == (common.Hash{}) {
 		return types.DefaultBlockIntervalUintCount
 	}
-	count := uint256.NewInt(0).SetBytes2(g.random[2:2]).Uint64()
+	count := uint256.NewInt(0).SetBytes1(g.random[2:3]).Uint64()
 	if count == 0 {
 		return types.DefaultBlockIntervalUintCount
 	}

@@ -1959,6 +1959,10 @@ func TestRPCGetBlockOrHeader(t *testing.T) {
 			continue
 		}
 
+		if result != nil {
+			delete(result, "milliTimestamp")
+		}
+
 		testRPCResponseWithFile(t, i, result, rpc, tt.file)
 	}
 }

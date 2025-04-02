@@ -1170,19 +1170,20 @@ func (w *worker) validateParams(genParams *generateParams) (time.Duration, error
 		parent = block.Header()
 	}
 
+	currentMilliTimestamp := genParams.MilliTimestamp()
 	// Sanity check the timestamp correctness
-	blockTime := int64(genParams.MilliTimestamp()) - int64(parent.MilliTimestamp())
+	blockTime := int64(currentMilliTimestamp) - int64(parent.MilliTimestamp())
 	if blockTime <= 0 && genParams.forceTime {
 		return 0, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), genParams.MilliTimestamp())
 	}
 
-	if genParams.random == (common.Hash{}) {
-		if blockTime < 1000 {
-			blockTime = 1000
+	if w.chainConfig.IsVolta(currentMilliTimestamp) {
+		if blockTime < 500 {
+			blockTime = int64(w.chainConfig.MillisecondBlockInterval(currentMilliTimestamp))
 		}
 	} else {
-		if blockTime < 500 {
-			blockTime = 500
+		if blockTime > 1000 {
+			blockTime = int64(w.chainConfig.MillisecondBlockInterval(currentMilliTimestamp))
 		}
 	}
 	return time.Duration(blockTime) * time.Millisecond, nil
@@ -1207,15 +1208,19 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	// Sanity check the timestamp correctness, recap the timestamp
 	// to parent+1 if the mutation is allowed.
 	timestamp := genParams.MilliTimestamp()
+	isVoltaFork := w.chainConfig.IsVolta(timestamp)
 	if parent.MilliTimestamp() >= timestamp {
 		if genParams.forceTime {
 			return nil, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), timestamp)
 		}
-		timestamp = parent.NextMilliTimestamp()
-		if genParams.random != (common.Hash{}) {
+
+		if isVoltaFork {
+			timestamp = parent.MilliTimestamp() + w.chainConfig.BlockTimeInterval(timestamp)
 			milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
 			genParams.random[0] = milliPartBytes[30]
 			genParams.random[1] = milliPartBytes[31]
+		} else {
+			timestamp = parent.Time*1000 + w.chainConfig.BlockTimeInterval(timestamp)
 		}
 	}
 	timestamp = timestamp / 1000
@@ -1233,7 +1238,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 		header.Extra = w.extra
 	}
 	// Set the randomness field from the beacon chain if it's available.
-	if genParams.random != (common.Hash{}) {
+	if isVoltaFork && genParams.random != (common.Hash{}) {
 		header.MixDigest = genParams.random
 	}
 	// Set baseFee and GasLimit if we are on an EIP-1559 chain

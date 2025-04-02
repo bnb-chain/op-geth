@@ -83,7 +83,7 @@ func (oracle *Oracle) processBlock(bf *blockFees, percentiles []float64) {
 		bf.results.baseFee = new(big.Int)
 	}
 	if chainconfig.IsLondon(big.NewInt(int64(bf.blockNumber + 1))) {
-		bf.results.nextBaseFee = eip1559.CalcBaseFee(chainconfig, bf.header, bf.header.NextSecondsTimestamp())
+		bf.results.nextBaseFee = eip1559.CalcBaseFee(chainconfig, bf.header, chainconfig.NextSecondBlockTime(bf.header.MilliTimestamp()))
 	} else {
 		bf.results.nextBaseFee = new(big.Int)
 	}

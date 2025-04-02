@@ -20,21 +20,17 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/holiman/uint256"
 	"io"
 	"math/big"
 	"reflect"
 	"sync/atomic"
 	"time"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rlp"
-)
-
-var (
-	OldBlockMillisecondsInterval uint64 = 1000
-	NewBlockMillisecondsInterval uint64 = 500
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
@@ -124,15 +120,6 @@ func (h *Header) millisecondes() uint64 {
 }
 
 func (h *Header) MilliTimestamp() uint64 { return h.Time*1000 + h.millisecondes() }
-
-func (h *Header) NextMilliTimestamp() uint64 {
-	if h.MixDigest == (common.Hash{}) {
-		return h.Time*1000 + OldBlockMillisecondsInterval
-	}
-	return h.MilliTimestamp() + NewBlockMillisecondsInterval
-}
-
-func (h *Header) NextSecondsTimestamp() uint64 { return h.NextMilliTimestamp() / 1000 }
 
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.

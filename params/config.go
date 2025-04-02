@@ -37,15 +37,17 @@ var (
 )
 
 const (
-	OPMainnetChainID        = 10
-	OPGoerliChainID         = 420
-	BaseMainnetChainID      = 8453
-	BaseGoerliChainID       = 84531
-	baseSepoliaChainID      = 84532
-	baseGoerliDevnetChainID = 11763071
-	pgnSepoliaChainID       = 58008
-	devnetChainID           = 997
-	chaosnetChainID         = 888
+	OPMainnetChainID              = 10
+	OPGoerliChainID               = 420
+	BaseMainnetChainID            = 8453
+	BaseGoerliChainID             = 84531
+	baseSepoliaChainID            = 84532
+	baseGoerliDevnetChainID       = 11763071
+	pgnSepoliaChainID             = 58008
+	devnetChainID                 = 997
+	chaosnetChainID               = 888
+	VoltaMilliSecondBlockInterval = 500
+	BeforeBlockInterval           = 1000
 )
 
 const (
@@ -516,6 +518,7 @@ type ChainConfig struct {
 	CancunTime   *uint64 `json:"cancunTime,omitempty"`   // Cancun switch time (nil = no fork, 0 = already on cancun)
 	PragueTime   *uint64 `json:"pragueTime,omitempty"`   // Prague switch time (nil = no fork, 0 = already on prague)
 	VerkleTime   *uint64 `json:"verkleTime,omitempty"`   // Verkle switch time (nil = no fork, 0 = already on verkle)
+	VoltaTime    *uint64 `json:"voltaTime,omitempty"`    // Volta switch time (nil = no fork, 0 = already on volta)
 
 	BedrockBlock *big.Int `json:"bedrockBlock,omitempty"` // Bedrock switch block (nil = no fork, 0 = already on optimism bedrock)
 	RegolithTime *uint64  `json:"regolithTime,omitempty"` // Regolith switch time (nil = no fork, 0 = already on optimism regolith)
@@ -818,6 +821,10 @@ func (c *ChainConfig) IsCanyon(time uint64) bool {
 	return isTimestampForked(c.CanyonTime, time)
 }
 
+func (c *ChainConfig) IsVolta(timestamp uint64) bool {
+	return c.VoltaTime != nil && timestamp >= *c.VoltaTime
+}
+
 func (c *ChainConfig) IsEcotone(time uint64) bool {
 	return isTimestampForked(c.EcotoneTime, time)
 }
@@ -929,6 +936,7 @@ func (c *ChainConfig) CheckConfigForkOrder() error {
 		{name: "cancunTime", timestamp: c.CancunTime, optional: true},
 		{name: "pragueTime", timestamp: c.PragueTime, optional: true},
 		{name: "verkleTime", timestamp: c.VerkleTime, optional: true},
+		{name: "voltaTime", timestamp: c.VoltaTime, optional: true},
 	} {
 		if lastFork.name != "" {
 			switch {
@@ -1079,6 +1087,32 @@ func (c *ChainConfig) LatestFork(time uint64) forks.Fork {
 	default:
 		return forks.Paris
 	}
+}
+
+func (c *ChainConfig) IsMillisecondTimestamp(timestamp uint64) bool {
+	return c.IsVolta(timestamp)
+}
+
+func (c *ChainConfig) BlockTimeInterval(timestamp uint64) uint64 {
+	if c.IsVolta(timestamp) {
+		return VoltaMilliSecondBlockInterval
+	}
+	return BeforeBlockInterval
+}
+
+func (cfg *ChainConfig) NextMillisecondBlockTime(millisecondTimestamp uint64) uint64 {
+	return millisecondTimestamp + cfg.MillisecondBlockInterval(millisecondTimestamp)
+}
+
+func (cfg *ChainConfig) NextSecondBlockTime(millisecondTimestamp uint64) uint64 {
+	return cfg.NextMillisecondBlockTime(millisecondTimestamp) / 1000
+}
+
+func (cfg *ChainConfig) MillisecondBlockInterval(millisecondTimestamp uint64) uint64 {
+	if cfg.IsVolta(millisecondTimestamp / 1000) {
+		return VoltaMilliSecondBlockInterval
+	}
+	return BeforeBlockInterval
 }
 
 // isForkBlockIncompatible returns true if a fork scheduled at block s1 cannot be

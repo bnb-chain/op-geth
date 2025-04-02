@@ -348,13 +348,18 @@ func (miner *Miner) SimulateGaslessBundle(bundle *types.Bundle) (*types.Simulate
 
 func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	parent := miner.eth.BlockChain().CurrentBlock()
+	var timestamp uint64
 	// fork check
-	timestamp := parent.NextMilliTimestamp()
-
+	isVoltaFork := miner.worker.chainConfig.IsVolta(parent.MilliTimestamp())
 	var mixDigest common.Hash
-	milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
-	mixDigest[0] = milliPartBytes[30]
-	mixDigest[1] = milliPartBytes[31]
+	if isVoltaFork {
+		timestamp = parent.MilliTimestamp() + miner.worker.chainConfig.BlockTimeInterval(timestamp)
+		milliPartBytes := uint256.NewInt(timestamp % 1000).Bytes32()
+		mixDigest[0] = milliPartBytes[30]
+		mixDigest[1] = milliPartBytes[31]
+	} else {
+		timestamp = parent.Time*1000 + miner.worker.chainConfig.BlockTimeInterval(timestamp)
+	}
 
 	header := &types.Header{
 		ParentHash: parent.Hash(),

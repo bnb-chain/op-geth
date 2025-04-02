@@ -210,6 +210,7 @@ var (
 		HaberTime:   newUint64(1718872200), // Jun-20-2024 08:30 AM +UTC
 		WrightTime:  newUint64(1724738400), // Aug-27-2024 06:00 AM +UTC
 		FjordTime:   newUint64(1727157600), // Sep-24-2024 06:00 AM +UTC
+		VoltaTime:   newUint64(1745204400), // Apr-21-2025 03:00 AM +UTC
 	}
 	// OPBNBTestNetConfig is the chain parameters to run a node on the opBNB testnet network.
 	OPBNBTestNetConfig = &ChainConfig{
@@ -247,6 +248,7 @@ var (
 		HaberTime:   newUint64(1717048800), // May-30-2024 06:00 AM +UTC
 		WrightTime:  newUint64(1723701600), // Aug-15-2024 06:00 AM +UTC
 		FjordTime:   newUint64(1725948000), // Sep-10-2024 06:00 AM +UTC
+		VoltaTime:   newUint64(1743562800), // Apr-02-2025 03:00 AM +UTC
 	}
 	// OPBNBQANetConfig is the chain parameters to run a node on the opBNB qa network. It is just for internal test.
 	OPBNBQANetConfig = &ChainConfig{
@@ -283,6 +285,7 @@ var (
 		HaberTime:   newUint64(0),
 		WrightTime:  newUint64(0),
 		FjordTime:   newUint64(1724392800), // Aug-23-2024 06:00 AM +UTC
+		VoltaTime:   newUint64(1743562800), // Apr-02-2025 03:00 AM +UTC
 	}
 
 	// AllEthashProtocolChanges contains every protocol change (EIPs) introduced

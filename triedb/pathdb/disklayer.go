@@ -122,7 +122,7 @@ func NewTrieNodeBuffer(
 	trieNodeBufferType NodeBufferType,
 	limit int,
 	nodes map[common.Hash]map[string]*trienode.Node,
-	layers, proposeBlockInterval uint64,
+	layers, proposeBlockInterval, proposeBlockMultiplier uint64,
 	keepFunc NotifyKeepFunc,
 	freezer *rawdb.ResettableFreezer,
 	fastRecovery, useBase bool,
@@ -130,13 +130,15 @@ func NewTrieNodeBuffer(
 	log.Info("init trie node buffer", "type", nodeBufferTypeToString[trieNodeBufferType])
 	switch trieNodeBufferType {
 	case NodeBufferList:
-		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, fastRecovery, useBase)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, proposeBlockMultiplier,
+			keepFunc, freezer, fastRecovery, useBase)
 	case AsyncNodeBuffer:
 		return newAsyncNodeBuffer(limit, nodes, layers)
 	case SyncNodeBuffer:
 		return newNodeBuffer(limit, nodes, layers)
 	default:
-		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, keepFunc, freezer, fastRecovery, useBase)
+		return newNodeBufferList(db, uint64(limit), nodes, layers, proposeBlockInterval, proposeBlockMultiplier,
+			keepFunc, freezer, fastRecovery, useBase)
 	}
 }
 

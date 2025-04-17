@@ -174,6 +174,7 @@ func (keeper *ProofKeeper) GetNotifyKeepRecordFunc() pathdb.NotifyKeepFunc {
 			log.Info("Keep a new proof", "record", keepRecord, "elapsed", common.PrettyDuration(time.Since(startTimestamp)), "error", err)
 		}()
 
+		log.Info("GetNotifyKeepRecordFunc", "keepRecord.BlockID", keepRecord.BlockID, "keepRecord.KeepInterval", keepRecord.KeepInterval)
 		keeper.opts.watchStartKeepCh <- keepRecord
 		err = <-keeper.opts.notifyFinishKeepCh
 	}
@@ -196,18 +197,22 @@ func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofData
 		// log.Info("Succeed to get proof", "proof_record", pRecord, "error", err, "elapsed", common.PrettyDuration(time.Since(startTimestamp)))
 	}()
 
+	log.Info("getInnerProof GetHeaderByNumber")
 	if header = keeper.blockChain.GetHeaderByNumber(kRecord.BlockID); header == nil {
 		return nil, fmt.Errorf("block is not found, block_id=%d", kRecord.BlockID)
 	}
+	log.Info("getInnerProof NewStateTrieByInnerReader")
 	if worldTrie, err = trie2.NewStateTrieByInnerReader(
 		trie2.StateTrieID(header.Root),
 		keeper.blockChain.stateCache.TrieDB(),
 		kRecord.PinnedInnerTrieReader); err != nil {
 		return nil, err
 	}
+	log.Info("getInnerProof Prove")
 	if err = worldTrie.Prove(crypto.Keccak256(l2ToL1MessagePasserAddr.Bytes()), &accountProof); err != nil {
 		return nil, err
 	}
+	log.Info("getInnerProof NewStateDBByTrie")
 	if stateDB, err = state.NewStateDBByTrie(worldTrie, keeper.blockChain.stateCache, keeper.blockChain.snaps); err != nil {
 		return nil, err
 	}
@@ -224,11 +229,13 @@ func (keeper *ProofKeeper) getInnerProof(kRecord *pathdb.KeepRecord) (*proofData
 		StorageProof: make([]common.StorageResult, 0),
 	}
 	err = stateDB.Error()
+	log.Info("getInnerProof last")
 	return pRecord, err
 }
 
 // eventLoop is used to update/query keeper meta and proof data in the event loop, which ensure thread-safe.
 func (keeper *ProofKeeper) eventLoop() {
+	log.Info("start eventLoop")
 	if !keeper.opts.enable {
 		return
 	}
@@ -241,23 +248,32 @@ func (keeper *ProofKeeper) eventLoop() {
 	gcProofTicker := time.NewTicker(time.Second * time.Duration(keeper.opts.gcInterval))
 	defer gcProofTicker.Stop()
 
+	log.Info("before for loop")
 	for {
+		log.Info("enter for loop")
 		select {
 		case keepRecord := <-keeper.opts.watchStartKeepCh:
+			log.Info("11: keepRecord")
 			var (
 				hasTruncatedMeta bool
 				curProofID       uint64
 				proofRecord      *proofDataRecord
 			)
 
+			log.Info("start getInnerProof")
 			proofRecord, err = keeper.getInnerProof(keepRecord)
 			if err == nil {
+				log.Info("getInnerProof no err")
 				hasTruncatedMeta = keeper.truncateKeeperMetaRecordHeadIfNeeded(keepRecord.BlockID)
+				log.Info("truncateKeeperMetaRecordHeadIfNeeded")
 				metaList := keeper.getKeeperMetaRecordList()
+				log.Info("getKeeperMetaRecordList")
 				if len(metaList) == 0 {
+					log.Info("zero metaList")
 					keeper.proofDataDB.Reset()
 					curProofID = ancientInitSequenceID
 				} else {
+					log.Info("non zero metaList")
 					keeper.truncateProofDataRecordHeadIfNeeded(keepRecord.BlockID)
 					latestProofData := keeper.getLatestProofDataRecord()
 					if latestProofData != nil {
@@ -279,9 +295,11 @@ func (keeper *ProofKeeper) eventLoop() {
 				err = keeper.putProofDataRecord(proofRecord)
 				keeper.latestBlockID = keepRecord.BlockID
 			}
+			log.Info("finish keep record")
 			keeper.opts.notifyFinishKeepCh <- err
 
 		case queryBlockID := <-keeper.queryProofCh:
+			log.Info("22: queryBlockID")
 			var resultProofRecord *proofDataRecord
 			metaList := keeper.getKeeperMetaRecordList()
 			if len(metaList) != 0 && (queryBlockID+keeper.opts.keepProofBlockSpan > keeper.latestBlockID) {
@@ -304,6 +322,7 @@ func (keeper *ProofKeeper) eventLoop() {
 			keeper.waitQueryProofCh <- resultProofRecord
 
 		case <-keeper.stopCh:
+			log.Info("33: stop")
 			err = keeper.proofDataDB.Sync()
 			if err == nil {
 				err = keeper.proofDataDB.Close()

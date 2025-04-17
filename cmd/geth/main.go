@@ -101,6 +101,7 @@ var (
 		utils.StateHistoryFlag,
 		utils.ProposeBlockIntervalFlag,
 		utils.PathDBNodeBufferTypeFlag,
+		utils.PathDBProposeBlockMultiplierFlag,
 		utils.EnableProofKeeperFlag,
 		utils.KeepProofBlockSpanFlag,
 		utils.JournalFileFlag,

@@ -325,9 +325,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	proofKeeper := newProofKeeper(opts)
 	// Open trie database with provided config
 	trieConfig := cacheConfig.triedbConfig(proofKeeper.GetNotifyKeepRecordFunc())
-	log.Info("skcfnawnscwcn")
 	triedb := triedb.NewDatabase(db, trieConfig)
-	log.Info("evnvcrnjnrf")
 
 	// Setup the genesis block, commit the provided genesis specification
 	// to database if the genesis block is not present yet, or load the
@@ -375,7 +373,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
-	log.Info("start dddddd")
 	err := proofKeeper.Start(bc, db)
 	if err != nil {
 		return nil, err

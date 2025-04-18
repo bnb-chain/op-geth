@@ -103,16 +103,17 @@ type layer interface {
 
 // Config contains the settings for database.
 type Config struct {
-	TrieNodeBufferType   NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
-	StateHistory         uint64         // Number of recent blocks to maintain state history for
-	CleanCacheSize       int            // Maximum memory allowance (in bytes) for caching clean nodes
-	DirtyCacheSize       int            // Maximum memory allowance (in bytes) for caching dirty nodes
-	ReadOnly             bool           // Flag whether the database is opened in read only mode.
-	ProposeBlockInterval uint64         // Propose block to L1 block interval.
-	NotifyKeep           NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
-	JournalFilePath      string         // The journal file path
-	JournalFile          bool           // Whether to use journal file mode
-	UseBase              bool           // Flag to use base and no other buffers for nodebufferlist, it's used for init genesis and unit tes
+	TrieNodeBufferType             NodeBufferType // Type of trienodebuffer to cache trie nodes in disklayer
+	StateHistory                   uint64         // Number of recent blocks to maintain state history for
+	CleanCacheSize                 int            // Maximum memory allowance (in bytes) for caching clean nodes
+	DirtyCacheSize                 int            // Maximum memory allowance (in bytes) for caching dirty nodes
+	ReadOnly                       bool           // Flag whether the database is opened in read only mode.
+	ProposeBlockInterval           uint64         // Propose block to L1 block interval.
+	NotifyKeep                     NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
+	JournalFilePath                string         // The journal file path
+	JournalFile                    bool           // Whether to use journal file mode
+	UseBase                        bool           // Flag to use base and no other buffers for nodebufferlist, it's used for init genesis and unit tes
+	ProposeBlockIntervalMultiplier uint64         // Multiplier of propose block which can provide more proof
 }
 
 // sanitize checks the provided user configurations and changes anything that's
@@ -368,7 +369,7 @@ func (db *Database) Enable(root common.Hash) error {
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
 	nb, err := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0, db.config.ProposeBlockInterval,
-		db.config.NotifyKeep, db.freezer, false, false)
+		db.config.ProposeBlockIntervalMultiplier, db.config.NotifyKeep, db.freezer, false, false)
 	if err != nil {
 		log.Error("Failed to new trie node buffer", "error", err)
 		return err

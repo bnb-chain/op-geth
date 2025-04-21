@@ -112,7 +112,7 @@ type Config struct {
 	NotifyKeep                     NotifyKeepFunc // NotifyKeep is used to keep the proof which maybe queried by op-proposer.
 	JournalFilePath                string         // The journal file path
 	JournalFile                    bool           // Whether to use journal file mode
-	UseBase                        bool           // Flag to use base and no other buffers for nodebufferlist, it's used for init genesis and unit tes
+	UseBase                        bool           // Flag to use base and no other buffers for nodebufferlist, it's used for init genesis and unit test
 	ProposeBlockIntervalMultiplier uint64         // Multiplier of propose block which can provide more proof
 }
 

@@ -46,7 +46,7 @@ type NotifyKeepFunc func(*KeepRecord)
 var _ trienodebuffer = &nodebufferlist{}
 
 // nodebufferlist implements the trienodebuffer interface, it is designed to meet
-// the withdraw proof function of opBNB at the storage layer while taking into
+// the withdrawal proof function of opBNB at the storage layer while taking into
 // account high performance. It is a multiDifflayer based queue that stores
 // mergeBlockInterval compressed block difflayers per multiDifflayer. It also has
 // one base multiDifflayer that collects the list's trie nodes to write disk.
@@ -87,29 +87,12 @@ func newNodeBufferList(
 	db ethdb.Database,
 	limit uint64,
 	nodes map[common.Hash]map[string]*trienode.Node,
-	layers uint64,
-	proposeBlockInterval uint64,
+	layers, proposeBlockInterval, proposeBlockMultiplier uint64,
 	keepFunc NotifyKeepFunc,
 	freezer *rawdb.ResettableFreezer,
-	fastRecovery bool,
-	useBase bool,
+	fastRecovery, useBase bool,
 ) (*nodebufferlist, error) {
-	var (
-		rsevMdNum uint64
-		dlInMd    uint64
-		wpBlocks  = proposeBlockInterval
-	)
-	if wpBlocks == 0 {
-		rsevMdNum = DefaultReserveMultiDifflayerNumber
-		wpBlocks = DefaultProposeBlockInterval
-		dlInMd = DefaultProposeBlockInterval / (DefaultReserveMultiDifflayerNumber - 1)
-	} else if wpBlocks%(DefaultReserveMultiDifflayerNumber-1) == 0 {
-		rsevMdNum = DefaultReserveMultiDifflayerNumber
-		dlInMd = wpBlocks / (DefaultReserveMultiDifflayerNumber - 1)
-	} else {
-		rsevMdNum = 1
-		dlInMd = wpBlocks
-	}
+	wpBlocks, rsevMdNum, dlInMd := calculateNodeBufferListInfo(proposeBlockInterval, proposeBlockMultiplier)
 
 	var base *multiDifflayer
 	if nodes != nil && useBase {
@@ -161,9 +144,39 @@ func newNodeBufferList(
 	go nf.loop()
 
 	log.Info("New node buffer list", "proposed block interval", nf.wpBlocks,
-		"reserve multi diff_layers", nf.rsevMdNum, "diff_layers in multi_diff_layer", nf.dlInMd,
+		"reserve multi_diff_layers number", nf.rsevMdNum, "diff_layers in multi_diff_layer", nf.dlInMd,
 		"limit", common.StorageSize(limit), "layers", layers, "persist_id", nf.persistID, "base_size", nf.size)
 	return nf, nil
+}
+
+func calculateNodeBufferListInfo(proposeBlockInterval, proposeBlockMultiplier uint64) (uint64, uint64, uint64) {
+	var (
+		dlInMd, rsevMdNum uint64
+		wpBlocks          = proposeBlockInterval
+	)
+
+	if wpBlocks == 0 {
+		wpBlocks = DefaultProposeBlockInterval
+	}
+
+	if proposeBlockMultiplier == 0 {
+		if wpBlocks%(DefaultReserveMultiDifflayerNumber-1) == 0 {
+			rsevMdNum = DefaultReserveMultiDifflayerNumber
+			dlInMd = wpBlocks / (rsevMdNum - 1)
+		} else {
+			rsevMdNum = 1
+			dlInMd = wpBlocks
+		}
+	} else {
+		rsevMdNum = proposeBlockMultiplier + 1
+		dlInMd = wpBlocks
+
+		if (rsevMdNum-1) != 0 && wpBlocks%(rsevMdNum-1) != 0 {
+			rsevMdNum = 1
+		}
+	}
+
+	return wpBlocks, rsevMdNum, dlInMd
 }
 
 // recoverNodeBufferList recovers node buffer list
@@ -232,12 +245,12 @@ func (nf *nodebufferlist) recoverNodeBufferList(freezer *rawdb.ResettableFreezer
 	log.Info("Before diffToBase", "base_size", nf.base.size, "tail_state_id", nf.tail.id, "head_state_id", nf.head.id,
 		"nbl_layers", nf.layers, "base_layers", nf.base.layers, "nf_count", nf.count, "node_buffer_size", nf.size)
 
-	if nf.size >= maxNodeBufferListSize && nf.count == DefaultReserveMultiDifflayerNumber {
+	if nf.size >= maxNodeBufferListSize && nf.count == nf.rsevMdNum {
 		// Avoid diff size exceeding max pebble batch size limit, force flush buffer to base
 		log.Info("Node buffer list size exceeds 3GB", "node buffer size", nf.size)
-		nf.diffToBase(true)
+		nf.diffToBase(true, false)
 	} else {
-		nf.diffToBase(false)
+		nf.diffToBase(false, false)
 	}
 
 	log.Info("After diffToBase", "base_size", nf.base.size, "tail_state_id", nf.tail.id,
@@ -694,7 +707,7 @@ func (nf *nodebufferlist) traverseReverse(cb func(*multiDifflayer) bool) {
 // diffToBase calls traverseReverse and merges the multiDifflayer's nodes to
 // base node buffer, if up to limit size and flush to disk. It is called
 // periodically in the background
-func (nf *nodebufferlist) diffToBase(skipCountCheck bool) {
+func (nf *nodebufferlist) diffToBase(skipCountCheck, enableProofKeeper bool) {
 	commitFunc := func(buffer *multiDifflayer) bool {
 		if nf.base.size >= nf.base.limit {
 			log.Debug("base node buffer need write disk immediately")
@@ -711,7 +724,9 @@ func (nf *nodebufferlist) diffToBase(skipCountCheck bool) {
 			log.Crit("committed block number misaligned", "block", buffer.block)
 		}
 
-		if nf.keepFunc != nil { // keep in background flush stage
+		// When recovering node buffer list, no need to store proof data, set enableProofKeeper to false
+		if nf.keepFunc != nil && enableProofKeeper {
+			// keep in background flush stage
 			nf.keepFunc(&KeepRecord{
 				BlockID:      buffer.block,
 				StateRoot:    buffer.root,
@@ -825,7 +840,7 @@ func (nf *nodebufferlist) loop() {
 			if nf.isFlushing.Swap(true) {
 				continue
 			}
-			nf.diffToBase(false)
+			nf.diffToBase(false, true)
 			if nf.base.size >= nf.base.limit {
 				nf.backgroundFlush()
 			}

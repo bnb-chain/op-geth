@@ -32,6 +32,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		StateScheme                             string                 `toml:",omitempty"`
 		PathNodeBuffer                          pathdb.NodeBufferType  `toml:",omitempty"`
 		ProposeBlockInterval                    uint64                 `toml:",omitempty"`
+		ProposeBlockIntervalMultiplier          uint64                 `toml:",omitempty"`
 		EnableProofKeeper                       bool                   `toml:",omitempty"`
 		KeepProofBlockSpan                      uint64                 `toml:",omitempty"`
 		JournalFileEnabled                      bool                   `toml:",omitempty"`
@@ -78,6 +79,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RollupDisableTxPoolAdmission            bool
 		RollupHaltOnIncompatibleProtocolVersion string
 		EnableOpcodeOptimizing                  bool
+		EnableParallelTxDAG                     bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -93,6 +95,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.StateScheme = c.StateScheme
 	enc.PathNodeBuffer = c.PathNodeBuffer
 	enc.ProposeBlockInterval = c.ProposeBlockInterval
+	enc.ProposeBlockIntervalMultiplier = c.ProposeBlockIntervalMultiplier
 	enc.EnableProofKeeper = c.EnableProofKeeper
 	enc.KeepProofBlockSpan = c.KeepProofBlockSpan
 	enc.JournalFileEnabled = c.JournalFileEnabled
@@ -139,6 +142,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RollupDisableTxPoolAdmission = c.RollupDisableTxPoolAdmission
 	enc.RollupHaltOnIncompatibleProtocolVersion = c.RollupHaltOnIncompatibleProtocolVersion
 	enc.EnableOpcodeOptimizing = c.EnableOpcodeOptimizing
+	enc.EnableParallelTxDAG = c.EnableParallelTxDAG
 	return &enc, nil
 }
 
@@ -158,6 +162,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		StateScheme                             *string                `toml:",omitempty"`
 		PathNodeBuffer                          *pathdb.NodeBufferType `toml:",omitempty"`
 		ProposeBlockInterval                    *uint64                `toml:",omitempty"`
+		ProposeBlockIntervalMultiplier          *uint64                `toml:",omitempty"`
 		EnableProofKeeper                       *bool                  `toml:",omitempty"`
 		KeepProofBlockSpan                      *uint64                `toml:",omitempty"`
 		JournalFileEnabled                      *bool                  `toml:",omitempty"`
@@ -204,6 +209,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RollupDisableTxPoolAdmission            *bool
 		RollupHaltOnIncompatibleProtocolVersion *string
 		EnableOpcodeOptimizing                  *bool
+		EnableParallelTxDAG                     *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -247,6 +253,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.ProposeBlockInterval != nil {
 		c.ProposeBlockInterval = *dec.ProposeBlockInterval
+	}
+	if dec.ProposeBlockIntervalMultiplier != nil {
+		c.ProposeBlockIntervalMultiplier = *dec.ProposeBlockIntervalMultiplier
 	}
 	if dec.EnableProofKeeper != nil {
 		c.EnableProofKeeper = *dec.EnableProofKeeper
@@ -385,6 +394,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.EnableOpcodeOptimizing != nil {
 		c.EnableOpcodeOptimizing = *dec.EnableOpcodeOptimizing
+	}
+	if dec.EnableParallelTxDAG != nil {
+		c.EnableParallelTxDAG = *dec.EnableParallelTxDAG
 	}
 	return nil
 }

@@ -19,7 +19,6 @@ package ethconfig
 
 import (
 	"errors"
-	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -29,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/txpool/blobpool"
+	"github.com/ethereum/go-ethereum/core/txpool/bundlepool"
 	"github.com/ethereum/go-ethereum/core/txpool/legacypool"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
@@ -130,12 +130,13 @@ type Config struct {
 	// State scheme represents the scheme used to store ethereum states and trie
 	// nodes on top. It can be 'hash', 'path', or none which means use the scheme
 	// consistent with persistent state.
-	StateScheme          string                `toml:",omitempty"`
-	PathNodeBuffer       pathdb.NodeBufferType `toml:",omitempty"` // Type of trienodebuffer to cache trie nodes in disklayer
-	ProposeBlockInterval uint64                `toml:",omitempty"` // Keep the same with op-proposer propose block interval
-	EnableProofKeeper    bool                  `toml:",omitempty"` // Whether to enable proof keeper
-	KeepProofBlockSpan   uint64                `toml:",omitempty"` // Span block of keep proof
-	JournalFileEnabled   bool                  `toml:",omitempty"` // Whether the TrieJournal is stored using journal file
+	StateScheme                    string                `toml:",omitempty"`
+	PathNodeBuffer                 pathdb.NodeBufferType `toml:",omitempty"` // Type of trienodebuffer to cache trie nodes in disklayer
+	ProposeBlockInterval           uint64                `toml:",omitempty"` // Keep the same with op-proposer propose block interval
+	ProposeBlockIntervalMultiplier uint64                `toml:",omitempty"` // Multiplier of propose block which can provide more proof
+	EnableProofKeeper              bool                  `toml:",omitempty"` // Whether to enable proof keeper
+	KeepProofBlockSpan             uint64                `toml:",omitempty"` // Span block of keep proof
+	JournalFileEnabled             bool                  `toml:",omitempty"` // Whether the TrieJournal is stored using journal file
 
 	// RequiredBlocks is a set of block number -> hash mappings which must be in the
 	// canonical chain of all remote peers. Setting the option makes geth verify the

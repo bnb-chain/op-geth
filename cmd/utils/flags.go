@@ -340,6 +340,12 @@ var (
 		Value:    pathdb.DefaultProposeBlockInterval,
 		Category: flags.StateCategory,
 	}
+	PathDBProposeBlockMultiplierFlag = &cli.Uint64Flag{
+		Name:     "pathdb.proposeblockmultiplier",
+		Usage:    "Multiplier for proof submission interval (e.g. 2 means providing proofs of 2*proposeblock)",
+		Value:    0,
+		Category: flags.StateCategory,
+	}
 	EnableProofKeeperFlag = &cli.BoolFlag{
 		Name:     "pathdb.enableproofkeeper",
 		Usage:    "Enable path db proof keeper to store proposed proof",
@@ -1958,6 +1964,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(ProposeBlockIntervalFlag.Name) {
 		cfg.ProposeBlockInterval = ctx.Uint64(ProposeBlockIntervalFlag.Name)
+	}
+	if ctx.IsSet(PathDBProposeBlockMultiplierFlag.Name) {
+		cfg.ProposeBlockIntervalMultiplier = ctx.Uint64(PathDBProposeBlockMultiplierFlag.Name)
 	}
 	if ctx.IsSet(EnableProofKeeperFlag.Name) {
 		cfg.EnableProofKeeper = ctx.Bool(EnableProofKeeperFlag.Name)

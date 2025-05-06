@@ -610,6 +610,7 @@ func (t *Trie) resolveAndTrack(n hashNode, prefix []byte) (node, error) {
 	if err != nil {
 		return nil, err
 	}
+	// note here
 	t.tracer.onRead(prefix, blob)
 	return mustDecodeNode(n, blob), nil
 }

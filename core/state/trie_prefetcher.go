@@ -40,6 +40,7 @@ type triePrefetcher struct {
 	fetches  map[string]Trie        // Partially or fully fetched tries. Only populated for inactive copies.
 	fetchers map[string]*subfetcher // Subfetchers for each trie
 
+	// TODO: fix me
 	noreads bool // Whether to ignore state-read-only prefetch requests
 
 	deliveryMissMeter metrics.Meter

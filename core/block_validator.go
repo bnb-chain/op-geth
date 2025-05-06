@@ -20,9 +20,11 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
@@ -213,6 +215,28 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 		}
 	}
 	return err
+}
+
+// ValidateWitness cross validates a block execution with stateless remote clients.
+//
+// Normally we'd distribute the block witness to remote cross validators, wait
+// for them to respond and then merge the results. For now, however, it's only
+// Geth, so do an internal stateless run.
+func (v *BlockValidator) ValidateWitness(witness *stateless.Witness, receiptRoot common.Hash, stateRoot common.Hash) error {
+	// Run the cross client stateless execution
+	// TODO(karalabe): Self-stateless for now, swap with other clients
+	crossReceiptRoot, crossStateRoot, err := ExecuteStateless(v.config, witness)
+	if err != nil {
+		return fmt.Errorf("stateless execution failed: %v", err)
+	}
+	// Stateless cross execution suceeeded, validate the withheld computed fields
+	if crossReceiptRoot != receiptRoot {
+		return fmt.Errorf("cross validator receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, receiptRoot)
+	}
+	if crossStateRoot != stateRoot {
+		return fmt.Errorf("cross validator state root mismatch (cross: %x local: %x)", crossStateRoot, stateRoot)
+	}
+	return nil
 }
 
 // CalcGasLimit computes the gas limit of the next block after parent. It aims

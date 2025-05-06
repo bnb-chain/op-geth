@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -371,7 +372,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
-	bc.processor = NewStateProcessor(chainConfig, bc, engine)
+	bc.processor = NewStateProcessor(chainConfig, bc, engine, nil)
 
 	err := proofKeeper.Start(bc, db)
 	if err != nil {
@@ -1968,7 +1969,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 
 			// Enable prefetching to pull in trie node paths while processing transactions
-			statedb.StartPrefetcher("chain")
+			//statedb.StartPrefetcher("chain")
+			var witness *stateless.Witness
+			if bc.vmConfig.StatelessSelfValidation {
+				witness, err = stateless.NewWitness(bc, block)
+				if err != nil {
+					return it.index, err
+				}
+			}
+			statedb.StartPrefetcher("chain", witness)
 			activeState = statedb
 
 			// If we have a followup block, run that against the current state to pre-cache
@@ -2021,6 +2030,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
 				return it.index, err
+			}
+		}
+		if witness := statedb.Witness(); witness != nil {
+			if err = bc.validator.ValidateWitness(witness, block.ReceiptHash(), block.Root()); err != nil {
+				bc.reportBlock(block, receipts, err)
+				return it.index, fmt.Errorf("cross verification failed: %v", err)
 			}
 		}
 

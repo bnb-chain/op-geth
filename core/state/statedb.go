@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -134,6 +135,9 @@ type StateDB struct {
 	validRevisions []revision
 	nextRevisionId int
 
+	// State witness if cross validation is needed
+	witness *stateless.Witness
+
 	// Measurements gathered during execution for debugging purposes
 	AccountReads         time.Duration
 	AccountHashes        time.Duration
@@ -227,7 +231,7 @@ func NewStateDBByTrie(tr Trie, db Database, snaps *snapshot.Tree) (*StateDB, err
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the
 // state trie concurrently while the state is mutated so that when we reach the
 // commit phase, most of the needed data is already hot.
-func (s *StateDB) StartPrefetcher(namespace string) {
+func (s *StateDB) StartPrefetcher(namespace string, witness *stateless.Witness) {
 	if s.noTrie {
 		return
 	}
@@ -236,8 +240,11 @@ func (s *StateDB) StartPrefetcher(namespace string) {
 		s.prefetcher.close()
 		s.prefetcher = nil
 	}
+	// Enable witness collection if requested
+	s.witness = witness
+
 	if s.snap != nil {
-		s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace)
+		s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace, witness == nil)
 	}
 }
 
@@ -824,6 +831,9 @@ func (s *StateDB) Copy() *StateDB {
 		snaps: s.snaps,
 		snap:  s.snap,
 	}
+	if s.witness != nil {
+		state.witness = s.witness.Copy()
+	}
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
 		// As documented [here](https://github.com/ethereum/go-ethereum/pull/16485#issuecomment-380438527),
@@ -1040,6 +1050,12 @@ func (s *StateDB) AccountsIntermediateRoot() {
 				defer wg.Done()
 				obj.updateRoot()
 
+				// If witness building is enabled and the state object has a trie,
+				// gather the witnesses for its specific storage trie
+				if s.witness != nil && obj.trie != nil {
+					s.witness.AddState(obj.trie.Witness())
+				}
+
 				// Cache the data until commit. Note, this update mechanism is not symmetric
 				// to the deletion, because whereas it is enough to track account updates
 				// at commit time, deletions need tracking at transaction boundary level to
@@ -1049,6 +1065,10 @@ func (s *StateDB) AccountsIntermediateRoot() {
 				s.AccountMux.Unlock()
 			}
 		}
+	}
+	// If witness building is enabled, gather all the read-only accesses
+	if s.witness != nil {
+		// todo: fix it
 	}
 	wg.Wait()
 }
@@ -1111,7 +1131,12 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	if s.noTrie {
 		return s.expectedRoot
 	} else {
-		return s.trie.Hash()
+		// If witness building is enabled, gather the account trie witness
+		hash := s.trie.Hash()
+		if s.witness != nil {
+			s.witness.AddState(s.trie.Witness())
+		}
+		return hash
 	}
 }
 
@@ -1811,4 +1836,9 @@ func copy2DSet[k comparable](set map[k]map[common.Hash][]byte) map[k]map[common.
 		}
 	}
 	return copied
+}
+
+// Witness retrieves the current state witness being collected.
+func (s *StateDB) Witness() *stateless.Witness {
+	return s.witness
 }

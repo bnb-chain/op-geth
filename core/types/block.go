@@ -20,12 +20,13 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/holiman/uint256"
 	"io"
 	"math/big"
 	"reflect"
 	"sync/atomic"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -232,6 +233,11 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  Withdrawals
+
+	// witness is not an encoded part of the block body.
+	// It is held in Block in order for easy relaying to the places
+	// that process it.
+	//witness *ExecutionWitness
 
 	// caches
 	hash atomic.Value
@@ -505,6 +511,20 @@ func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
 	}
 	return block
 }
+
+// func (b *Block) WithBody(body Body) *Block {
+// 	block := &Block{
+// 		header:       b.header,
+// 		transactions: slices.Clone(body.Transactions),
+// 		uncles:       make([]*Header, len(body.Uncles)),
+// 		withdrawals:  slices.Clone(body.Withdrawals),
+// 		//witness:      b.witness,
+// 	}
+// 	for i := range body.Uncles {
+// 		block.uncles[i] = CopyHeader(body.Uncles[i])
+// 	}
+// 	return block
+// }
 
 // WithWithdrawals returns a copy of the block containing the given withdrawals.
 func (b *Block) WithWithdrawals(withdrawals []*Withdrawal) *Block {

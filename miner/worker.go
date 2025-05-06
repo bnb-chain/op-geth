@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -805,7 +806,7 @@ func (w *worker) resultLoop() {
 }
 
 // makeEnv creates a new environment for the sealing block.
-func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase common.Address) (*environment, error) {
+func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase common.Address, witness bool) (*environment, error) {
 	// Retrieve the parent state to execute on top and start a prefetcher for
 	// the miner to speed block sealing up a bit.
 	state, err := w.chain.StateAt(parent.Root)
@@ -821,7 +822,18 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 	if err != nil {
 		return nil, err
 	}
-	state.StartPrefetcher("miner")
+	if witness {
+		// todo: fix it
+		//bundle, err := stateless.NewWitness(header, miner.chain)
+		bundle, err := stateless.NewWitness(nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		state.StartPrefetcher("miner", bundle)
+	} else {
+		state.StartPrefetcher("miner", nil)
+	}
+	//state.StartPrefetcher("miner")
 
 	// Note the passed coinbase may be different with header.Coinbase.
 	env := &environment{
@@ -1281,7 +1293,8 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	// Could potentially happen if starting to mine in an odd state.
 	// Note genParams.coinbase can be different with header.Coinbase
 	// since clique algorithm can modify the coinbase field in header.
-	env, err := w.makeEnv(parent, header, genParams.coinbase)
+	// todo: fix it
+	env, err := w.makeEnv(parent, header, genParams.coinbase, false)
 	if err != nil {
 		log.Error("Failed to create sealing context", "err", err)
 		return nil, err

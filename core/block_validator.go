@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -228,6 +229,9 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 func (v *BlockValidator) ValidateWitness(witness *stateless.Witness, receiptRoot common.Hash, stateRoot common.Hash) error {
 	// Run the cross client stateless execution
 	// TODO(karalabe): Self-stateless for now, swap with other clients
+	defer func() {
+		log.Info("succeed to validate witness", "hash", witness.Block.Hash(), "number", witness.Block.NumberU64(), "root", witness.Block.Root())
+	}()
 	crossReceiptRoot, crossStateRoot, err := ExecuteStateless(v.config, witness)
 	if err != nil {
 		return fmt.Errorf("stateless execution failed: %v", err)

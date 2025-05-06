@@ -1068,7 +1068,35 @@ func (s *StateDB) AccountsIntermediateRoot() {
 	}
 	// If witness building is enabled, gather all the read-only accesses
 	if s.witness != nil {
-		// todo: fix it
+		// Pull in anything that has been accessed before destruction
+		for addr := range s.stateObjectsDestruct {
+			obj, ok := s.stateObjects[addr]
+			if !ok {
+				continue
+			}
+			// Skip any objects that haven't touched their storage
+			if len(obj.originStorage) == 0 {
+				continue
+			}
+			if trie := obj.getPrefetchedTrie(); trie != nil {
+				s.witness.AddState(trie.Witness())
+			} else if obj.trie != nil {
+				s.witness.AddState(obj.trie.Witness())
+			}
+		}
+		// Pull in only-read and non-destructed trie witnesses
+		for _, obj := range s.stateObjects {
+			// Skip any objects that haven't touched their storage
+			if len(obj.originStorage) == 0 {
+				continue
+			}
+			if trie := obj.getPrefetchedTrie(); trie != nil {
+				s.witness.AddState(trie.Witness())
+			} else if obj.trie != nil {
+				s.witness.AddState(obj.trie.Witness())
+			}
+		}
+
 	}
 	wg.Wait()
 }

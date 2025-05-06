@@ -1969,13 +1969,13 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 
 			// Enable prefetching to pull in trie node paths while processing transactions
-			//statedb.StartPrefetcher("chain")
 			var witness *stateless.Witness
 			if bc.vmConfig.StatelessSelfValidation {
 				witness, err = stateless.NewWitness(bc, block)
 				if err != nil {
 					return it.index, err
 				}
+				log.Info("succeed to enable witness generator", "hash", block.Hash(), "number", block.NumberU64(), "root", block.Root())
 			}
 			statedb.StartPrefetcher("chain", witness)
 			activeState = statedb

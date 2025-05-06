@@ -62,7 +62,7 @@ func ExecuteStateless(config *params.ChainConfig, witness *stateless.Witness) (c
 	if err != nil {
 		return common.Hash{}, common.Hash{}, err
 	}
-	if err = validator.ValidateState(witness.Block, db, receipts, usedGas, true); err != nil {
+	if err = validator.ValidateState(witness.Block, db, receipts, usedGas, true, true); err != nil {
 		return common.Hash{}, common.Hash{}, err
 	}
 	// Almost everything validated, but receipt and state root needs to be returned

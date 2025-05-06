@@ -35,7 +35,7 @@ type Validator interface {
 
 	// ValidateState validates the given statedb and optionally the receipts and
 	// gas used.
-	ValidateState(block *types.Block, state *state.StateDB, receipts types.Receipts, usedGas uint64, skipRoot bool) error
+	ValidateState(block *types.Block, state *state.StateDB, receipts types.Receipts, usedGas uint64, skipRoot bool, stateless bool) error
 
 	// ValidateWitness cross validates a block execution with stateless remote clients.
 	ValidateWitness(witness *stateless.Witness, receiptRoot common.Hash, stateRoot common.Hash) error

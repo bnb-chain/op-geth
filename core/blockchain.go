@@ -2023,10 +2023,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 			go func() {
-				asyncValidateStateCh <- bc.validator.ValidateState(block, statedb, receipts, usedGas, true)
+				asyncValidateStateCh <- bc.validator.ValidateState(block, statedb, receipts, usedGas, true, false)
 			}()
 		} else {
-			if err := bc.validator.ValidateState(block, statedb, receipts, usedGas, false); err != nil {
+			if err := bc.validator.ValidateState(block, statedb, receipts, usedGas, false, false); err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
 				return it.index, err

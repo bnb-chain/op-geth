@@ -372,7 +372,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
-	bc.processor = NewStateProcessor(chainConfig, bc, engine, nil)
+	bc.processor = NewStateProcessor(chainConfig, bc, engine, bc.hc)
 
 	err := proofKeeper.Start(bc, db)
 	if err != nil {

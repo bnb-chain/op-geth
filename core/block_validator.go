@@ -183,6 +183,8 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 		},
 		func() error {
 			if stateless {
+				// In stateless mode, return early because the receipt and state root are not
+				// provided through the witness, rather the cross validator needs to return it.
 				return nil
 			}
 			// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))

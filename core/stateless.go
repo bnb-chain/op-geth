@@ -60,7 +60,7 @@ func ExecuteStateless(config *params.ChainConfig, bc *BlockChain, witness *state
 
 	// Run the stateless blocks processing and self-validate certain fields
 	receipts, _, usedGas, err := processor.Process(witness.Block, db, vm.Config{})
-	log.Info("print witness execute receipt", "block", witness.Block, "receipt", receipts)
+	log.Info("print witness execute receipt", "block", witness.Block, "receipt", receipts, "vm_config", vm.Config{})
 	if err != nil {
 		return common.Hash{}, common.Hash{}, err
 	}

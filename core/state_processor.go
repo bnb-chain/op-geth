@@ -116,8 +116,17 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			processTxTimer.UpdateSince(start)
 		}
 	}
-	log.Info("Process txs", "block_number", block.NumberU64(), "tx", len(block.Transactions()), "receipts", len(receipts), "gas", *usedGas)
-
+	log.Info("Process txs", "block_number", block.NumberU64(), "tx_count", len(block.Transactions()), "receipts_count", len(receipts), "gas_used", *usedGas)
+	if len(block.Transactions()) == 1 {
+		tx := block.Transactions()[0]
+		log.Info("Process txs",
+			"block_number", block.NumberU64(),
+			"tx_hash", tx.Hash().Hex(),
+			"tx_gas", tx.Gas(),
+			"tx_nonce", tx.Nonce(),
+			"receipt", receipts[0],
+			"gas_used", *usedGas)
+	}
 	if statedb.MVStates() != nil {
 		statedb.MVStates().BatchRecordHandle()
 	}

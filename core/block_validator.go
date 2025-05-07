@@ -228,13 +228,13 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 // Normally we'd distribute the block witness to remote cross validators, wait
 // for them to respond and then merge the results. For now, however, it's only
 // Geth, so do an internal stateless run.
-func (v *BlockValidator) ValidateWitness(witness *stateless.Witness, receiptRoot common.Hash, stateRoot common.Hash) error {
+func (v *BlockValidator) ValidateWitness(bc *BlockChain, witness *stateless.Witness, receiptRoot common.Hash, stateRoot common.Hash) error {
 	// Run the cross client stateless execution
 	// TODO(karalabe): Self-stateless for now, swap with other clients
 	defer func() {
 		log.Info("succeed to validate witness", "hash", witness.Block.Hash(), "number", witness.Block.NumberU64(), "root", witness.Block.Root())
 	}()
-	crossReceiptRoot, crossStateRoot, err := ExecuteStateless(v.config, witness)
+	crossReceiptRoot, crossStateRoot, err := ExecuteStateless(v.config, bc, witness)
 	if err != nil {
 		return fmt.Errorf("stateless execution failed: %v", err)
 	}

@@ -2035,7 +2035,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 		}
 		if witness := statedb.Witness(); witness != nil {
-			if err = bc.validator.ValidateWitness(witness, block.ReceiptHash(), block.Root()); err != nil {
+			if err = bc.validator.ValidateWitness(bc, witness, block.ReceiptHash(), block.Root()); err != nil {
 				bc.reportBlock(block, receipts, err)
 				return it.index, fmt.Errorf("cross verification failed: %v", err)
 			}

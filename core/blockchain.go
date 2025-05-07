@@ -367,6 +367,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		engine:              engine,
 		vmConfig:            vmConfig,
 	}
+	var err error
+	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
+	if err != nil {
+		return nil, err
+	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
@@ -374,16 +379,12 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine, bc.hc)
 
-	err := proofKeeper.Start(bc, db)
+	err = proofKeeper.Start(bc, db)
 	if err != nil {
 		return nil, err
 	}
 	bc.proofKeeper = proofKeeper
 
-	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
-	if err != nil {
-		return nil, err
-	}
 	bc.genesisBlock = bc.GetBlockByNumber(0)
 	if bc.genesisBlock == nil {
 		return nil, ErrNoGenesis

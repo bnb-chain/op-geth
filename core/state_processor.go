@@ -86,7 +86,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	misc.EnsureCreate2Deployer(p.config, block.Time(), statedb)
 
 	var (
-		context = NewEVMBlockContext(header, p.bc, nil, p.config, statedb)
+		context = NewEVMBlockContext(header, p.chain, nil, p.config, statedb)
 		vmenv   = vm.NewEVM(context, vm.TxContext{}, statedb, p.config, cfg)
 		signer  = types.MakeSigner(p.config, header.Number, header.Time)
 	)

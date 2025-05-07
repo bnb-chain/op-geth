@@ -119,7 +119,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	log.Info("Process txs", "block_number", block.NumberU64(), "tx_count", len(block.Transactions()), "receipts_count", len(receipts), "gas_used", *usedGas)
 	if len(block.Transactions()) == 1 {
 		tx := block.Transactions()[0]
-		log.Info("Process txs",
+		log.Info("Process tx",
 			"block_number", block.NumberU64(),
 			"tx_hash", tx.Hash().Hex(),
 			"tx_gas", tx.Gas(),
@@ -187,6 +187,7 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	// by the tx.
 	receipt := &types.Receipt{Type: tx.Type(), PostState: root, CumulativeGasUsed: *usedGas}
 	if result.Failed() {
+		log.Info("failed to execute tx", "tx", tx.Hash().Hex(), "error", result.Unwrap())
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful

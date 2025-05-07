@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/triedb"
@@ -59,6 +60,7 @@ func ExecuteStateless(config *params.ChainConfig, bc *BlockChain, witness *state
 
 	// Run the stateless blocks processing and self-validate certain fields
 	receipts, _, usedGas, err := processor.Process(witness.Block, db, vm.Config{})
+	log.Info("print witness execute receipt", "block", witness.Block, "receipt", receipts)
 	if err != nil {
 		return common.Hash{}, common.Hash{}, err
 	}

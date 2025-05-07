@@ -23,6 +23,7 @@ import (
 	"io"
 	"math/big"
 	"reflect"
+	"slices"
 	"sync/atomic"
 	"time"
 
@@ -512,19 +513,19 @@ func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
 	return block
 }
 
-// func (b *Block) WithBody(body Body) *Block {
-// 	block := &Block{
-// 		header:       b.header,
-// 		transactions: slices.Clone(body.Transactions),
-// 		uncles:       make([]*Header, len(body.Uncles)),
-// 		withdrawals:  slices.Clone(body.Withdrawals),
-// 		//witness:      b.witness,
-// 	}
-// 	for i := range body.Uncles {
-// 		block.uncles[i] = CopyHeader(body.Uncles[i])
-// 	}
-// 	return block
-// }
+func (b *Block) WithBodyV2(body Body) *Block {
+	block := &Block{
+		header:       b.header,
+		transactions: slices.Clone(body.Transactions),
+		uncles:       make([]*Header, len(body.Uncles)),
+		withdrawals:  slices.Clone(body.Withdrawals),
+		//witness:      b.witness,
+	}
+	for i := range body.Uncles {
+		block.uncles[i] = CopyHeader(body.Uncles[i])
+	}
+	return block
+}
 
 // WithWithdrawals returns a copy of the block containing the given withdrawals.
 func (b *Block) WithWithdrawals(withdrawals []*Withdrawal) *Block {

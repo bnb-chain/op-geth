@@ -63,7 +63,7 @@ func NewWitness(chain HeaderReader, block *types.Block) (*Witness, error) {
 	}
 	// Create the wtness with a reconstructed gutted out block
 	return &Witness{
-		Block:   types.NewBlockWithHeader(header).WithBody(block.Body().Transactions, block.Body().Uncles),
+		Block:   types.NewBlockWithHeader(header).WithBodyV2(*block.Body()),
 		Codes:   make(map[string]struct{}),
 		State:   make(map[string]struct{}),
 		Headers: []*types.Header{parent},

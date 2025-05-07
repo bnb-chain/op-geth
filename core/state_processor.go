@@ -23,7 +23,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -94,10 +93,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		ProcessBeaconBlockRoot(*beaconRoot, vmenv, statedb)
 	}
 	statedb.MarkFullProcessed()
-	if p.bc.enableTxDAG {
-		feeReceivers := []common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient}
-		statedb.ResetMVStates(len(block.Transactions()), feeReceivers).EnableAsyncGen()
-	}
+	// if p.bc.enableTxDAG {
+	// 	feeReceivers := []common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient}
+	// 	statedb.ResetMVStates(len(block.Transactions()), feeReceivers).EnableAsyncGen()
+	// }
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		start := time.Now()
@@ -125,23 +124,23 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		return nil, nil, 0, errors.New("withdrawals before shanghai")
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), withdrawals)
-	if p.bc.enableTxDAG {
-		defer func() {
-			statedb.MVStates().Stop()
-		}()
-		// compare input TxDAG when it enable in consensus
-		dag, err := statedb.ResolveTxDAG(len(block.Transactions()))
-		if err == nil {
-			// TODO(galaio): check TxDAG correctness?
-			log.Debug("Process TxDAG result", "block", block.NumberU64(), "tx", len(block.Transactions()), "txDAG", dag.TxCount())
-			if metrics.EnabledExpensive {
-				go types.EvaluateTxDAGPerformance(dag)
-			}
-		} else {
-			log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
-		}
-	}
+	p.engine.Finalize(p.chain, header, statedb, block.Transactions(), block.Uncles(), withdrawals)
+	// if p.bc.enableTxDAG {
+	// 	defer func() {
+	// 		statedb.MVStates().Stop()
+	// 	}()
+	// 	// compare input TxDAG when it enable in consensus
+	// 	dag, err := statedb.ResolveTxDAG(len(block.Transactions()))
+	// 	if err == nil {
+	// 		// TODO(galaio): check TxDAG correctness?
+	// 		log.Debug("Process TxDAG result", "block", block.NumberU64(), "tx", len(block.Transactions()), "txDAG", dag.TxCount())
+	// 		if metrics.EnabledExpensive {
+	// 			go types.EvaluateTxDAGPerformance(dag)
+	// 		}
+	// 	} else {
+	// 		log.Error("ResolveTxDAG err", "block", block.NumberU64(), "tx", len(block.Transactions()), "err", err)
+	// 	}
+	// }
 	return receipts, allLogs, *usedGas, nil
 }
 

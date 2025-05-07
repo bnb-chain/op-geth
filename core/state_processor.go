@@ -116,6 +116,8 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			processTxTimer.UpdateSince(start)
 		}
 	}
+	log.Info("Process txs", "block_number", block.NumberU64(), "tx", len(block.Transactions()), "receipts", len(receipts), "gas", *usedGas)
+
 	if statedb.MVStates() != nil {
 		statedb.MVStates().BatchRecordHandle()
 	}

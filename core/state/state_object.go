@@ -225,42 +225,42 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 	// If no live objects are available, attempt to use snapshots
 	var (
-		enc   []byte
+		//enc   []byte
 		err   error
 		value common.Hash
 	)
-	if s.db.snap != nil {
-		start := time.Now()
-		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
-		if metrics.EnabledExpensive {
-			s.db.SnapshotStorageReads += time.Since(start)
-		}
-		if len(enc) > 0 {
-			_, content, _, err := rlp.Split(enc)
-			if err != nil {
-				s.db.setError(err)
-			}
-			value.SetBytes(content)
-		}
+	// if s.db.snap != nil {
+	// 	start := time.Now()
+	// 	enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
+	// 	if metrics.EnabledExpensive {
+	// 		s.db.SnapshotStorageReads += time.Since(start)
+	// 	}
+	// 	if len(enc) > 0 {
+	// 		_, content, _, err := rlp.Split(enc)
+	// 		if err != nil {
+	// 			s.db.setError(err)
+	// 		}
+	// 		value.SetBytes(content)
+	// 	}
+	// }
+	// // If the snapshot is unavailable or reading from it fails, load from the database.
+	// if s.db.snap == nil || err != nil {
+	start := time.Now()
+	tr, err := s.getTrie()
+	if err != nil {
+		s.db.setError(err)
+		return common.Hash{}
 	}
-	// If the snapshot is unavailable or reading from it fails, load from the database.
-	if s.db.snap == nil || err != nil {
-		start := time.Now()
-		tr, err := s.getTrie()
-		if err != nil {
-			s.db.setError(err)
-			return common.Hash{}
-		}
-		val, err := tr.GetStorage(s.address, key.Bytes())
-		if metrics.EnabledExpensive {
-			s.db.StorageReads += time.Since(start)
-		}
-		if err != nil {
-			s.db.setError(err)
-			return common.Hash{}
-		}
-		value.SetBytes(val)
+	val, err := tr.GetStorage(s.address, key.Bytes())
+	if metrics.EnabledExpensive {
+		s.db.StorageReads += time.Since(start)
 	}
+	if err != nil {
+		s.db.setError(err)
+		return common.Hash{}
+	}
+	value.SetBytes(val)
+	//}
 	s.originStorage[key] = value
 	return value
 }
@@ -365,10 +365,20 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		origin  map[common.Hash][]byte
 		hasher  = crypto.NewKeccakState()
 	)
-	tr, err := s.getTrie()
-	if err != nil {
-		s.db.setError(err)
-		return nil, err
+	// Retrieve a pretecher populated trie, or fall back to the database. This will
+	// block until all prefetch tasks are done, which are needed for witnesses even
+	// for unmodified state objects.
+	tr := s.getPrefetchedTrie()
+	if tr != nil {
+		// Prefetcher returned a live trie, swap it out for the current one
+		s.trie = tr
+	} else {
+		var err error
+		tr, err = s.getTrie()
+		if err != nil {
+			s.db.setError(err)
+			return nil, err
+		}
 	}
 	// Insert all the pending storage updates into the trie
 	usedStorage := make([][]byte, 0, len(s.pendingStorage))

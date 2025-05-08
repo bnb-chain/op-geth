@@ -238,7 +238,7 @@ func (s *StateDB) StartPrefetcher(namespace string, witness *stateless.Witness) 
 			s.prefetcher = nil
 		}
 		s.witness = witness
-		s.snap = nil
+		//s.snap = nil
 		return
 	}
 

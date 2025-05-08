@@ -1012,6 +1012,9 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		"pending_number", len(s.stateObjectsPending),
 		"destruct_number", len(s.stateObjectsDestruct),
 		"destruct_dirty_number", len(s.stateObjectsDestructDirty))
+	for dest := range s.stateObjectsDestruct {
+		log.Info("debug finalise destruct", "addr", dest)
+	}
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
 	}

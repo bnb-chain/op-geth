@@ -992,6 +992,8 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
 				obj.finaliseRWSet()
 			}
+			// TODO:
+			log.Info("debug finalise storage tree", "addr", addr.Hex())
 			obj.finalise(true) // Prefetch slots in the background
 		}
 		obj.created = false
@@ -1003,6 +1005,13 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// the commit-phase will be a lot faster
 		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(addr[:])) // Copy needed for closure
 	}
+	log.Info("debug finalise account number",
+		"journal_number", len(s.journal.dirties),
+		"stateobject_number", len(s.stateObjects),
+		"diry_number", len(s.stateObjectsDirty),
+		"pending_number", len(s.stateObjectsPending),
+		"destruct_number", len(s.stateObjectsDestruct),
+		"destruct_dirty_number", len(s.stateObjectsDestructDirty))
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
 	}

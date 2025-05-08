@@ -240,6 +240,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
 		if err != nil {
+			log.Info("failed to operation execute", "error", err)
 			break
 		}
 		pc++

@@ -53,7 +53,7 @@ func ExecuteStateless(config *params.ChainConfig, bc *BlockChain, witness *state
 		config:      config,
 		chainDb:     memdb,
 		headerCache: lru.NewCache[common.Hash, *types.Header](256),
-		engine:      beacon.New(ethash.NewFaker()),
+		engine:      beacon.New(ethash.NewFaker()), // TODO: bug??
 	}
 	processor := NewStateProcessor(config, bc, bc.engine, chain)
 	validator := NewBlockValidator(config, bc, bc.engine)

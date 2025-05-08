@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -185,6 +186,9 @@ func (s *stateObject) getTrie() (Trie, error) {
 // to break the hidden interdependency between retrieving tries from the db or
 // from the prefetcher.
 func (s *stateObject) getPrefetchedTrie() Trie {
+	defer func() {
+		log.Info("debug get prefetched trie", "owner", s.address)
+	}()
 	// If there's nothing to meaningfully return, let the user figure it out by
 	// pulling the trie from disk.
 	if s.data.Root == types.EmptyRootHash || s.db.prefetcher == nil {

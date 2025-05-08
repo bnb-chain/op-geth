@@ -269,6 +269,9 @@ func (sf *subfetcher) schedule(keys [][]byte) {
 // peek tries to retrieve a deep copy of the fetcher's trie in whatever form it
 // is currently.
 func (sf *subfetcher) peek() Trie {
+	defer func() {
+		log.Info("debug succeed to peek tree", "owner", sf.owner)
+	}()
 	ch := make(chan Trie)
 	select {
 	case sf.copy <- ch:

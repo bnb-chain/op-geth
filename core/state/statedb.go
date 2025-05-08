@@ -682,48 +682,48 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		return obj
 	}
 	// If no live objects are available, attempt to use snapshots
-	// var data *types.StateAccount
-	// if s.snap != nil {
-	// 	start := time.Now()
-	// 	acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
-	// 	if metrics.EnabledExpensive {
-	// 		s.SnapshotAccountReads += time.Since(start)
-	// 	}
-	// 	if err == nil {
-	// 		if acc == nil {
-	// 			return nil
-	// 		}
-	// 		data = &types.StateAccount{
-	// 			Nonce:    acc.Nonce,
-	// 			Balance:  acc.Balance,
-	// 			CodeHash: acc.CodeHash,
-	// 			Root:     common.BytesToHash(acc.Root),
-	// 		}
-	// 		if len(data.CodeHash) == 0 {
-	// 			data.CodeHash = types.EmptyCodeHash.Bytes()
-	// 		}
-	// 		if data.Root == (common.Hash{}) {
-	// 			data.Root = types.EmptyRootHash
-	// 		}
-	// 	}
-	// }
-	// If snapshot unavailable or reading from it failed, load from the database
-	//if data == nil {
 	var data *types.StateAccount
-	start := time.Now()
-	var err error
-	data, err = s.trie.GetAccount(addr)
-	if metrics.EnabledExpensive {
-		s.AccountReads += time.Since(start)
+	if s.snap != nil {
+		start := time.Now()
+		acc, err := s.snap.Account(crypto.HashData(s.hasher, addr.Bytes()))
+		if metrics.EnabledExpensive {
+			s.SnapshotAccountReads += time.Since(start)
+		}
+		if err == nil {
+			if acc == nil {
+				return nil
+			}
+			data = &types.StateAccount{
+				Nonce:    acc.Nonce,
+				Balance:  acc.Balance,
+				CodeHash: acc.CodeHash,
+				Root:     common.BytesToHash(acc.Root),
+			}
+			if len(data.CodeHash) == 0 {
+				data.CodeHash = types.EmptyCodeHash.Bytes()
+			}
+			if data.Root == (common.Hash{}) {
+				data.Root = types.EmptyRootHash
+			}
+		}
 	}
-	if err != nil {
-		s.setError(fmt.Errorf("getDeleteStateObject (%x) error: %w", addr.Bytes(), err))
-		return nil
-	}
+	// If snapshot unavailable or reading from it failed, load from the database
 	if data == nil {
-		return nil
+		//var data *types.StateAccount
+		start := time.Now()
+		var err error
+		data, err = s.trie.GetAccount(addr)
+		if metrics.EnabledExpensive {
+			s.AccountReads += time.Since(start)
+		}
+		if err != nil {
+			s.setError(fmt.Errorf("getDeleteStateObject (%x) error: %w", addr.Bytes(), err))
+			return nil
+		}
+		if data == nil {
+			return nil
+		}
 	}
-	//}
 	// Insert into the live set
 	obj := newObject(s, addr, data)
 	s.setStateObject(obj)

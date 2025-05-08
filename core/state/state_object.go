@@ -225,42 +225,42 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 	// If no live objects are available, attempt to use snapshots
 	var (
-		//enc   []byte
+		enc   []byte
 		err   error
 		value common.Hash
 	)
-	// if s.db.snap != nil {
-	// 	start := time.Now()
-	// 	enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
-	// 	if metrics.EnabledExpensive {
-	// 		s.db.SnapshotStorageReads += time.Since(start)
-	// 	}
-	// 	if len(enc) > 0 {
-	// 		_, content, _, err := rlp.Split(enc)
-	// 		if err != nil {
-	// 			s.db.setError(err)
-	// 		}
-	// 		value.SetBytes(content)
-	// 	}
-	// }
-	// // If the snapshot is unavailable or reading from it fails, load from the database.
-	// if s.db.snap == nil || err != nil {
-	start := time.Now()
-	tr, err := s.getTrie()
-	if err != nil {
-		s.db.setError(err)
-		return common.Hash{}
+	if s.db.snap != nil {
+		start := time.Now()
+		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
+		if metrics.EnabledExpensive {
+			s.db.SnapshotStorageReads += time.Since(start)
+		}
+		if len(enc) > 0 {
+			_, content, _, err := rlp.Split(enc)
+			if err != nil {
+				s.db.setError(err)
+			}
+			value.SetBytes(content)
+		}
 	}
-	val, err := tr.GetStorage(s.address, key.Bytes())
-	if metrics.EnabledExpensive {
-		s.db.StorageReads += time.Since(start)
+	// If the snapshot is unavailable or reading from it fails, load from the database.
+	if s.db.snap == nil || err != nil {
+		start := time.Now()
+		tr, err := s.getTrie()
+		if err != nil {
+			s.db.setError(err)
+			return common.Hash{}
+		}
+		val, err := tr.GetStorage(s.address, key.Bytes())
+		if metrics.EnabledExpensive {
+			s.db.StorageReads += time.Since(start)
+		}
+		if err != nil {
+			s.db.setError(err)
+			return common.Hash{}
+		}
+		value.SetBytes(val)
 	}
-	if err != nil {
-		s.db.setError(err)
-		return common.Hash{}
-	}
-	value.SetBytes(val)
-	//}
 	s.originStorage[key] = value
 	return value
 }

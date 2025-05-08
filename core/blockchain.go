@@ -1984,21 +1984,20 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// If we have a followup block, run that against the current state to pre-cache
 			// transactions and probabilistically some of the account/storage trie nodes.
-			// TODO: tmp comment out
-			// if !bc.cacheConfig.TrieCleanNoPrefetch {
-			// 	if followup, err := it.peek(); followup != nil && err == nil {
-			// 		throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
+			if !bc.cacheConfig.TrieCleanNoPrefetch {
+				if followup, err := it.peek(); followup != nil && err == nil {
+					throwaway, _ := state.New(parent.Root, bc.stateCache, bc.snaps)
 
-			// 		go func(start time.Time, followup *types.Block, throwaway *state.StateDB) {
-			// 			bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, &followupInterrupt)
+					go func(start time.Time, followup *types.Block, throwaway *state.StateDB) {
+						bc.prefetcher.Prefetch(followup, throwaway, bc.vmConfig, &followupInterrupt)
 
-			// 			blockPrefetchExecuteTimer.Update(time.Since(start))
-			// 			if followupInterrupt.Load() {
-			// 				blockPrefetchInterruptMeter.Mark(1)
-			// 			}
-			// 		}(time.Now(), followup, throwaway)
-			// 	}
-			// }
+						blockPrefetchExecuteTimer.Update(time.Since(start))
+						if followupInterrupt.Load() {
+							blockPrefetchInterruptMeter.Mark(1)
+						}
+					}(time.Now(), followup, throwaway)
+				}
+			}
 
 			statedb.SetExpectedStateRoot(block.Root())
 

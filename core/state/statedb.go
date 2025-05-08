@@ -232,15 +232,15 @@ func NewStateDBByTrie(tr Trie, db Database, snaps *snapshot.Tree) (*StateDB, err
 // state trie concurrently while the state is mutated so that when we reach the
 // commit phase, most of the needed data is already hot.
 func (s *StateDB) StartPrefetcher(namespace string, witness *stateless.Witness) {
-	if true {
-		if s.prefetcher != nil {
-			s.prefetcher.close()
-			s.prefetcher = nil
-		}
-		s.witness = witness
-		//s.snap = nil
-		return
-	}
+	// if true {
+	// 	if s.prefetcher != nil {
+	// 		s.prefetcher.close()
+	// 		s.prefetcher = nil
+	// 	}
+	// 	s.witness = witness
+	// 	//s.snap = nil
+	// 	return
+	// }
 
 	if s.noTrie {
 		return
@@ -1027,6 +1027,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		log.Info("debug finalise destruct", "addr", dest)
 	}
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
+		// note here
 		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
 	}
 	// Invalidate journal because reverting across transactions is not allowed.

@@ -255,6 +255,8 @@ func (s *StateDB) StartPrefetcher(namespace string, witness *stateless.Witness) 
 
 	if s.snap != nil {
 		s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace, witness == nil)
+		// TODO:
+		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, nil)
 	}
 }
 
@@ -1025,6 +1027,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		"destruct_dirty_number", len(s.stateObjectsDestructDirty))
 	for dest := range s.stateObjectsDestruct {
 		log.Info("debug finalise destruct", "addr", dest)
+		addressesToPrefetch = append(addressesToPrefetch, common.CopyBytes(dest[:])) // Copy needed for closure
 	}
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		// note here

@@ -181,6 +181,7 @@ func (p *triePrefetcher) trie(owner common.Hash, root common.Hash) Trie {
 	}
 	// Interrupt the prefetcher if it's by any chance still running and return
 	// a copy of any pre-loaded trie.
+	// TODO: wait??
 	fetcher.abort() // safe to do multiple times
 
 	trie := fetcher.peek()
@@ -329,17 +330,34 @@ func (sf *subfetcher) loop() {
 			sf.lock.Unlock()
 
 			// Prefetch any tasks until the loop is interrupted
-			for i, task := range tasks {
+			for _, task := range tasks {
 				select {
 				case <-sf.stop:
 					// If termination is requested, add any leftover back and return
-					sf.lock.Lock()
-					sf.tasks = append(sf.tasks, tasks[i:]...)
-					sf.lock.Unlock()
+					// sf.lock.Lock()
+					// sf.tasks = append(sf.tasks, tasks[i:]...)
+					// sf.lock.Unlock()
+					for _, t := range tasks {
+						if len(t) == common.AddressLength {
+							sf.trie.GetAccount(common.BytesToAddress(t))
+						} else {
+							sf.trie.GetStorage(sf.addr, t)
+						}
+						sf.seen[string(t)] = struct{}{}
+					}
 					return
 
 				case ch := <-sf.copy:
 					// Somebody wants a copy of the current trie, grant them
+					// TODO: force prefetch all tasks
+					for _, t := range tasks {
+						if len(t) == common.AddressLength {
+							sf.trie.GetAccount(common.BytesToAddress(t))
+						} else {
+							sf.trie.GetStorage(sf.addr, t)
+						}
+						sf.seen[string(t)] = struct{}{}
+					}
 					ch <- sf.db.CopyTrie(sf.trie)
 
 				default:
@@ -359,9 +377,34 @@ func (sf *subfetcher) loop() {
 
 		case ch := <-sf.copy:
 			// Somebody wants a copy of the current trie, grant them
+			// TODO: force prefetch all tasks
+			sf.lock.Lock()
+			tasks := sf.tasks
+			sf.tasks = nil
+			sf.lock.Unlock()
+			for _, t := range tasks {
+				if len(t) == common.AddressLength {
+					sf.trie.GetAccount(common.BytesToAddress(t))
+				} else {
+					sf.trie.GetStorage(sf.addr, t)
+				}
+				sf.seen[string(t)] = struct{}{}
+			}
 			ch <- sf.db.CopyTrie(sf.trie)
 
 		case <-sf.stop:
+			sf.lock.Lock()
+			tasks := sf.tasks
+			sf.tasks = nil
+			sf.lock.Unlock()
+			for _, t := range tasks {
+				if len(t) == common.AddressLength {
+					sf.trie.GetAccount(common.BytesToAddress(t))
+				} else {
+					sf.trie.GetStorage(sf.addr, t)
+				}
+				sf.seen[string(t)] = struct{}{}
+			}
 			// Termination is requested, abort and leave remaining tasks
 			return
 		}

@@ -257,6 +257,8 @@ func (s *StateDB) StartPrefetcher(namespace string, witness *stateless.Witness) 
 		s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace, witness == nil)
 		// TODO:
 		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, nil)
+		// disable snap
+		s.snap = nil
 	}
 }
 

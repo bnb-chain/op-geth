@@ -728,6 +728,11 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 			return nil
 		}
 	}
+
+	if s.prefetcher != nil {
+		s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, [][]byte{addr[:]})
+	}
+
 	// Insert into the live set
 	obj := newObject(s, addr, data)
 	s.setStateObject(obj)

@@ -1,11 +1,14 @@
-package types
+package state
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"golang.org/x/exp/slices"
@@ -229,12 +232,22 @@ func (s *RWSet) String() string {
 }
 
 const (
+	// tx rw events
 	NewTxRWEvent byte = iota
 	ReadAccRWEvent
 	WriteAccRWEvent
 	ReadSlotRWEvent
 	WriteSlotRWEvent
+
+	// feature flags
 	CannotGasFeeDelayRWEvent
+
+	// state witness events
+	OriginAccReadEvent
+	OriginSlotReadEvent
+
+	// execution events
+	ExecutionDoneEvent
 )
 
 type RWEventItem struct {
@@ -243,6 +256,10 @@ type RWEventItem struct {
 	Addr  common.Address
 	State AccountState
 	Slot  common.Hash
+
+	// for witness generation
+	StateRoot   common.Hash
+	StorageRoot common.Hash
 }
 
 func (e RWEventItem) String() string {
@@ -258,6 +275,12 @@ func (e RWEventItem) String() string {
 	case WriteSlotRWEvent:
 		return fmt.Sprintf("(%v)%v|%v", e.Event, e.Addr, e.Slot)
 	case CannotGasFeeDelayRWEvent:
+		return fmt.Sprintf("(%v)", e.Event)
+	case OriginAccReadEvent:
+		return fmt.Sprintf("(%v)%v", e.Event, e.Addr)
+	case OriginSlotReadEvent:
+		return fmt.Sprintf("(%v)%v|%v", e.Event, e.Addr, e.Slot)
+	case ExecutionDoneEvent:
 		return fmt.Sprintf("(%v)", e.Event)
 	}
 	return "Unknown"
@@ -356,7 +379,7 @@ type MVStates struct {
 	gasFeeReceivers   []common.Address
 	// dependency map cache for generating TxDAG
 	// depMapCache[i].exist(j) means j->i, and i > j
-	txDepCache []TxDep
+	txDepCache []types.TxDep
 	lock       sync.RWMutex
 
 	// async rw event recorder
@@ -369,9 +392,16 @@ type MVStates struct {
 	recordingWrite    bool
 	asyncRunning      bool
 	asyncWG           sync.WaitGroup
+
+	// stateless related fields
+	asyncWitnessRunning bool
+	trieDB              Database
+	trieCache           map[common.Hash]Trie
+	witnessCache        []map[string]struct{}
+	witnessEventCh      chan RWEventItem
 }
 
-func NewMVStates(txCount int, gasFeeReceivers []common.Address) *MVStates {
+func NewMVStates(txCount int, gasFeeReceivers []common.Address, trieDB Database) *MVStates {
 	s := &MVStates{
 		accWriteSet:     make(map[common.Address]map[AccountState]*RWTxList, txCount),
 		slotWriteSet:    make(map[common.Address]map[common.Hash]*RWTxList, txCount),
@@ -379,11 +409,17 @@ func NewMVStates(txCount int, gasFeeReceivers []common.Address) *MVStates {
 		slotReadSet:     make(map[common.Address]map[common.Hash]*RWTxList, txCount),
 		rwEventCh:       make(chan []RWEventItem, 100),
 		gasFeeReceivers: gasFeeReceivers,
+
+		// witness related
+		witnessEventCh: make(chan RWEventItem, 1000),
+		trieDB:         trieDB,
+		trieCache:      make(map[common.Hash]Trie),
 	}
 	return s
 }
 
 func (s *MVStates) EnableAsyncGen() *MVStates {
+	// start async rw event recorder & dep analysis
 	s.asyncWG.Add(1)
 	s.asyncRunning = true
 	s.rwEventCache = *rwEventCachePool.Get().(*[]RWEventItem)
@@ -391,17 +427,24 @@ func (s *MVStates) EnableAsyncGen() *MVStates {
 	s.rwEventCacheIndex = 0
 	s.asyncRWSet.index = -1
 	go s.asyncRWEventLoop()
+
+	// start async witness generator
+	s.asyncWG.Add(1)
+	s.asyncWitnessRunning = true
+	go s.asyncWitnessLoop()
 	return s
 }
 
 func (s *MVStates) Stop() {
 	s.stopAsyncRecorder()
+	s.stopAsyncWitness()
+	s.asyncWG.Wait()
 }
 
 func (s *MVStates) Copy() *MVStates {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	ns := NewMVStates(len(s.rwSets), s.gasFeeReceivers)
+	ns := NewMVStates(len(s.rwSets), s.gasFeeReceivers, s.trieDB)
 	ns.nextFinaliseIndex = s.nextFinaliseIndex
 	ns.txDepCache = append(ns.txDepCache, s.txDepCache...)
 	ns.rwSets = append(ns.rwSets, s.rwSets...)
@@ -437,6 +480,15 @@ func (s *MVStates) Copy() *MVStates {
 			ns.slotReadSet[addr][slot] = reads.Copy()
 		}
 	}
+
+	ns.trieCache = make(map[common.Hash]Trie)
+	for key, trie := range s.trieCache {
+		ns.trieCache[key] = ns.trieDB.CopyTrie(trie)
+	}
+	ns.witnessCache = make([]map[string]struct{}, len(s.witnessCache))
+	for key, cache := range s.witnessCache {
+		ns.witnessCache[key] = maps.Clone(cache)
+	}
 	return ns
 }
 
@@ -450,6 +502,49 @@ func (s *MVStates) asyncRWEventLoop() {
 			}
 			s.handleRWEvents(item)
 			rwEventCachePool.Put(&item)
+		}
+	}
+}
+
+func (s *MVStates) asyncWitnessLoop() {
+	defer s.asyncWG.Done()
+	for {
+		select {
+		case item, ok := <-s.witnessEventCh:
+			if !ok {
+				return
+			}
+			switch item.Event {
+			case OriginAccReadEvent:
+				key := common.Hash{}
+				if s.trieCache[key] == nil {
+					trie, err := s.trieDB.OpenTrie(item.StateRoot)
+					if err != nil {
+						log.Error("failed to account trie", "stateRoot", item.StateRoot, "error", err)
+						continue
+					}
+					s.trieCache[key] = trie
+				}
+				// access account in trie
+				s.trieCache[key].GetAccount(item.Addr)
+			case OriginSlotReadEvent:
+				key := crypto.Keccak256Hash(item.Addr.Bytes())
+				if s.trieCache[key] == nil {
+					trie, err := s.trieDB.OpenStorageTrie(item.StateRoot, item.Addr, item.StorageRoot, nil)
+					if err != nil {
+						log.Error("failed to account trie", "stateRoot", item.StateRoot, "error", err)
+						continue
+					}
+					s.trieCache[key] = trie
+				}
+				// access storage slot in trie
+				s.trieCache[key].GetStorage(item.Addr, item.Slot.Bytes())
+			case ExecutionDoneEvent:
+				// generate witness immediately
+				for _, trie := range s.trieCache {
+					s.witnessCache = append(s.witnessCache, trie.Witness())
+				}
+			}
 		}
 	}
 }
@@ -509,6 +604,13 @@ func (s *MVStates) handleRWEvents(items []RWEventItem) {
 		// recorde current as cannot gas fee delay
 		case CannotGasFeeDelayRWEvent:
 			s.asyncRWSet.cannotGasFeeDelay = true
+		// handle witness generation events
+		case ExecutionDoneEvent, OriginAccReadEvent, OriginSlotReadEvent:
+			// if no trieDB, skip witness generation
+			if s.trieDB == nil {
+				continue
+			}
+			s.witnessEventCh <- item
 		}
 	}
 	// handle last tx rw set
@@ -695,6 +797,55 @@ func (s *MVStates) RecordCannotDelayGasFee() {
 	s.rwEventCacheIndex++
 }
 
+func (s *MVStates) RecordOriginAccRead(addr common.Address) {
+	if !s.asyncRunning || !s.recordingRead {
+		return
+	}
+	if s.rwEventCacheIndex < len(s.rwEventCache) {
+		s.rwEventCache[s.rwEventCacheIndex].Event = OriginAccReadEvent
+		s.rwEventCache[s.rwEventCacheIndex].Addr = addr
+		s.rwEventCacheIndex++
+		return
+	}
+	s.rwEventCache = append(s.rwEventCache, RWEventItem{
+		Event: OriginAccReadEvent,
+		Addr:  addr,
+	})
+	s.rwEventCacheIndex++
+}
+
+func (s *MVStates) RecordOriginSlotRead(addr common.Address, slot common.Hash) {
+	if !s.asyncRunning || !s.recordingRead {
+		return
+	}
+	if s.rwEventCacheIndex < len(s.rwEventCache) {
+		s.rwEventCache[s.rwEventCacheIndex].Event = OriginSlotReadEvent
+		s.rwEventCache[s.rwEventCacheIndex].Addr = addr
+		s.rwEventCache[s.rwEventCacheIndex].Slot = slot
+		s.rwEventCacheIndex++
+		return
+	}
+	s.rwEventCache = append(s.rwEventCache, RWEventItem{
+		Event: OriginSlotReadEvent,
+		Addr:  addr,
+		Slot:  slot,
+	})
+	s.rwEventCacheIndex++
+}
+
+// RecordExecutionDone record the execution done event
+func (s *MVStates) RecordExecutionDone() {
+	if s.rwEventCacheIndex < len(s.rwEventCache) {
+		s.rwEventCache[s.rwEventCacheIndex].Event = ExecutionDoneEvent
+		s.rwEventCacheIndex++
+		return
+	}
+	s.rwEventCache = append(s.rwEventCache, RWEventItem{
+		Event: ExecutionDoneEvent,
+	})
+	s.rwEventCacheIndex++
+}
+
 func (s *MVStates) BatchRecordHandle() {
 	if !s.asyncRunning || s.rwEventCacheIndex == 0 {
 		return
@@ -706,12 +857,22 @@ func (s *MVStates) BatchRecordHandle() {
 }
 
 func (s *MVStates) stopAsyncRecorder() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	if s.asyncRunning {
 		s.BatchRecordHandle()
 		s.asyncRunning = false
 		close(s.rwEventCh)
 		rwEventCachePool.Put(&s.rwEventCache)
-		s.asyncWG.Wait()
+	}
+}
+
+func (s *MVStates) stopAsyncWitness() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if s.asyncWitnessRunning {
+		close(s.witnessEventCh)
+		s.asyncWitnessRunning = false
 	}
 }
 
@@ -916,12 +1077,12 @@ func (s *MVStates) querySlotReads(addr common.Address, slot common.Hash) *RWTxLi
 // resolveDepsMapCacheByWrites must be executed in order
 func (s *MVStates) resolveDepsMapCacheByWrites(index int, reads []RWEventItem, writes []RWEventItem) {
 	for index >= len(s.txDepCache) {
-		s.txDepCache = append(s.txDepCache, TxDep{})
+		s.txDepCache = append(s.txDepCache, types.TxDep{})
 	}
 	rwSet := s.rwSets[index]
 	// analysis dep, if the previous transaction is not executed/validated, re-analysis is required
 	if rwSet.excludedTx {
-		s.txDepCache[index] = NewTxDep([]uint64{}, ExcludedTxFlag)
+		s.txDepCache[index] = types.NewTxDep([]uint64{}, types.ExcludedTxFlag)
 		return
 	}
 	depSlice := NewTxDepSlice(1)
@@ -1004,12 +1165,12 @@ func (s *MVStates) resolveDepsMapCacheByWrites(index int, reads []RWEventItem, w
 	for _, tx := range removed {
 		depSlice.remove(tx)
 	}
-	s.txDepCache[index] = NewTxDep(depSlice.deps())
+	s.txDepCache[index] = types.NewTxDep(depSlice.deps())
 }
 
 // ResolveTxDAG generate TxDAG from RWSets
-func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...TxDep) (TxDAG, error) {
-	s.stopAsyncRecorder()
+func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...types.TxDep) (types.TxDAG, error) {
+	s.Stop()
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -1020,10 +1181,10 @@ func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...TxDep) (TxDAG, error) 
 	totalCnt := txCnt + len(extraTxDeps)
 	for i := 0; i < txCnt; i++ {
 		if s.rwSets[i].cannotGasFeeDelay {
-			return NewEmptyTxDAG(), nil
+			return types.NewEmptyTxDAG(), nil
 		}
 	}
-	txDAG := &PlainTxDAG{
+	txDAG := &types.PlainTxDAG{
 		TxDeps: s.txDepCache,
 	}
 	if len(extraTxDeps) > 0 {
@@ -1034,7 +1195,7 @@ func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...TxDep) (TxDAG, error) 
 			continue
 		}
 		// if tx deps larger than half of txs, then convert with NonDependentRelFlag
-		txDAG.TxDeps[i].SetFlag(NonDependentRelFlag)
+		txDAG.TxDeps[i].SetFlag(types.NonDependentRelFlag)
 		nd := make([]uint64, 0, totalCnt-1-len(txDAG.TxDeps[i].TxIndexes))
 		for j := uint64(0); j < uint64(i); j++ {
 			if !slices.Contains(txDAG.TxDeps[i].TxIndexes, j) {
@@ -1045,6 +1206,15 @@ func (s *MVStates) ResolveTxDAG(txCnt int, extraTxDeps ...TxDep) (TxDAG, error) 
 	}
 	s.txDepCache = txDAG.TxDeps
 	return txDAG, nil
+}
+
+// ResolveROTrieWitness generate ROTrieWitness from RWSets
+func (s *MVStates) ResolveROTrieWitness() ([]map[string]struct{}, error) {
+	s.Stop()
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	return s.witnessCache, nil
 }
 
 func (s *MVStates) FeeReceivers() []common.Address {

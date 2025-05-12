@@ -118,7 +118,7 @@ type StateDB struct {
 	logSize uint
 
 	// parallel EVM related
-	mvStates *types.MVStates
+	mvStates *MVStates
 
 	// Preimages occurred seen by VM in the scope of block.
 	preimages map[common.Hash][]byte
@@ -365,7 +365,7 @@ func (s *StateDB) Empty(addr common.Address) bool {
 // GetBalance retrieves the balance from the given address or 0 if object not found
 func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
 	if s.mvStates != nil {
-		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+		s.mvStates.RecordAccountRead(addr, AccountBalance)
 	}
 
 	stateObject := s.getStateObject(addr)
@@ -378,7 +378,7 @@ func (s *StateDB) GetBalance(addr common.Address) *uint256.Int {
 // GetNonce retrieves the nonce from the given address or 0 if object not found
 func (s *StateDB) GetNonce(addr common.Address) uint64 {
 	if s.mvStates != nil {
-		s.mvStates.RecordAccountRead(addr, types.AccountNonce)
+		s.mvStates.RecordAccountRead(addr, AccountNonce)
 	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
@@ -405,7 +405,7 @@ func (s *StateDB) TxIndex() int {
 
 func (s *StateDB) GetCode(addr common.Address) []byte {
 	if s.mvStates != nil {
-		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+		s.mvStates.RecordAccountRead(addr, AccountCodeHash)
 	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
@@ -416,7 +416,7 @@ func (s *StateDB) GetCode(addr common.Address) []byte {
 
 func (s *StateDB) GetCodeSize(addr common.Address) int {
 	if s.mvStates != nil {
-		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+		s.mvStates.RecordAccountRead(addr, AccountCodeHash)
 	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
@@ -427,7 +427,7 @@ func (s *StateDB) GetCodeSize(addr common.Address) int {
 
 func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	if s.mvStates != nil {
-		s.mvStates.RecordAccountRead(addr, types.AccountCodeHash)
+		s.mvStates.RecordAccountRead(addr, AccountCodeHash)
 	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
@@ -480,7 +480,7 @@ func (s *StateDB) HasSelfDestructed(addr common.Address) bool {
 // AddBalance adds amount to the account associated with addr.
 func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
 	if s.mvStates != nil {
-		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+		s.mvStates.RecordAccountRead(addr, AccountBalance)
 	}
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
@@ -492,7 +492,7 @@ func (s *StateDB) AddBalance(addr common.Address, amount *uint256.Int) {
 // SubBalance subtracts amount from the account associated with addr.
 func (s *StateDB) SubBalance(addr common.Address, amount *uint256.Int) {
 	if s.mvStates != nil {
-		s.mvStates.RecordAccountRead(addr, types.AccountBalance)
+		s.mvStates.RecordAccountRead(addr, AccountBalance)
 	}
 	stateObject := s.getOrNewStateObject(addr)
 	if stateObject != nil {
@@ -966,7 +966,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	for addr, acc := range s.stateObjectsDestructDirty {
 		s.stateObjectsDestruct[addr] = acc
 		if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
-			s.mvStates.RecordAccountWrite(addr, types.AccountSuicide)
+			s.mvStates.RecordAccountWrite(addr, AccountSuicide)
 		}
 	}
 	s.stateObjectsDestructDirty = make(map[common.Address]*types.StateAccount)
@@ -990,7 +990,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			if _, ok := s.stateObjectsDestruct[obj.address]; !ok {
 				s.stateObjectsDestruct[obj.address] = obj.origin
 				if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
-					s.mvStates.RecordAccountWrite(addr, types.AccountSuicide)
+					s.mvStates.RecordAccountWrite(addr, AccountSuicide)
 				}
 			}
 			// Note, we can't do this only at the end of a block because multiple
@@ -1779,7 +1779,7 @@ func (s *StateDB) StartTxRecorder(isExcludeTx bool) {
 		return
 	}
 	if isExcludeTx {
-		rwSet := types.NewEmptyRWSet(s.txIndex).WithExcludedTxFlag()
+		rwSet := NewEmptyRWSet(s.txIndex).WithExcludedTxFlag()
 		if err := s.mvStates.FinaliseWithRWSet(rwSet); err != nil {
 			log.Error("MVStates SystemTx Finalise err", "err", err)
 		}
@@ -1798,8 +1798,13 @@ func (s *StateDB) StopTxRecorder() {
 	s.mvStates.RecordWriteDone()
 }
 
-func (s *StateDB) ResetMVStates(txCount int, feeReceivers []common.Address) *types.MVStates {
-	s.mvStates = types.NewMVStates(txCount, feeReceivers)
+func (s *StateDB) ResetMVStates(txCount int, feeReceivers []common.Address) *MVStates {
+	var trieDB Database
+	// if exists witness, use the same trieDB
+	if s.witness != nil {
+		trieDB = s.db
+	}
+	s.mvStates = NewMVStates(txCount, feeReceivers, trieDB)
 	return s.mvStates
 }
 
@@ -1860,7 +1865,7 @@ func (s *StateDB) ResolveTxDAG(txCnt int, extraTxDeps ...types.TxDep) (types.TxD
 	return s.mvStates.ResolveTxDAG(txCnt, extraTxDeps...)
 }
 
-func (s *StateDB) MVStates() *types.MVStates {
+func (s *StateDB) MVStates() *MVStates {
 	return s.mvStates
 }
 

@@ -2038,6 +2038,18 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 		}
 
+		// todo: tmp force enable witness generator for testing, will remove it later.
+		//need to collect the witness after state root generation
+		if bc.enableTxDAG && statedb.Witness() != nil {
+			witnesses, err := statedb.MVStates().ResolveROTrieWitness()
+			if err != nil {
+				log.Warn("failed to resolve ROTrieWitness", "err", err)
+				return it.index, err
+			}
+			for _, witness := range witnesses {
+				statedb.Witness().AddState(witness)
+			}
+		}
 		if witness := statedb.Witness(); witness != nil && bc.vmConfig.EnableStatelessSelfValidation {
 			// Remove critical computed fields from the block to force true recalculation
 			context := block.Header()

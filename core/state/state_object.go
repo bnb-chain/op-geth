@@ -334,13 +334,13 @@ func (s *stateObject) finaliseRWSet() {
 	}
 
 	if s.dirtyNonce != nil && *s.dirtyNonce != s.data.Nonce {
-		ms.RecordAccountWrite(s.address, types.AccountNonce)
+		ms.RecordAccountWrite(s.address, AccountNonce)
 	}
 	if s.dirtyBalance != nil && s.dirtyBalance.Cmp(s.data.Balance) != 0 {
-		ms.RecordAccountWrite(s.address, types.AccountBalance)
+		ms.RecordAccountWrite(s.address, AccountBalance)
 	}
 	if s.dirtyCodeHash != nil && !slices.Equal(s.dirtyCodeHash, s.data.CodeHash) {
-		ms.RecordAccountWrite(s.address, types.AccountCodeHash)
+		ms.RecordAccountWrite(s.address, AccountCodeHash)
 	}
 }
 

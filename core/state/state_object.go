@@ -267,7 +267,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	}
 	// Schedule the resolved storage slots for prefetching if it's enabled.
 	if s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
-		s.db.prefetcher.prefetch(s.addrHash, s.origin.Root, s.address, [][]byte{key[:]})
+		s.db.prefetcher.prefetch(s.addrHash, s.origin.Root, s.address, nil, []common.Hash{key}, true)
 	}
 	s.originStorage[key] = value
 	return value
@@ -296,11 +296,11 @@ func (s *stateObject) setState(key, value common.Hash) {
 // finalise moves all dirty storage slots into the pending area to be hashed or
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise(prefetch bool) {
-	slotsToPrefetch := make([][]byte, 0, len(s.dirtyStorage))
+	slotsToPrefetch := make([]common.Hash, 0, len(s.dirtyStorage))
 	for key, value := range s.dirtyStorage {
 		s.pendingStorage[key] = value
 		if value != s.originStorage[key] {
-			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(key[:])) // Copy needed for closure
+			slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
 		}
 	}
 
@@ -318,7 +318,7 @@ func (s *stateObject) finalise(prefetch bool) {
 	}
 	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
 		// note here
-		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, slotsToPrefetch)
+		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, slotsToPrefetch, false)
 	}
 	if len(s.dirtyStorage) > 0 {
 		s.dirtyStorage = make(Storage)
@@ -390,7 +390,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 		}
 	}
 	// Insert all the pending storage updates into the trie
-	usedStorage := make([][]byte, 0, len(s.pendingStorage))
+	usedStorage := make([]common.Hash, 0, len(s.pendingStorage))
 	dirtyStorage := make(map[common.Hash][]byte)
 
 	for key, value := range s.pendingStorage {
@@ -422,7 +422,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 				s.db.StorageUpdated += 1
 			}
 			// Cache the items for preloading
-			usedStorage = append(usedStorage, common.CopyBytes(key[:]))
+			usedStorage = append(usedStorage, key)
 		}
 	}()
 	// If state snapshotting is active, cache the data til commit
@@ -470,7 +470,7 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	wg.Wait()
 
 	if s.db.prefetcher != nil {
-		s.db.prefetcher.used(s.addrHash, s.data.Root, usedStorage)
+		s.db.prefetcher.used(s.addrHash, s.data.Root, nil, usedStorage)
 	}
 	s.pendingStorage = make(Storage) // reset pending map
 	return tr, nil

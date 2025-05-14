@@ -223,6 +223,66 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 	return err
 }
 
+// ValidateStateV2 validates the various changes that happen after a state transition,
+// such as amount of used gas, the receipt roots and the state root itself.
+func (v *BlockValidator) ValidateStateV2(block *types.Block, statedb *state.StateDB, res *ProcessResult, stateless bool) error {
+	header := block.Header()
+	if block.GasUsed() != res.GasUsed {
+		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), res.GasUsed)
+	}
+
+	validateFuns := []func() error{
+		func() error {
+			// Validate the received block's bloom with the one derived from the generated receipts.
+			// For valid blocks this should always validate to true.
+			rbloom := types.CreateBloom(res.Receipts)
+			if rbloom != header.Bloom {
+				return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
+			}
+			return nil
+		},
+		func() error {
+			if stateless {
+				// In stateless mode, return early because the receipt and state root are not
+				// provided through the witness, rather the cross validator needs to return it.
+				return nil
+			}
+			// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))
+			receiptSha := types.DeriveSha(res.Receipts, trie.NewStackTrie(nil))
+			if receiptSha != header.ReceiptHash {
+				return fmt.Errorf("invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
+			}
+			return nil
+		},
+	}
+	if !stateless {
+		validateFuns = append(validateFuns, func() error {
+			// Validate the state root against the received state root and throw
+			// an error if they don't match.
+			if root := statedb.IntermediateRoot(v.config.IsEIP158(header.Number)); header.Root != root {
+				return fmt.Errorf("invalid merkle root (remote: %x local: %x) dberr: %w", header.Root, root, statedb.Error())
+			}
+			return nil
+		})
+	}
+	validateRes := make(chan error, len(validateFuns))
+	for _, f := range validateFuns {
+		tmpFunc := f
+		gopool.Submit(func() {
+			validateRes <- tmpFunc()
+		})
+	}
+
+	var err error
+	for i := 0; i < len(validateFuns); i++ {
+		r := <-validateRes
+		if r != nil && err == nil {
+			err = r
+		}
+	}
+	return err
+}
+
 // ValidateWitness cross validates a block execution with stateless remote clients.
 //
 // Normally we'd distribute the block witness to remote cross validators, wait

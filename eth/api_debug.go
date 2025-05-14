@@ -478,14 +478,12 @@ func generateWitness(blockchain *core.BlockChain, block *types.Block) (*stateles
 	statedb.StartPrefetcher("debug_execution_witness", witness)
 	defer statedb.StopPrefetcher()
 
-	// TODO: polish it
-	res, err := blockchain.Processor().ProcessV2(block, statedb, *blockchain.GetVMConfig())
+	receipts, _, usedGas, err := blockchain.Processor().Process(block, statedb, *blockchain.GetVMConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to process block %d: %w", block.Number(), err)
 	}
 
-	// TODO: polish it
-	if err := blockchain.Validator().ValidateStateV2(block, statedb, res, false); err != nil {
+	if err := blockchain.Validator().ValidateState(block, statedb, receipts, usedGas, false, false); err != nil {
 		return nil, fmt.Errorf("failed to validate block %d: %w", block.Number(), err)
 	}
 

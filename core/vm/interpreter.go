@@ -36,6 +36,7 @@ type Config struct {
 	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
 	EnableOpcodeOptimizations   bool                // Enable opcode optimization
 
+	// TODO: check it
 	StatelessSelfValidation bool // Generate execution witnesses and self-check against them (testing purpose)
 }
 
@@ -240,7 +241,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
 		if err != nil {
-			log.Info("failed to operation execute", "error", err)
+			log.Info("debug witness, failed to operation execute", "error", err)
 			break
 		}
 		pc++

@@ -516,9 +516,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From, st.state.GetNonce(sender.Address())+1)
-		log.Info("print call context", "from", msg.From.Hex(), "to", st.to().Hex(), "data", msg.Data, "gas", st.gasRemaining, "value", value)
+		log.Info("debug witness, print call context", "from", msg.From.Hex(), "to", st.to().Hex(), "data", msg.Data, "gas", st.gasRemaining, "value", value)
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), msg.Data, st.gasRemaining, value)
-		log.Info("print call result", "ret", ret, "gasRemaining", st.gasRemaining, "vmerr", vmerr)
+		log.Info("debug witness, print call result", "ret", ret, "gasRemaining", st.gasRemaining, "vmerr", vmerr)
 	}
 	DebugInnerExecutionDuration += time.Since(start)
 

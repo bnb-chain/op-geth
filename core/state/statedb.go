@@ -1016,17 +1016,14 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		// the commit-phase will be a lot faster
 		addressesToPrefetch = append(addressesToPrefetch, addr) // Copy needed for closure
 	}
-	log.Info("debug finalise account number",
+	log.Info("debug witness,finalise account number",
 		"journal_number", len(s.journal.dirties),
 		"stateobject_number", len(s.stateObjects),
 		"diry_number", len(s.stateObjectsDirty),
 		"pending_number", len(s.stateObjectsPending),
 		"destruct_number", len(s.stateObjectsDestruct),
 		"destruct_dirty_number", len(s.stateObjectsDestructDirty))
-	// if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
-	// 	// note here
-	// 	s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)
-	// }
+
 	if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch, nil, false); err != nil {
 			log.Error("Failed to prefetch addresses", "addresses", len(addressesToPrefetch), "err", err)
@@ -1139,6 +1136,7 @@ func (s *StateDB) AccountsIntermediateRoot() {
 }
 
 func (s *StateDB) StateIntermediateRoot() common.Hash {
+	// TODO: check it
 	prefetcher := s.prefetcher
 
 	// Now we're about to start to write changes to the trie. The trie is so far

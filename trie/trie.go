@@ -610,7 +610,6 @@ func (t *Trie) resolveAndTrack(n hashNode, prefix []byte) (node, error) {
 	if err != nil {
 		return nil, err
 	}
-	// note here
 	t.tracer.onRead(prefix, blob)
 	return mustDecodeNode(n, blob), nil
 }
@@ -687,7 +686,7 @@ func (t *Trie) hashRoot() (node, node) {
 // Witness returns a set containing all trie nodes that have been accessed.
 func (t *Trie) Witness() map[string]struct{} {
 	defer func() {
-		log.Info("print trie witness len", "len", len(t.tracer.accessList), "owner", t.owner)
+		log.Info("debug witness, print trie witness len", "len", len(t.tracer.accessList), "owner", t.owner)
 	}()
 	if len(t.tracer.accessList) == 0 {
 		return nil

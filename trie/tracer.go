@@ -58,7 +58,6 @@ func newTracer() *tracer {
 // blob internally. Don't change the value outside of function since
 // it's not deep-copied.
 func (t *tracer) onRead(path []byte, val []byte) {
-	// note here
 	t.accessList[string(path)] = val
 }
 

@@ -238,6 +238,7 @@ type Block struct {
 	// witness is not an encoded part of the block body.
 	// It is held in Block in order for easy relaying to the places
 	// that process it.
+	// TODO: check it
 	//witness *ExecutionWitness
 
 	// caches
@@ -513,6 +514,7 @@ func (b *Block) WithBody(transactions []*Transaction, uncles []*Header) *Block {
 	return block
 }
 
+// TODO: check it
 func (b *Block) WithBodyV2(body Body) *Block {
 	block := &Block{
 		header:       b.header,

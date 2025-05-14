@@ -49,6 +49,7 @@ type Witness struct {
 }
 
 // NewWitness creates an empty witness ready for population.
+// TODO: polish it
 func NewWitness(chain HeaderReader, block *types.Block) (*Witness, error) {
 	// Zero out the result fields to avoid accidentally sending them to the verifier
 	header := block.Header()

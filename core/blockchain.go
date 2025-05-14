@@ -377,6 +377,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
+	// TODO: polish it
 	bc.processor = NewStateProcessor(chainConfig, bc, engine, bc.hc)
 
 	err = proofKeeper.Start(bc, db)
@@ -1971,13 +1972,18 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 			// Enable prefetching to pull in trie node paths while processing transactions
 			var witness *stateless.Witness
-			// if bc.vmConfig.StatelessSelfValidation {
-			{ // todo: tmp force enable witness generator
-				witness, err = stateless.NewWitness(bc, block)
-				if err != nil {
-					return it.index, err
+			// If we are past Byzantium, enable prefetching to pull in trie node paths
+			// while processing transactions. Before Byzantium the prefetcher is mostly
+			// useless due to the intermediate root hashing after each transaction.
+			if bc.chainConfig.IsByzantium(block.Number()) {
+				{ // todo: tmp force enable witness generator for testing, will remove it later.
+					witness, err = stateless.NewWitness(bc, block)
+					if err != nil {
+						return it.index, err
+					}
+					log.Info("debug witness, succeed to enable witness generator",
+						"hash", block.Hash(), "number", block.NumberU64(), "root", block.Root())
 				}
-				log.Info("succeed to enable witness generator", "hash", block.Hash(), "number", block.NumberU64(), "root", block.Root())
 			}
 			statedb.StartPrefetcher("chain", witness)
 			activeState = statedb
@@ -2004,7 +2010,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// Process block using the parent state as reference point
 			pstart = time.Now()
 			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
-			log.Info("print normal execute receipt", "block", block, "receipt", receipts, "vm_config", bc.vmConfig)
+			log.Info("debug witness,print normal execute receipt", "block", block, "receipt", receipts, "vm_config", bc.vmConfig)
 			if err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
@@ -2035,10 +2041,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 		}
+
+		// todo: tmp force enable witness generator for testing, will remove it later.
 		if witness := statedb.Witness(); witness != nil {
 			if err = bc.validator.ValidateWitness(bc, witness, block.ReceiptHash(), block.Root()); err != nil {
 				bc.reportBlock(block, receipts, err)
-				return it.index, fmt.Errorf("cross verification failed: %v", err)
+				return it.index, fmt.Errorf("debug witness, cross verification failed: %v", err)
 			}
 		}
 

@@ -710,7 +710,6 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 	}
 	// If snapshot unavailable or reading from it failed, load from the database
 	if data == nil {
-		//var data *types.StateAccount
 		start := time.Now()
 		var err error
 		data, err = s.trie.GetAccount(addr)
@@ -921,12 +920,6 @@ func (s *StateDB) Copy() *StateDB {
 	state.accessList = s.accessList.Copy()
 	state.transientStorage = s.transientStorage.Copy()
 
-	// // If there's a prefetcher running, make an inactive copy of it that can
-	// // only access data but does not actively preload (since the user will not
-	// // know that they need to explicitly terminate an active copy).
-	// if s.prefetcher != nil {
-	// 	state.prefetcher = s.prefetcher.copy()
-	// }
 	return state
 }
 
@@ -1011,8 +1004,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 			if s.mvStates != nil && !slices.Contains(feeReceivers, addr) {
 				obj.finaliseRWSet()
 			}
-			// TODO:
-			log.Info("debug finalise storage tree", "addr", addr.Hex())
+			log.Info("debug witness, finalise storage tree", "addr", addr.Hex())
 			obj.finalise(true) // Prefetch slots in the background
 		}
 		obj.created = false
@@ -1031,10 +1023,6 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 		"pending_number", len(s.stateObjectsPending),
 		"destruct_number", len(s.stateObjectsDestruct),
 		"destruct_dirty_number", len(s.stateObjectsDestructDirty))
-	for dest := range s.stateObjectsDestruct {
-		log.Info("debug finalise destruct", "addr", dest)
-		addressesToPrefetch = append(addressesToPrefetch, dest) // Copy needed for closure
-	}
 	// if s.prefetcher != nil && len(addressesToPrefetch) > 0 {
 	// 	// note here
 	// 	s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, addressesToPrefetch)

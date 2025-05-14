@@ -157,23 +157,18 @@ func (s *stateObject) touch() {
 	}
 }
 
-// getTrie returns the associated storage trie. The trie will be opened
-// if it's not loaded previously. An error will be returned if trie can't
-// be loaded.
+// getTrie returns the associated storage trie. The trie will be opened if it's
+// not loaded previously. An error will be returned if trie can't be loaded.
+//
+// If a new trie is opened, it will be cached within the state object to allow
+// subsequent reads to expand the same trie instead of reloading from disk.
 func (s *stateObject) getTrie() (Trie, error) {
 	if s.trie == nil {
-		// Try fetching from prefetcher first
-		if s.data.Root != types.EmptyRootHash && s.db.prefetcher != nil {
-			// When the miner is creating the pending state, there is no prefetcher
-			s.trie = s.db.prefetcher.trie(s.addrHash, s.data.Root)
+		tr, err := s.db.db.OpenStorageTrie(s.db.originalRoot, s.address, s.data.Root, s.db.trie)
+		if err != nil {
+			return nil, err
 		}
-		if s.trie == nil {
-			tr, err := s.db.db.OpenStorageTrie(s.db.originalRoot, s.address, s.data.Root, s.db.trie)
-			if err != nil {
-				return nil, err
-			}
-			s.trie = tr
-		}
+		s.trie = tr
 	}
 	return s.trie, nil
 }
@@ -187,7 +182,7 @@ func (s *stateObject) getTrie() (Trie, error) {
 // from the prefetcher.
 func (s *stateObject) getPrefetchedTrie() Trie {
 	defer func() {
-		log.Info("debug get prefetched trie", "owner", s.address)
+		log.Info("debug witness, get prefetched trie", "owner", s.address)
 	}()
 	// If there's nothing to meaningfully return, let the user figure it out by
 	// pulling the trie from disk.
@@ -317,7 +312,6 @@ func (s *stateObject) finalise(prefetch bool) {
 		s.dirtyCodeHash = nil
 	}
 	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != types.EmptyRootHash {
-		// note here
 		s.db.prefetcher.prefetch(s.addrHash, s.data.Root, s.address, nil, slotsToPrefetch, false)
 	}
 	if len(s.dirtyStorage) > 0 {

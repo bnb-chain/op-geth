@@ -225,6 +225,7 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 
 // ValidateStateV2 validates the various changes that happen after a state transition,
 // such as amount of used gas, the receipt roots and the state root itself.
+// TODO: remove it later
 func (v *BlockValidator) ValidateStateV2(block *types.Block, statedb *state.StateDB, res *ProcessResult, stateless bool) error {
 	header := block.Header()
 	if block.GasUsed() != res.GasUsed {

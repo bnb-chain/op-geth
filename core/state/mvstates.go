@@ -243,8 +243,8 @@ const (
 	CannotGasFeeDelayRWEvent
 
 	// state witness events
-	OriginAccReadEvent
-	OriginSlotReadEvent
+	AccReadFromDBEvent
+	SlotReadFromDBEvent
 
 	// execution events
 	ExecutionDoneEvent
@@ -276,9 +276,9 @@ func (e RWEventItem) String() string {
 		return fmt.Sprintf("(%v)%v|%v", e.Event, e.Addr, e.Slot)
 	case CannotGasFeeDelayRWEvent:
 		return fmt.Sprintf("(%v)", e.Event)
-	case OriginAccReadEvent:
+	case AccReadFromDBEvent:
 		return fmt.Sprintf("(%v)%v", e.Event, e.Addr)
-	case OriginSlotReadEvent:
+	case SlotReadFromDBEvent:
 		return fmt.Sprintf("(%v)%v|%v", e.Event, e.Addr, e.Slot)
 	case ExecutionDoneEvent:
 		return fmt.Sprintf("(%v)", e.Event)
@@ -515,7 +515,7 @@ func (s *MVStates) asyncWitnessLoop() {
 				return
 			}
 			switch item.Event {
-			case OriginAccReadEvent:
+			case AccReadFromDBEvent:
 				key := common.Hash{}
 				if s.trieCache[key] == nil {
 					trie, err := s.trieDB.OpenTrie(item.StateRoot)
@@ -527,7 +527,7 @@ func (s *MVStates) asyncWitnessLoop() {
 				}
 				// access account in trie
 				s.trieCache[key].GetAccount(item.Addr)
-			case OriginSlotReadEvent:
+			case SlotReadFromDBEvent:
 				key := crypto.Keccak256Hash(item.Addr.Bytes())
 				if s.trieCache[key] == nil {
 					trie, err := s.trieDB.OpenStorageTrie(item.StateRoot, item.Addr, item.StorageRoot, nil)
@@ -605,7 +605,7 @@ func (s *MVStates) handleRWEvents(items []RWEventItem) {
 		case CannotGasFeeDelayRWEvent:
 			s.asyncRWSet.cannotGasFeeDelay = true
 		// handle witness generation events
-		case ExecutionDoneEvent, OriginAccReadEvent, OriginSlotReadEvent:
+		case ExecutionDoneEvent, AccReadFromDBEvent, SlotReadFromDBEvent:
 			// if no trieDB, skip witness generation
 			if s.trieDB == nil {
 				continue
@@ -797,38 +797,44 @@ func (s *MVStates) RecordCannotDelayGasFee() {
 	s.rwEventCacheIndex++
 }
 
-func (s *MVStates) RecordOriginAccRead(addr common.Address) {
+func (s *MVStates) RecordOriginAccRead(addr common.Address, stateRoot common.Hash) {
 	if !s.asyncRunning || !s.recordingRead {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
-		s.rwEventCache[s.rwEventCacheIndex].Event = OriginAccReadEvent
+		s.rwEventCache[s.rwEventCacheIndex].Event = AccReadFromDBEvent
 		s.rwEventCache[s.rwEventCacheIndex].Addr = addr
+		s.rwEventCache[s.rwEventCacheIndex].StateRoot = stateRoot
 		s.rwEventCacheIndex++
 		return
 	}
 	s.rwEventCache = append(s.rwEventCache, RWEventItem{
-		Event: OriginAccReadEvent,
-		Addr:  addr,
+		Event:     AccReadFromDBEvent,
+		Addr:      addr,
+		StateRoot: stateRoot,
 	})
 	s.rwEventCacheIndex++
 }
 
-func (s *MVStates) RecordOriginSlotRead(addr common.Address, slot common.Hash) {
+func (s *MVStates) RecordOriginSlotRead(addr common.Address, slot common.Hash, stateRoot common.Hash, storageRoot common.Hash) {
 	if !s.asyncRunning || !s.recordingRead {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
-		s.rwEventCache[s.rwEventCacheIndex].Event = OriginSlotReadEvent
+		s.rwEventCache[s.rwEventCacheIndex].Event = SlotReadFromDBEvent
 		s.rwEventCache[s.rwEventCacheIndex].Addr = addr
 		s.rwEventCache[s.rwEventCacheIndex].Slot = slot
+		s.rwEventCache[s.rwEventCacheIndex].StateRoot = stateRoot
+		s.rwEventCache[s.rwEventCacheIndex].StorageRoot = storageRoot
 		s.rwEventCacheIndex++
 		return
 	}
 	s.rwEventCache = append(s.rwEventCache, RWEventItem{
-		Event: OriginSlotReadEvent,
-		Addr:  addr,
-		Slot:  slot,
+		Event:       SlotReadFromDBEvent,
+		Addr:        addr,
+		Slot:        slot,
+		StateRoot:   stateRoot,
+		StorageRoot: storageRoot,
 	})
 	s.rwEventCacheIndex++
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -559,7 +560,9 @@ func (st *StateTransition) innerTransitionDb() (*ExecutionResult, error) {
 		}
 
 		// Execute the transaction's call.
+		log.Info("debug witness, print call context", "from", msg.From.Hex(), "to", st.to().Hex(), "data", msg.Data, "gas", st.gasRemaining, "value", value)
 		ret, st.gasRemaining, vmerr = st.evm.Call(sender, st.to(), msg.Data, st.gasRemaining, value)
+		log.Info("debug witness, print call result", "ret", ret, "gasRemaining", st.gasRemaining, "vmerr", vmerr)
 	}
 	DebugInnerExecutionDuration += time.Since(start)
 

@@ -235,8 +235,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 	var (
 		vmConfig = vm.Config{
-			EnablePreimageRecording:   config.EnablePreimageRecording,
-			EnableOpcodeOptimizations: config.EnableOpcodeOptimizing,
+			EnablePreimageRecording:       config.EnablePreimageRecording,
+			EnableOpcodeOptimizations:     config.EnableOpcodeOptimizing,
+			EnableTxDAG:                   config.EnableParallelTxDAG,
+			EnableStatelessSelfValidation: config.EnableStatelessSelfValidation,
 		}
 		cacheConfig = &core.CacheConfig{
 			TrieCleanLimit:       config.TrieCleanCache,

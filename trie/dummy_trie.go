@@ -86,3 +86,7 @@ func (t *EmptyTrie) Copy() *EmptyTrie {
 	cpy := *t
 	return &cpy
 }
+
+func (t *EmptyTrie) Witness() map[string]struct{} {
+	panic("not implemented")
+}

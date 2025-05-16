@@ -29,12 +29,14 @@ type PrecompileOverrides func(params.Rules, PrecompiledContract, common.Address)
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Tracer                      EVMLogger           // Opcode logger
-	NoBaseFee                   bool                // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
-	EnablePreimageRecording     bool                // Enables recording of SHA3/keccak preimages
-	ExtraEips                   []int               // Additional EIPS that are to be enabled
-	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
-	EnableOpcodeOptimizations   bool                // Enable opcode optimization
+	Tracer                        EVMLogger           // Opcode logger
+	NoBaseFee                     bool                // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
+	EnablePreimageRecording       bool                // Enables recording of SHA3/keccak preimages
+	ExtraEips                     []int               // Additional EIPS that are to be enabled
+	OptimismPrecompileOverrides   PrecompileOverrides // Precompile overrides for Optimism
+	EnableOpcodeOptimizations     bool                // Enable opcode optimization
+	EnableTxDAG                   bool                // parallel EVM related
+	EnableStatelessSelfValidation bool                // Generate execution witnesses and self-check against them (testing purpose)
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -240,6 +242,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
 		if err != nil {
+			log.Info("debug witness, failed to operation execute", "error", err)
 			break
 		}
 		pc++

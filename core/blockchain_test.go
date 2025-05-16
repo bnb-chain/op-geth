@@ -172,7 +172,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 			blockchain.reportBlock(block, receipts, err)
 			return err
 		}
-		err = blockchain.validator.ValidateState(block, statedb, receipts, usedGas, false)
+		err = blockchain.validator.ValidateState(block, statedb, receipts, usedGas, false, false)
 		if err != nil {
 			blockchain.reportBlock(block, receipts, err)
 			return err

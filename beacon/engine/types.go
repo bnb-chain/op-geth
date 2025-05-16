@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/holiman/uint256"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -33,8 +31,8 @@ import (
 type PayloadVersion byte
 
 const (
-	GetPayloadStage  = "getPayload"
-	NewPayloadStage  = "newPayload"
+	GetPayloadStage        = "getPayload"
+	NewPayloadStage        = "newPayload"
 	ForkchoiceUpdatedStage = "forkchoiceUpdated"
 )
 

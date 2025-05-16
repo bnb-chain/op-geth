@@ -264,6 +264,9 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	if s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
 		s.db.prefetcher.prefetch(s.addrHash, s.origin.Root, s.address, nil, []common.Hash{key}, true)
 	}
+	if s.db.mvStates != nil && s.data.Root != types.EmptyRootHash {
+		s.db.mvStates.RecordOriginSlotRead(s.address, key, s.db.originalRoot, s.origin.Root)
+	}
 	s.originStorage[key] = value
 	return value
 }

@@ -730,6 +730,9 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 			log.Error("Failed to prefetch account", "addr", addr, "err", err)
 		}
 	}
+	if s.mvStates != nil {
+		s.mvStates.RecordOriginAccRead(addr, s.originalRoot)
+	}
 
 	// Insert into the live set
 	obj := newObject(s, addr, data)

@@ -35,6 +35,9 @@ type Config struct {
 	ExtraEips                   []int               // Additional EIPS that are to be enabled
 	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
 	EnableOpcodeOptimizations   bool                // Enable opcode optimization
+
+	// TODO: check it
+	StatelessSelfValidation bool // Generate execution witnesses and self-check against them (testing purpose)
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -238,6 +241,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
 		if err != nil {
+			log.Info("debug witness, failed to operation execute", "error", err)
 			break
 		}
 		pc++

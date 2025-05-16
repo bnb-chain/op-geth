@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -805,7 +806,8 @@ func (w *worker) resultLoop() {
 }
 
 // makeEnv creates a new environment for the sealing block.
-func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase common.Address) (*environment, error) {
+// TODO: check it
+func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase common.Address, witness bool) (*environment, error) {
 	// Retrieve the parent state to execute on top and start a prefetcher for
 	// the miner to speed block sealing up a bit.
 	state, err := w.chain.StateAt(parent.Root)
@@ -821,7 +823,18 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 	if err != nil {
 		return nil, err
 	}
-	state.StartPrefetcher("miner")
+	if witness {
+		// todo: fix it
+		//bundle, err := stateless.NewWitness(header, miner.chain)
+		bundle, err := stateless.NewWitness(nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		state.StartPrefetcher("miner", bundle)
+	} else {
+		state.StartPrefetcher("miner", nil)
+	}
+	//state.StartPrefetcher("miner")
 
 	// Note the passed coinbase may be different with header.Coinbase.
 	env := &environment{
@@ -1066,6 +1079,18 @@ func (w *worker) appendTxDAG(env *environment) {
 	env.tcount++
 }
 
+// generate and append ROTrieWitness
+func (w *worker) appendWitnessFromTxDAG(env *environment) {
+	witnesses, err := env.state.MVStates().ResolveROTrieWitness()
+	if err != nil {
+		log.Warn("failed to resolve ROTrieWitness", "err", err)
+		return
+	}
+	for _, witness := range witnesses {
+		env.state.Witness().AddState(witness)
+	}
+}
+
 // generateDAGTx generates a DAG transaction for the block
 func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIndex int, gasLimitForDag uint64) (*types.Transaction, error) {
 	if statedb == nil {
@@ -1281,7 +1306,8 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	// Could potentially happen if starting to mine in an odd state.
 	// Note genParams.coinbase can be different with header.Coinbase
 	// since clique algorithm can modify the coinbase field in header.
-	env, err := w.makeEnv(parent, header, genParams.coinbase)
+	// todo: fix it
+	env, err := w.makeEnv(parent, header, genParams.coinbase, false)
 	if err != nil {
 		log.Error("Failed to create sealing context", "err", err)
 		return nil, err
@@ -1491,6 +1517,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			}
 		}
 		if w.chain.TxDAGEnabledWhenMine() {
+			work.state.MVStates().RecordExecutionDone()
 			// append a DAG tx at the end of the block
 			w.appendTxDAG(work)
 		}
@@ -1504,6 +1531,11 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)
 	if err != nil {
 		return &newPayloadResult{err: err}
+	}
+
+	//need to collect the witness after state root generation
+	if w.chain.TxDAGEnabledWhenMine() && work.state.Witness() != nil {
+		w.appendWitnessFromTxDAG(work)
 	}
 	if block.Root() == (common.Hash{}) {
 		return &newPayloadResult{err: fmt.Errorf("empty block root")}

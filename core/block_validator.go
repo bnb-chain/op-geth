@@ -20,10 +20,13 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/gopool"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -162,7 +165,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 
 // ValidateState validates the various changes that happen after a state transition,
 // such as amount of used gas, the receipt roots and the state root itself.
-func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas uint64, skipRoot bool) error {
+func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas uint64, skipRoot bool, stateless bool) error {
 	header := block.Header()
 	if block.GasUsed() != usedGas {
 		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
@@ -179,6 +182,11 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 			return nil
 		},
 		func() error {
+			if stateless {
+				// In stateless mode, return early because the receipt and state root are not
+				// provided through the witness, rather the cross validator needs to return it.
+				return nil
+			}
 			// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))
 			receiptSha := types.DeriveSha(receipts, trie.NewStackTrie(nil))
 			if receiptSha != header.ReceiptHash {
@@ -187,7 +195,7 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 			return nil
 		},
 	}
-	if !skipRoot {
+	if !skipRoot && !stateless {
 		validateFuns = append(validateFuns, func() error {
 			// Validate the state root against the received state root and throw
 			// an error if they don't match.
@@ -213,6 +221,39 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 		}
 	}
 	return err
+}
+
+// ValidateWitness cross validates a block execution with stateless remote clients.
+//
+// Normally we'd distribute the block witness to remote cross validators, wait
+// for them to respond and then merge the results. For now, however, it's only
+// Geth, so do an internal stateless run.
+func (v *BlockValidator) ValidateWitness(bc *BlockChain, witness *stateless.Witness, receiptRoot common.Hash, stateRoot common.Hash) error {
+	// Run the cross client stateless execution
+	// TODO(karalabe): Self-stateless for now, swap with other clients
+	var err error
+	defer func() {
+		log.Info("debug witness,print validate witness",
+			"error", err,
+			"hash", witness.Block.Hash(),
+			"number", witness.Block.NumberU64(),
+			"root", witness.Block.Root(),
+			"witness", witness)
+	}()
+	crossReceiptRoot, crossStateRoot, err := ExecuteStateless(v.config, bc, witness)
+	if err != nil {
+		return fmt.Errorf("stateless execution failed: %v", err)
+	}
+	// Stateless cross execution suceeeded, validate the withheld computed fields
+	if crossReceiptRoot != receiptRoot {
+		err = fmt.Errorf("cross validator receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, receiptRoot)
+		return err
+	}
+	if crossStateRoot != stateRoot {
+		err = fmt.Errorf("cross validator state root mismatch (cross: %x local: %x)", crossStateRoot, stateRoot)
+		return err
+	}
+	return nil
 }
 
 // CalcGasLimit computes the gas limit of the next block after parent. It aims

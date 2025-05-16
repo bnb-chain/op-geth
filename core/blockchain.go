@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -304,9 +305,6 @@ type BlockChain struct {
 	processor  Processor // Block transaction processor interface
 	forker     *ForkChoice
 	vmConfig   vm.Config
-
-	// parallel EVM related
-	enableTxDAG bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -366,23 +364,24 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		engine:              engine,
 		vmConfig:            vmConfig,
 	}
+	var err error
+	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
+	if err != nil {
+		return nil, err
+	}
 	bc.flushInterval.Store(int64(cacheConfig.TrieTimeLimit))
 	bc.forker = NewForkChoice(bc, shouldPreserve)
 	bc.stateCache = state.NewDatabaseWithNodeDB(bc.db, bc.triedb)
-	bc.validator = NewBlockValidator(chainConfig, bc, engine)
-	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
-	bc.processor = NewStateProcessor(chainConfig, bc, engine)
+	bc.validator = NewBlockValidator(chainConfig, bc)
+	bc.prefetcher = newStatePrefetcher(chainConfig, bc)
+	bc.processor = NewStateProcessor(chainConfig, bc.hc)
 
-	err := proofKeeper.Start(bc, db)
+	err = proofKeeper.Start(bc, db)
 	if err != nil {
 		return nil, err
 	}
 	bc.proofKeeper = proofKeeper
 
-	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
-	if err != nil {
-		return nil, err
-	}
 	bc.genesisBlock = bc.GetBlockByNumber(0)
 	if bc.genesisBlock == nil {
 		return nil, ErrNoGenesis
@@ -1968,7 +1967,21 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 
 			// Enable prefetching to pull in trie node paths while processing transactions
-			statedb.StartPrefetcher("chain")
+			var witness *stateless.Witness
+			// If we are past Byzantium, enable prefetching to pull in trie node paths
+			// while processing transactions. Before Byzantium the prefetcher is mostly
+			// useless due to the intermediate root hashing after each transaction.
+			if bc.chainConfig.IsByzantium(block.Number()) {
+				if bc.vmConfig.EnableStatelessSelfValidation {
+					witness, err = stateless.NewWitness(block.Header(), bc)
+					if err != nil {
+						return it.index, err
+					}
+					log.Info("debug witness, succeed to enable witness generator",
+						"hash", block.Hash(), "number", block.NumberU64(), "root", block.Root())
+				}
+				statedb.StartPrefetcher("chain", witness)
+			}
 			activeState = statedb
 
 			// If we have a followup block, run that against the current state to pre-cache
@@ -1993,6 +2006,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// Process block using the parent state as reference point
 			pstart = time.Now()
 			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
+			log.Info("debug witness, print normal execute receipt", "block", block, "receipt", receipts, "vm_config", bc.vmConfig)
 			if err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
@@ -2014,14 +2028,36 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 				return it.index, err
 			}
 			go func() {
-				asyncValidateStateCh <- bc.validator.ValidateState(block, statedb, receipts, usedGas, true)
+				asyncValidateStateCh <- bc.validator.ValidateState(block, statedb, receipts, usedGas, true, false)
 			}()
 		} else {
-			if err := bc.validator.ValidateState(block, statedb, receipts, usedGas, false); err != nil {
+			if err := bc.validator.ValidateState(block, statedb, receipts, usedGas, false, false); err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
 				return it.index, err
 			}
+		}
+
+		if witness := statedb.Witness(); witness != nil && bc.vmConfig.EnableStatelessSelfValidation {
+			// Remove critical computed fields from the block to force true recalculation
+			context := block.Header()
+			context.Root = common.Hash{}
+			context.ReceiptHash = common.Hash{}
+
+			task := types.NewBlockWithHeader(context).WithBody(*block.Body())
+
+			// Run the stateless self-cross-validation
+			crossStateRoot, crossReceiptRoot, err := ExecuteStateless(bc.chainConfig, bc.vmConfig, task, witness)
+			if err != nil {
+				return it.index, fmt.Errorf("stateless self-validation failed: %v", err)
+			}
+			if crossStateRoot != block.Root() {
+				return it.index, fmt.Errorf("stateless self-validation root mismatch (cross: %x local: %x)", crossStateRoot, block.Root())
+			}
+			if crossReceiptRoot != block.ReceiptHash() {
+				return it.index, fmt.Errorf("stateless self-validation receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, block.ReceiptHash())
+			}
+			log.Info("debug witness, succeed to stateless check", "block", block)
 		}
 
 		vtime := time.Since(vstart)
@@ -2828,10 +2864,10 @@ func (bc *BlockChain) HeaderChainForceSetHead(headNumber uint64) {
 }
 
 func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
-	return bc.enableTxDAG
+	return bc.vmConfig.EnableTxDAG
 }
 
 func (bc *BlockChain) SetupTxDAGGeneration() {
 	log.Info("node enable TxDAG feature")
-	bc.enableTxDAG = true
+	bc.vmConfig.EnableTxDAG = true
 }

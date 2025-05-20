@@ -1117,6 +1117,12 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Category: flags.VMCategory,
 	}
 
+	SelfStatelessValidationFlag = &cli.BoolFlag{
+		Name:     "selfstateless.validate",
+		Usage:    "Enable the experimental witness generate and stateless validation in rpc node(default = false)",
+		Category: flags.VMCategory,
+	}
+
 	VMOpcodeOptimizeFlag = &cli.BoolFlag{
 		Name:     "vm.opcode.optimize",
 		Usage:    "enable opcode optimization",
@@ -2022,6 +2028,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 
 	if ctx.IsSet(ParallelTxDAGFlag.Name) {
 		cfg.EnableParallelTxDAG = ctx.Bool(ParallelTxDAGFlag.Name)
+	}
+	if ctx.IsSet(SelfStatelessValidationFlag.Name) {
+		cfg.EnableStatelessSelfValidation = ctx.Bool(SelfStatelessValidationFlag.Name)
 	}
 
 	if ctx.IsSet(ParallelTxDAGSenderPrivFlag.Name) {

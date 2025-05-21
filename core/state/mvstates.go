@@ -5,6 +5,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -394,7 +395,7 @@ type MVStates struct {
 	asyncWG           sync.WaitGroup
 
 	// stateless related fields
-	asyncWitnessRunning bool
+	asyncWitnessRunning atomic.Bool
 	trieDB              Database
 	trieCache           map[common.Hash]Trie
 	witnessCache        []map[string]struct{}
@@ -427,10 +428,13 @@ func (s *MVStates) EnableAsyncGen() *MVStates {
 	s.rwEventCacheIndex = 0
 	s.asyncRWSet.index = -1
 	go s.asyncRWEventLoop()
+	return s
+}
 
+func (s *MVStates) EnableAsyncWitnessGen() *MVStates {
 	// start async witness generator
 	s.asyncWG.Add(1)
-	s.asyncWitnessRunning = true
+	s.asyncWitnessRunning.Store(true)
 	go s.asyncWitnessLoop()
 	return s
 }
@@ -607,7 +611,7 @@ func (s *MVStates) handleRWEvents(items []RWEventItem) {
 		// handle witness generation events
 		case ExecutionDoneEvent, AccReadFromDBEvent, SlotReadFromDBEvent:
 			// if no trieDB, skip witness generation
-			if s.trieDB == nil {
+			if !s.asyncWitnessRunning.Load() || s.trieDB == nil {
 				continue
 			}
 			s.witnessEventCh <- item
@@ -876,9 +880,9 @@ func (s *MVStates) stopAsyncRecorder() {
 func (s *MVStates) stopAsyncWitness() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	if s.asyncWitnessRunning {
+	if s.asyncWitnessRunning.Load() {
 		close(s.witnessEventCh)
-		s.asyncWitnessRunning = false
+		s.asyncWitnessRunning.Store(false)
 	}
 }
 

@@ -305,6 +305,10 @@ type BlockChain struct {
 	processor  Processor // Block transaction processor interface
 	forker     *ForkChoice
 	vmConfig   vm.Config
+
+	// parallel EVM related
+	enableTxDAG           bool
+	enableTxDAGWitnessGen bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -2040,7 +2044,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 
 		// todo: tmp force enable witness generator for testing, will remove it later.
 		//need to collect the witness after state root generation
-		if bc.enableTxDAG && statedb.Witness() != nil {
+		if statedb.EnableAsyncWitnessGen() {
+			log.Debug("ResolveROTrieWitness from txdag component", "hash", block.Hash(), "number", block.NumberU64())
 			witnesses, err := statedb.MVStates().ResolveROTrieWitness()
 			if err != nil {
 				log.Warn("failed to resolve ROTrieWitness", "err", err)
@@ -2879,7 +2884,12 @@ func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
 	return bc.vmConfig.EnableTxDAG
 }
 
-func (bc *BlockChain) SetupTxDAGGeneration() {
-	log.Info("node enable TxDAG feature")
-	bc.vmConfig.EnableTxDAG = true
+func (bc *BlockChain) TxDAGWitnessGenEnabled() bool {
+	return bc.enableTxDAG && bc.enableTxDAGWitnessGen
+}
+
+func (bc *BlockChain) SetupTxDAGGeneration(witnessGen bool) {
+	log.Info("node enable TxDAG feature", "witnessGen", witnessGen)
+	bc.enableTxDAG = true
+	bc.enableTxDAGWitnessGen = witnessGen
 }

@@ -725,13 +725,12 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		}
 	}
 
-	if s.prefetcher != nil {
+	if s.EnableAsyncWitnessGen() {
+		s.mvStates.RecordOriginAccRead(addr, s.originalRoot)
+	} else if s.prefetcher != nil {
 		if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, []common.Address{addr}, nil, true); err != nil {
 			log.Error("Failed to prefetch account", "addr", addr, "err", err)
 		}
-	}
-	if s.mvStates != nil {
-		s.mvStates.RecordOriginAccRead(addr, s.originalRoot)
 	}
 
 	// Insert into the live set
@@ -1104,7 +1103,7 @@ func (s *StateDB) AccountsIntermediateRoot() {
 		}
 	}
 	// If witness building is enabled, gather all the read-only accesses
-	if s.witness != nil {
+	if s.witness != nil && !s.EnableAsyncWitnessGen() {
 		// Pull in anything that has been accessed before destruction
 		for addr := range s.stateObjectsDestruct {
 			obj, ok := s.stateObjects[addr]
@@ -1870,6 +1869,24 @@ func (s *StateDB) ResolveTxDAG(txCnt int, extraTxDeps ...types.TxDep) (types.TxD
 
 func (s *StateDB) MVStates() *MVStates {
 	return s.mvStates
+}
+
+func (s *StateDB) StartAsyncTxDAG(asyncWitnessGen bool) {
+	if s.mvStates == nil {
+		return
+	}
+	s.mvStates.EnableAsyncGen()
+	if s.witness != nil && asyncWitnessGen {
+		log.Debug("start witness generation in TxDAG component")
+		s.mvStates.EnableAsyncWitnessGen()
+	}
+}
+
+func (s *StateDB) EnableAsyncWitnessGen() bool {
+	if s.mvStates == nil {
+		return false
+	}
+	return s.witness != nil && s.mvStates.asyncWitnessRunning.Load()
 }
 
 // copySet returns a deep-copied set.

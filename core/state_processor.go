@@ -90,6 +90,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 	statedb.MarkFullProcessed()
 	if cfg.EnableTxDAG {
+		log.Debug("debug witness, start txdag", "block", block.NumberU64(), "hash", block.Hash(), "cfg", cfg)
 		feeReceivers := []common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient}
 		statedb.ResetMVStates(len(block.Transactions()), feeReceivers)
 		statedb.StartAsyncTxDAG(cfg.TxDAGWitnessGenEnabled())

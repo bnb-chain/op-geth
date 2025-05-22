@@ -118,7 +118,8 @@ type StateDB struct {
 	logSize uint
 
 	// parallel EVM related
-	mvStates *MVStates
+	mvStates        *MVStates
+	asyncWitnessGen bool
 
 	// Preimages occurred seen by VM in the scope of block.
 	preimages map[common.Hash][]byte
@@ -1879,6 +1880,7 @@ func (s *StateDB) StartAsyncTxDAG(asyncWitnessGen bool) {
 	if s.witness != nil && asyncWitnessGen {
 		log.Debug("start witness generation in TxDAG component")
 		s.mvStates.EnableAsyncWitnessGen()
+		s.asyncWitnessGen = true
 	}
 }
 
@@ -1886,7 +1888,7 @@ func (s *StateDB) EnableAsyncWitnessGen() bool {
 	if s.mvStates == nil {
 		return false
 	}
-	return s.witness != nil && s.mvStates.asyncWitnessRunning.Load()
+	return s.witness != nil && s.asyncWitnessGen
 }
 
 // copySet returns a deep-copied set.

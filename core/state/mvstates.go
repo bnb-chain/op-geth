@@ -519,11 +519,12 @@ func (s *MVStates) asyncWitnessLoop() {
 			}
 			switch item.Event {
 			case AccReadFromDBEvent:
+				log.Debug("AccReadFromDBEvent from trie", "stateRoot", item.StateRoot, "addr", item.Addr)
 				key := common.Hash{}
 				if s.trieCache[key] == nil {
 					trie, err := s.trieDB.OpenTrie(item.StateRoot)
 					if err != nil {
-						log.Error("failed to account trie", "stateRoot", item.StateRoot, "error", err)
+						log.Error("failed to get account trie", "stateRoot", item.StateRoot, "error", err)
 						continue
 					}
 					s.trieCache[key] = trie
@@ -531,11 +532,12 @@ func (s *MVStates) asyncWitnessLoop() {
 				// access account in trie
 				s.trieCache[key].GetAccount(item.Addr)
 			case SlotReadFromDBEvent:
+				log.Debug("SlotReadFromDBEvent from trie", "stateRoot", item.StateRoot, "addr", item.Addr, "StorageRoot", item.StorageRoot, "slot", item.Slot)
 				key := crypto.Keccak256Hash(item.Addr.Bytes())
 				if s.trieCache[key] == nil {
 					trie, err := s.trieDB.OpenStorageTrie(item.StateRoot, item.Addr, item.StorageRoot, nil)
 					if err != nil {
-						log.Error("failed to account trie", "stateRoot", item.StateRoot, "error", err)
+						log.Error("failed to get storage trie", "stateRoot", item.StateRoot, "StorageRoot", item.StorageRoot, "error", err)
 						continue
 					}
 					s.trieCache[key] = trie
@@ -543,10 +545,10 @@ func (s *MVStates) asyncWitnessLoop() {
 				// access storage slot in trie
 				s.trieCache[key].GetStorage(item.Addr, item.Slot.Bytes())
 			case ExecutionDoneEvent:
-				// generate witness immediately
 				for _, trie := range s.trieCache {
 					s.witnessCache = append(s.witnessCache, trie.Witness())
 				}
+				log.Debug("ExecutionDoneEvent, generate witness immediately", "witnesses", len(s.witnessCache))
 			}
 		}
 	}
@@ -801,7 +803,7 @@ func (s *MVStates) RecordCannotDelayGasFee() {
 }
 
 func (s *MVStates) RecordOriginAccRead(addr common.Address, stateRoot common.Hash) {
-	if !s.asyncRunning || !s.recordingRead {
+	if !s.asyncRunning {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {
@@ -820,7 +822,7 @@ func (s *MVStates) RecordOriginAccRead(addr common.Address, stateRoot common.Has
 }
 
 func (s *MVStates) RecordOriginSlotRead(addr common.Address, slot common.Hash, stateRoot common.Hash, storageRoot common.Hash) {
-	if !s.asyncRunning || !s.recordingRead {
+	if !s.asyncRunning {
 		return
 	}
 	if s.rwEventCacheIndex < len(s.rwEventCache) {

@@ -2006,7 +2006,13 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// Process block using the parent state as reference point
 			pstart = time.Now()
 			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
-			log.Info("debug witness, print normal execute receipt", "block", block, "receipt", receipts, "vm_config", bc.vmConfig)
+			var receiptString string
+			for i, receipt := range receipts {
+				receiptString += fmt.Sprintf("\n  %d: cumulative: %v gas: %v contract: %v status: %v tx: %v logs: %v bloom: %x state: %x",
+					i, receipt.CumulativeGasUsed, receipt.GasUsed, receipt.ContractAddress.Hex(),
+					receipt.Status, receipt.TxHash.Hex(), receipt.Logs, receipt.Bloom, receipt.PostState)
+			}
+			log.Info("debug witness, print normal execute receipt", "block", block, "receipt", receiptString, "vm_config", bc.vmConfig)
 			if err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
@@ -2041,13 +2047,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		// todo: tmp force enable witness generator for testing, will remove it later.
 		//need to collect the witness after state root generation
 		if statedb.EnableAsyncWitnessGen() {
-			log.Debug("ResolveROTrieWitness from txdag component", "hash", block.Hash(), "number", block.NumberU64())
 			witnesses, err := statedb.MVStates().ResolveROTrieWitness()
 			if err != nil {
 				log.Warn("failed to resolve ROTrieWitness", "err", err)
 				return it.index, err
 			}
+			log.Debug("ResolveROTrieWitness from txdag component", "hash", block.Hash(), "number", block.NumberU64(), "witnesses", len(witnesses))
 			for _, witness := range witnesses {
+				log.Debug("add witness to statedb", "hash", block.Hash(), "number", block.NumberU64(), "witness", len(witness))
 				statedb.Witness().AddState(witness)
 			}
 		}

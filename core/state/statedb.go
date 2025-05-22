@@ -726,7 +726,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		}
 	}
 
-	log.Debug("getStateObject from db", "addr", addr, "data", data, "stateRoot", s.originalRoot)
+	log.Debug("getStateObject from db", "addr", addr, "data", data)
 	if s.EnableAsyncWitnessGen() {
 		s.mvStates.RecordOriginAccRead(addr, s.originalRoot)
 	} else if s.prefetcher != nil {

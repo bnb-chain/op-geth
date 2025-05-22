@@ -261,7 +261,7 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		value.SetBytes(val)
 	}
 	// Schedule the resolved storage slots for prefetching if it's enabled.
-	log.Debug("getcommittedstate from db", "addr", s.address, "key", key, "value", value, "stateRoot", s.db.originalRoot, "originRoot", s.origin.Root)
+	log.Debug("getcommittedstate from db", "addr", s.address, "key", key, "value", value)
 	if s.db.EnableAsyncWitnessGen() && s.data.Root != types.EmptyRootHash {
 		s.db.mvStates.RecordOriginSlotRead(s.address, key, s.db.originalRoot, s.origin.Root)
 	} else if s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {

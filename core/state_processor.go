@@ -128,6 +128,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 
 	if statedb.MVStates() != nil {
+		statedb.MVStates().RecordExecutionDone()
 		statedb.MVStates().BatchRecordHandle()
 	}
 	// Fail if Shanghai not enabled and len(withdrawals) is non-zero.

@@ -609,14 +609,6 @@ func (s *MVStates) handleRWEvents(items []RWEventItem) {
 		// recorde current as cannot gas fee delay
 		case CannotGasFeeDelayRWEvent:
 			s.asyncRWSet.cannotGasFeeDelay = true
-		// handle witness generation events
-		case ExecutionDoneEvent, AccReadFromDBEvent, SlotReadFromDBEvent:
-			log.Debug("witness generation event", "event", item.Event, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
-			// if no trieDB, skip witness generation
-			if !s.asyncWitnessRunning || s.trieDB == nil {
-				continue
-			}
-			s.witnessEventCh <- item
 		}
 	}
 	// handle last tx rw set
@@ -804,58 +796,40 @@ func (s *MVStates) RecordCannotDelayGasFee() {
 }
 
 func (s *MVStates) RecordOriginAccRead(addr common.Address, stateRoot common.Hash) {
-	if !s.asyncRunning {
+	if !s.asyncWitnessRunning {
 		return
 	}
-	if s.rwEventCacheIndex < len(s.rwEventCache) {
-		s.rwEventCache[s.rwEventCacheIndex].Event = AccReadFromDBEvent
-		s.rwEventCache[s.rwEventCacheIndex].Addr = addr
-		s.rwEventCache[s.rwEventCacheIndex].StateRoot = stateRoot
-		s.rwEventCacheIndex++
-		return
-	}
-	s.rwEventCache = append(s.rwEventCache, RWEventItem{
+	log.Debug("witness generation event", "event", AccReadFromDBEvent, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
+	s.witnessEventCh <- RWEventItem{
 		Event:     AccReadFromDBEvent,
 		Addr:      addr,
 		StateRoot: stateRoot,
-	})
-	s.rwEventCacheIndex++
+	}
 }
 
 func (s *MVStates) RecordOriginSlotRead(addr common.Address, slot common.Hash, stateRoot common.Hash, storageRoot common.Hash) {
-	if !s.asyncRunning {
+	if !s.asyncWitnessRunning {
 		return
 	}
-	if s.rwEventCacheIndex < len(s.rwEventCache) {
-		s.rwEventCache[s.rwEventCacheIndex].Event = SlotReadFromDBEvent
-		s.rwEventCache[s.rwEventCacheIndex].Addr = addr
-		s.rwEventCache[s.rwEventCacheIndex].Slot = slot
-		s.rwEventCache[s.rwEventCacheIndex].StateRoot = stateRoot
-		s.rwEventCache[s.rwEventCacheIndex].StorageRoot = storageRoot
-		s.rwEventCacheIndex++
-		return
-	}
-	s.rwEventCache = append(s.rwEventCache, RWEventItem{
+	log.Debug("witness generation event", "event", SlotReadFromDBEvent, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
+	s.witnessEventCh <- RWEventItem{
 		Event:       SlotReadFromDBEvent,
 		Addr:        addr,
 		Slot:        slot,
 		StateRoot:   stateRoot,
 		StorageRoot: storageRoot,
-	})
-	s.rwEventCacheIndex++
+	}
 }
 
 // RecordExecutionDone record the execution done event
 func (s *MVStates) RecordExecutionDone() {
-	if s.rwEventCacheIndex < len(s.rwEventCache) {
-		s.rwEventCache[s.rwEventCacheIndex].Event = ExecutionDoneEvent
-		s.rwEventCacheIndex++
+	if !s.asyncWitnessRunning {
 		return
 	}
-	s.rwEventCache = append(s.rwEventCache, RWEventItem{
+	log.Debug("witness generation event", "event", ExecutionDoneEvent, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
+	s.witnessEventCh <- RWEventItem{
 		Event: ExecutionDoneEvent,
-	})
-	s.rwEventCacheIndex++
+	}
 }
 
 func (s *MVStates) BatchRecordHandle() {

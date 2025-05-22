@@ -611,6 +611,7 @@ func (s *MVStates) handleRWEvents(items []RWEventItem) {
 			s.asyncRWSet.cannotGasFeeDelay = true
 		// handle witness generation events
 		case ExecutionDoneEvent, AccReadFromDBEvent, SlotReadFromDBEvent:
+			log.Debug("witness generation event", "event", item.Event, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
 			// if no trieDB, skip witness generation
 			if !s.asyncWitnessRunning || s.trieDB == nil {
 				continue

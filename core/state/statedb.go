@@ -726,7 +726,7 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 		}
 	}
 
-	log.Debug("getStateObject from db", "addr", addr, "stateRoot", s.originalRoot)
+	log.Debug("getStateObject from db", "addr", addr, "data", data, "stateRoot", s.originalRoot)
 	if s.EnableAsyncWitnessGen() {
 		s.mvStates.RecordOriginAccRead(addr, s.originalRoot)
 	} else if s.prefetcher != nil {
@@ -1803,12 +1803,7 @@ func (s *StateDB) StopTxRecorder() {
 }
 
 func (s *StateDB) ResetMVStates(txCount int, feeReceivers []common.Address) *MVStates {
-	var trieDB Database
-	// if exists witness, use the same trieDB
-	if s.witness != nil {
-		trieDB = s.db
-	}
-	s.mvStates = NewMVStates(txCount, feeReceivers, trieDB)
+	s.mvStates = NewMVStates(txCount, feeReceivers, s.db)
 	return s.mvStates
 }
 

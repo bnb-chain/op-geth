@@ -305,10 +305,6 @@ type BlockChain struct {
 	processor  Processor // Block transaction processor interface
 	forker     *ForkChoice
 	vmConfig   vm.Config
-
-	// parallel EVM related
-	enableTxDAG           bool
-	enableTxDAGWitnessGen bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -2056,6 +2052,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			}
 		}
 		if witness := statedb.Witness(); witness != nil && bc.vmConfig.EnableStatelessSelfValidation {
+			log.Info("debug witness, start stateless checking", "block", block.NumberU64(), "hash", block.Hash())
 			// Remove critical computed fields from the block to force true recalculation
 			context := block.Header()
 			context.Root = common.Hash{}
@@ -2885,11 +2882,11 @@ func (bc *BlockChain) TxDAGEnabledWhenMine() bool {
 }
 
 func (bc *BlockChain) TxDAGWitnessGenEnabled() bool {
-	return bc.enableTxDAG && bc.enableTxDAGWitnessGen
+	return bc.vmConfig.TxDAGWitnessGenEnabled()
 }
 
 func (bc *BlockChain) SetupTxDAGGeneration(witnessGen bool) {
 	log.Info("node enable TxDAG feature", "witnessGen", witnessGen)
-	bc.enableTxDAG = true
-	bc.enableTxDAGWitnessGen = witnessGen
+	bc.vmConfig.EnableTxDAG = true
+	bc.vmConfig.EnableTxDAGWitnessGen = witnessGen
 }

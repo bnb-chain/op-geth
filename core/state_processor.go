@@ -92,7 +92,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if cfg.EnableTxDAG {
 		feeReceivers := []common.Address{context.Coinbase, params.OptimismBaseFeeRecipient, params.OptimismL1FeeRecipient}
 		statedb.ResetMVStates(len(block.Transactions()), feeReceivers)
-		statedb.StartAsyncTxDAG(p.bc.TxDAGWitnessGenEnabled())
+		statedb.StartAsyncTxDAG(cfg.TxDAGWitnessGenEnabled())
 	}
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {

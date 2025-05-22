@@ -36,7 +36,12 @@ type Config struct {
 	OptimismPrecompileOverrides   PrecompileOverrides // Precompile overrides for Optimism
 	EnableOpcodeOptimizations     bool                // Enable opcode optimization
 	EnableTxDAG                   bool                // parallel EVM related
+	EnableTxDAGWitnessGen         bool                // parallel EVM related
 	EnableStatelessSelfValidation bool                // Generate execution witnesses and self-check against them (testing purpose)
+}
+
+func (c *Config) TxDAGWitnessGenEnabled() bool {
+	return c.EnableTxDAG && c.EnableTxDAGWitnessGen
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,

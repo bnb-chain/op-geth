@@ -80,6 +80,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RollupHaltOnIncompatibleProtocolVersion string
 		EnableOpcodeOptimizing                  bool
 		EnableParallelTxDAG                     bool
+		EnableStatelessSelfValidation           bool
+		EnableParallelTxDAGWitnessGen           bool
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
@@ -143,6 +145,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RollupHaltOnIncompatibleProtocolVersion = c.RollupHaltOnIncompatibleProtocolVersion
 	enc.EnableOpcodeOptimizing = c.EnableOpcodeOptimizing
 	enc.EnableParallelTxDAG = c.EnableParallelTxDAG
+	enc.EnableStatelessSelfValidation = c.EnableStatelessSelfValidation
+	enc.EnableParallelTxDAGWitnessGen = c.EnableParallelTxDAGWitnessGen
 	return &enc, nil
 }
 
@@ -210,6 +214,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RollupHaltOnIncompatibleProtocolVersion *string
 		EnableOpcodeOptimizing                  *bool
 		EnableParallelTxDAG                     *bool
+		EnableStatelessSelfValidation           *bool
+		EnableParallelTxDAGWitnessGen           *bool
 	}
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
@@ -397,6 +403,12 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.EnableParallelTxDAG != nil {
 		c.EnableParallelTxDAG = *dec.EnableParallelTxDAG
+	}
+	if dec.EnableStatelessSelfValidation != nil {
+		c.EnableStatelessSelfValidation = *dec.EnableStatelessSelfValidation
+	}
+	if dec.EnableParallelTxDAGWitnessGen != nil {
+		c.EnableParallelTxDAGWitnessGen = *dec.EnableParallelTxDAGWitnessGen
 	}
 	return nil
 }

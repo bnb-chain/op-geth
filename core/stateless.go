@@ -17,6 +17,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
@@ -67,7 +69,13 @@ func ExecuteStateless(config *params.ChainConfig, vmconfig vm.Config, block *typ
 
 	// Run the stateless blocks processing and self-validate certain fields
 	receipts, _, usedGas, err := processor.Process(block, db, vm.Config{})
-	log.Info("print witness execute receipt", "block", block, "receipt", receipts, "vm_config", vm.Config{})
+	var receiptString string
+	for i, receipt := range receipts {
+		receiptString += fmt.Sprintf("\n  %d: cumulative: %v gas: %v contract: %v status: %v tx: %v logs: %v bloom: %x state: %x",
+			i, receipt.CumulativeGasUsed, receipt.GasUsed, receipt.ContractAddress.Hex(),
+			receipt.Status, receipt.TxHash.Hex(), receipt.Logs, receipt.Bloom, receipt.PostState)
+	}
+	log.Info("print witness execute receipt", "block", block, "receipt", receiptString, "vm_config", vm.Config{})
 	if err != nil {
 		return common.Hash{}, common.Hash{}, err
 	}

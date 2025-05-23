@@ -1,4 +1,4 @@
-package types
+package state
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/cometbft/cometbft/libs/rand"
 	"github.com/golang/snappy"
@@ -20,7 +21,7 @@ const (
 )
 
 func TestMVStates_SimpleResolveTxDAG(t *testing.T) {
-	ms := NewMVStates(10, nil).EnableAsyncGen()
+	ms := NewMVStates(10, nil, nil).EnableAsyncGen()
 	finaliseRWSets(t, ms, []*RWSet{
 		mockRWSet(0, []interface{}{"0x00"}, []interface{}{"0x00"}),
 		mockRWSet(1, []interface{}{"0x01"}, []interface{}{"0x01"}),
@@ -49,7 +50,7 @@ func TestMVStates_SimpleResolveTxDAG(t *testing.T) {
 func TestMVStates_ResolveTxDAG_Async(t *testing.T) {
 	txCnt := 10000
 	rwSets := mockRandomRWSet(txCnt)
-	ms1 := NewMVStates(txCnt, nil).EnableAsyncGen()
+	ms1 := NewMVStates(txCnt, nil, nil).EnableAsyncGen()
 	for i := 0; i < txCnt; i++ {
 		require.NoError(t, ms1.FinaliseWithRWSet(rwSets[i]))
 	}
@@ -61,12 +62,12 @@ func TestMVStates_ResolveTxDAG_Async(t *testing.T) {
 func TestMVStates_TxDAG_Compression(t *testing.T) {
 	txCnt := 10000
 	rwSets := mockRandomRWSet(txCnt)
-	ms1 := NewMVStates(txCnt, nil).EnableAsyncGen()
+	ms1 := NewMVStates(txCnt, nil, nil).EnableAsyncGen()
 	for _, rwSet := range rwSets {
 		ms1.FinaliseWithRWSet(rwSet)
 	}
 	dag := resolveDepsMapCacheByWritesInMVStates(ms1)
-	enc, err := EncodeTxDAG(dag)
+	enc, err := types.EncodeTxDAG(dag)
 	require.NoError(t, err)
 
 	// snappy compression
@@ -118,7 +119,7 @@ func init() {
 }
 
 func BenchmarkResolveTxDAGByWritesInMVStates(b *testing.B) {
-	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
+	ms1 := NewMVStates(mockRWSetSize, nil, nil).EnableAsyncGen()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, item := range mockRWEventItems {
@@ -142,7 +143,7 @@ func BenchmarkResolveTxDAG_RWEvent_DiffRWSet(b *testing.B) {
 
 func benchmarkResolveTxDAGRWEvent(b *testing.B, eventItems [][]RWEventItem) {
 	for i := 0; i < b.N; i++ {
-		s := NewMVStates(0, nil).EnableAsyncGen()
+		s := NewMVStates(0, nil, nil).EnableAsyncGen()
 		for _, items := range eventItems {
 			for _, item := range items {
 				switch item.Event {
@@ -166,7 +167,7 @@ func benchmarkResolveTxDAGRWEvent(b *testing.B, eventItems [][]RWEventItem) {
 
 func BenchmarkMVStates_Finalise(b *testing.B) {
 	rwSets := mockRandomRWSet(mockRWSetSize)
-	ms1 := NewMVStates(mockRWSetSize, nil).EnableAsyncGen()
+	ms1 := NewMVStates(mockRWSetSize, nil, nil).EnableAsyncGen()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, rwSet := range rwSets {
@@ -175,9 +176,9 @@ func BenchmarkMVStates_Finalise(b *testing.B) {
 	}
 }
 
-func resolveDepsMapCacheByWritesInMVStates(s *MVStates) TxDAG {
+func resolveDepsMapCacheByWritesInMVStates(s *MVStates) types.TxDAG {
 	txCnt := s.nextFinaliseIndex
-	txDAG := NewPlainTxDAG(txCnt)
+	txDAG := types.NewPlainTxDAG(txCnt)
 	for i := 0; i < txCnt; i++ {
 		txDAG.TxDeps[i] = s.txDepCache[i]
 	}
@@ -185,7 +186,7 @@ func resolveDepsMapCacheByWritesInMVStates(s *MVStates) TxDAG {
 }
 
 func TestMVStates_SystemTxResolveTxDAG(t *testing.T) {
-	ms := NewMVStates(12, nil).EnableAsyncGen()
+	ms := NewMVStates(12, nil, nil).EnableAsyncGen()
 	finaliseRWSets(t, ms, []*RWSet{
 		mockRWSet(0, []interface{}{"0x00"}, []interface{}{"0x00"}),
 		mockRWSet(1, []interface{}{"0x01"}, []interface{}{"0x01"}),
@@ -208,7 +209,7 @@ func TestMVStates_SystemTxResolveTxDAG(t *testing.T) {
 }
 
 func TestMVStates_SystemTxWithLargeDepsResolveTxDAG(t *testing.T) {
-	ms := NewMVStates(12, nil).EnableAsyncGen()
+	ms := NewMVStates(12, nil, nil).EnableAsyncGen()
 	finaliseRWSets(t, ms, []*RWSet{
 		mockRWSet(0, []interface{}{"0x00"}, []interface{}{"0x00"}),
 		mockRWSet(1, []interface{}{"0x01"}, []interface{}{"0x01"}),
@@ -238,7 +239,7 @@ func TestTxRecorder_Basic(t *testing.T) {
 		mockRWSet(2, []interface{}{AccountSelf, AccountBalance, "0x01", "0x01"},
 			[]interface{}{AccountBalance, AccountCodeHash, "0x01"}),
 	}
-	ms := NewMVStates(0, nil).EnableAsyncGen()
+	ms := NewMVStates(0, nil, nil).EnableAsyncGen()
 	for _, item := range sets {
 		ms.RecordNewTx(item.index)
 		for addr, sub := range item.accReadSet {
@@ -264,7 +265,7 @@ func TestTxRecorder_Basic(t *testing.T) {
 	}
 	dag, err := ms.ResolveTxDAG(3)
 	require.NoError(t, err)
-	require.Equal(t, "[]\n[0]\n[1]\n", dag.(*PlainTxDAG).String())
+	require.Equal(t, "[]\n[0]\n[1]\n", dag.(*types.PlainTxDAG).String())
 }
 
 func TestRWSet(t *testing.T) {
@@ -279,14 +280,14 @@ func TestRWSet(t *testing.T) {
 }
 
 func TestTxRecorder_CannotDelayGasFee(t *testing.T) {
-	ms := NewMVStates(0, nil).EnableAsyncGen()
+	ms := NewMVStates(0, nil, nil).EnableAsyncGen()
 	ms.RecordNewTx(0)
 	ms.RecordNewTx(1)
 	ms.RecordCannotDelayGasFee()
 	ms.RecordNewTx(2)
 	dag, err := ms.ResolveTxDAG(3)
 	require.NoError(t, err)
-	require.Equal(t, NewEmptyTxDAG(), dag)
+	require.Equal(t, types.NewEmptyTxDAG(), dag)
 }
 
 func mockRWSet(index int, read []interface{}, write []interface{}) *RWSet {
@@ -455,4 +456,54 @@ func mockRWEventItemsFromRWSet(index int, rwSet *RWSet) []RWEventItem {
 		}
 	}
 	return items
+}
+
+func mockSimpleDAG() types.TxDAG {
+	dag := types.NewPlainTxDAG(10)
+	dag.TxDeps[0].TxIndexes = []uint64{}
+	dag.TxDeps[1].TxIndexes = []uint64{}
+	dag.TxDeps[2].TxIndexes = []uint64{}
+	dag.TxDeps[3].TxIndexes = []uint64{0}
+	dag.TxDeps[4].TxIndexes = []uint64{0}
+	dag.TxDeps[5].TxIndexes = []uint64{1, 2}
+	dag.TxDeps[6].TxIndexes = []uint64{5}
+	dag.TxDeps[7].TxIndexes = []uint64{6}
+	dag.TxDeps[8].TxIndexes = []uint64{}
+	dag.TxDeps[9].TxIndexes = []uint64{8}
+	return dag
+}
+
+func mockSystemTxDAG() types.TxDAG {
+	dag := types.NewPlainTxDAG(12)
+	dag.TxDeps[0].TxIndexes = []uint64{}
+	dag.TxDeps[1].TxIndexes = []uint64{}
+	dag.TxDeps[2].TxIndexes = []uint64{}
+	dag.TxDeps[3].TxIndexes = []uint64{0}
+	dag.TxDeps[4].TxIndexes = []uint64{0}
+	dag.TxDeps[5].TxIndexes = []uint64{1, 2}
+	dag.TxDeps[6].TxIndexes = []uint64{5}
+	dag.TxDeps[7].TxIndexes = []uint64{6}
+	dag.TxDeps[8].TxIndexes = []uint64{}
+	dag.TxDeps[9].TxIndexes = []uint64{8}
+	dag.TxDeps[10] = types.NewTxDep([]uint64{}, types.ExcludedTxFlag)
+	dag.TxDeps[11] = types.NewTxDep([]uint64{}, types.ExcludedTxFlag)
+	return dag
+}
+
+func mockSystemTxDAGWithLargeDeps() types.TxDAG {
+	dag := types.NewPlainTxDAG(12)
+	dag.TxDeps[0].TxIndexes = []uint64{}
+	dag.TxDeps[1].TxIndexes = []uint64{}
+	dag.TxDeps[2].TxIndexes = []uint64{}
+	dag.TxDeps[3].TxIndexes = []uint64{0}
+	dag.TxDeps[4].TxIndexes = []uint64{0}
+	dag.TxDeps[5].TxIndexes = []uint64{1, 2}
+	dag.TxDeps[6].TxIndexes = []uint64{5}
+	dag.TxDeps[7].TxIndexes = []uint64{3}
+	dag.TxDeps[8].TxIndexes = []uint64{}
+	//dag.TxDeps[9].TxIndexes = []uint64{0, 1, 2, 6, 7, 8}
+	dag.TxDeps[9] = types.NewTxDep([]uint64{3, 4, 5}, types.NonDependentRelFlag)
+	dag.TxDeps[10] = types.NewTxDep([]uint64{}, types.ExcludedTxFlag)
+	dag.TxDeps[11] = types.NewTxDep([]uint64{}, types.ExcludedTxFlag)
+	return dag
 }

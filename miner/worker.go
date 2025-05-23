@@ -1066,6 +1066,18 @@ func (w *worker) appendTxDAG(env *environment) {
 	env.tcount++
 }
 
+// generate and append ROTrieWitness
+func (w *worker) appendWitnessFromTxDAG(env *environment) {
+	witnesses, err := env.state.MVStates().ResolveROTrieWitness()
+	if err != nil {
+		log.Warn("failed to resolve ROTrieWitness", "err", err)
+		return
+	}
+	for _, witness := range witnesses {
+		env.state.Witness().AddState(witness)
+	}
+}
+
 // generateDAGTx generates a DAG transaction for the block
 func (w *worker) generateDAGTx(statedb *state.StateDB, signer types.Signer, txIndex int, gasLimitForDag uint64) (*types.Transaction, error) {
 	if statedb == nil {
@@ -1452,7 +1464,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			go func() {
 				defer wg.Done()
 				if w.chain.TxDAGEnabledWhenMine() {
-					newWork.state.MVStates().EnableAsyncGen()
+					newWork.state.StartAsyncTxDAG(w.chain.TxDAGWitnessGenEnabled())
 				}
 				err := w.fillTransactions(interrupt, newWork)
 				if errors.Is(err, errBlockInterruptedByTimeout) {
@@ -1464,7 +1476,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 				}
 			}()
 			if w.chain.TxDAGEnabledWhenMine() {
-				work.state.MVStates().EnableAsyncGen()
+				work.state.StartAsyncTxDAG(w.chain.TxDAGWitnessGenEnabled())
 			}
 			err := w.fillTransactionsAndBundles(interrupt, work)
 			wg.Wait()
@@ -1478,7 +1490,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			}
 		} else {
 			if w.chain.TxDAGEnabledWhenMine() {
-				work.state.MVStates().EnableAsyncGen()
+				work.state.StartAsyncTxDAG(w.chain.TxDAGWitnessGenEnabled())
 			}
 			err := w.fillTransactions(interrupt, work)
 			timer.Stop() // don't need timeout interruption any more
@@ -1491,6 +1503,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			}
 		}
 		if w.chain.TxDAGEnabledWhenMine() {
+			work.state.MVStates().RecordExecutionDone()
 			// append a DAG tx at the end of the block
 			w.appendTxDAG(work)
 		}
@@ -1504,6 +1517,11 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	block, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, work.txs, nil, work.receipts, genParams.withdrawals)
 	if err != nil {
 		return &newPayloadResult{err: err}
+	}
+
+	//need to collect the witness after state root generation
+	if work.state.EnableAsyncWitnessGen() {
+		w.appendWitnessFromTxDAG(work)
 	}
 	if block.Root() == (common.Hash{}) {
 		return &newPayloadResult{err: fmt.Errorf("empty block root")}

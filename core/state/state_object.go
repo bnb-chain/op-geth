@@ -261,7 +261,10 @@ func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		value.SetBytes(val)
 	}
 	// Schedule the resolved storage slots for prefetching if it's enabled.
-	if s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
+	log.Debug("getcommittedstate from db", "addr", s.address, "key", key, "value", value)
+	if s.db.EnableAsyncWitnessGen() && s.data.Root != types.EmptyRootHash {
+		s.db.mvStates.RecordOriginSlotRead(s.address, key, s.db.originalRoot, s.origin.Root)
+	} else if s.db.prefetcher != nil && s.data.Root != types.EmptyRootHash {
 		s.db.prefetcher.prefetch(s.addrHash, s.origin.Root, s.address, nil, []common.Hash{key}, true)
 	}
 	s.originStorage[key] = value
@@ -334,13 +337,13 @@ func (s *stateObject) finaliseRWSet() {
 	}
 
 	if s.dirtyNonce != nil && *s.dirtyNonce != s.data.Nonce {
-		ms.RecordAccountWrite(s.address, types.AccountNonce)
+		ms.RecordAccountWrite(s.address, AccountNonce)
 	}
 	if s.dirtyBalance != nil && s.dirtyBalance.Cmp(s.data.Balance) != 0 {
-		ms.RecordAccountWrite(s.address, types.AccountBalance)
+		ms.RecordAccountWrite(s.address, AccountBalance)
 	}
 	if s.dirtyCodeHash != nil && !slices.Equal(s.dirtyCodeHash, s.data.CodeHash) {
-		ms.RecordAccountWrite(s.address, types.AccountCodeHash)
+		ms.RecordAccountWrite(s.address, AccountCodeHash)
 	}
 }
 

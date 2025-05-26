@@ -475,6 +475,7 @@ func generateWitness(blockchain *core.BlockChain, block *types.Block) (*stateles
 	}
 
 	statedb.StartPrefetcher("debug_execution_witness", witness)
+	fmt.Println("start prefetcher")
 	defer statedb.StopPrefetcher()
 
 	receipts, _, usedGas, err := blockchain.Processor().Process(block, statedb, *blockchain.GetVMConfig())
@@ -484,6 +485,19 @@ func generateWitness(blockchain *core.BlockChain, block *types.Block) (*stateles
 
 	if err := blockchain.Validator().ValidateState(block, statedb, receipts, usedGas, false, false); err != nil {
 		return nil, fmt.Errorf("failed to validate block %d: %w", block.Number(), err)
+	}
+
+	if blockchain.TxDAGWitnessGenEnabled() {
+		witnesses, err := statedb.MVStates().ResolveROTrieWitness()
+		if err != nil {
+			log.Warn("failed to resolve ROTrieWitness", "err", err)
+			return nil, fmt.Errorf("failed to resolve ROTrieWitness: %w", err)
+		}
+		log.Debug("ResolveROTrieWitness from txdag component", "hash", block.Hash(), "number", block.NumberU64(), "witnesses", len(witnesses))
+		for _, witness := range witnesses {
+			log.Debug("add witness to statedb", "hash", block.Hash(), "number", block.NumberU64(), "witness", len(witness))
+			statedb.Witness().AddState(witness)
+		}
 	}
 
 	return witness, nil

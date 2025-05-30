@@ -1100,7 +1100,6 @@ func (s *StateDB) AccountsIntermediateRoot() {
 			}
 		}
 	}
-	wg.Wait()
 	// If witness building is enabled, gather all the read-only accesses
 	if s.witness != nil {
 		// Pull in anything that has been accessed before destruction
@@ -1125,6 +1124,9 @@ func (s *StateDB) AccountsIntermediateRoot() {
 			if len(obj.originStorage) == 0 {
 				continue
 			}
+			if _, ok := s.stateObjectsPending[obj.address]; ok {
+				continue
+			}
 			if trie := obj.getPrefetchedTrie(); trie != nil {
 				s.witness.AddState(trie.Witness())
 			} else if obj.trie != nil {
@@ -1132,6 +1134,7 @@ func (s *StateDB) AccountsIntermediateRoot() {
 			}
 		}
 	}
+	wg.Wait()
 }
 
 func (s *StateDB) StateIntermediateRoot() common.Hash {

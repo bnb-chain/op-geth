@@ -1128,13 +1128,15 @@ func (s *StateDB) AccountsIntermediateRoot() {
 			if len(obj.originStorage) == 0 {
 				continue
 			}
+			if _, ok := s.stateObjectsPending[obj.address]; ok {
+				continue
+			}
 			if trie := obj.getPrefetchedTrie(); trie != nil {
 				s.witness.AddState(trie.Witness())
 			} else if obj.trie != nil {
 				s.witness.AddState(obj.trie.Witness())
 			}
 		}
-
 	}
 	wg.Wait()
 }

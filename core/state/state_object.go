@@ -352,7 +352,7 @@ func (s *stateObject) finaliseRWSet() {
 // storage change at all.
 func (s *stateObject) updateTrie() (Trie, error) {
 	// Make sure all dirty slots are finalized into the pending storage area
-	s.finalise(false)
+	// s.finalise(false)
 
 	// Short circuit if nothing changed, don't bother with hashing anything
 	if len(s.pendingStorage) == 0 {
@@ -403,12 +403,20 @@ func (s *stateObject) updateTrie() (Trie, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		// Perform trie updates before deletions.  This prevents resolution of unnecessary trie nodes
+		//  in circumstances similar to the following:
+		//
+		// Consider nodes `A` and `B` who share the same full node parent `P` and have no other siblings.
+		// During the execution of a block:
+		// - `A` is deleted,
+		// - `C` is created, and also shares the parent `P`.
+		// If the deletion is handled first, then `P` would be left with only one child, thus collapsed
+		// into a shortnode. This requires `B` to be resolved from disk.
+		// Whereas if the created node is handled first, then the collapse is avoided, and `B` is not resolved.
+		var deletions []common.Hash
 		for key, value := range dirtyStorage {
 			if len(value) == 0 {
-				if err := tr.DeleteStorage(s.address, key[:]); err != nil {
-					s.db.setError(err)
-				}
-				s.db.StorageDeleted += 1
+				deletions = append(deletions, key)
 			} else {
 				if err := tr.UpdateStorage(s.address, key[:], value); err != nil {
 					s.db.setError(err)
@@ -417,6 +425,12 @@ func (s *stateObject) updateTrie() (Trie, error) {
 			}
 			// Cache the items for preloading
 			usedStorage = append(usedStorage, key)
+		}
+		for _, key := range deletions {
+			if err := tr.DeleteStorage(s.address, key[:]); err != nil {
+				s.db.setError(err)
+			}
+			s.db.StorageDeleted += 1
 		}
 	}()
 	// If state snapshotting is active, cache the data til commit

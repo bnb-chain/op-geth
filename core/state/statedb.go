@@ -409,6 +409,9 @@ func (s *StateDB) GetCode(addr common.Address) []byte {
 	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
+		if s.witness != nil {
+			s.witness.AddCode(stateObject.Code())
+		}
 		return stateObject.Code()
 	}
 	return nil
@@ -420,6 +423,9 @@ func (s *StateDB) GetCodeSize(addr common.Address) int {
 	}
 	stateObject := s.getStateObject(addr)
 	if stateObject != nil {
+		if s.witness != nil {
+			s.witness.AddCode(stateObject.Code())
+		}
 		return stateObject.CodeSize()
 	}
 	return 0
@@ -1155,15 +1161,29 @@ func (s *StateDB) StateIntermediateRoot() common.Hash {
 	}
 
 	usedAddrs := make([]common.Address, 0, len(s.stateObjectsPending))
+	// Perform updates before deletions.  This prevents resolution of unnecessary trie nodes
+	// in circumstances similar to the following:
+	//
+	// Consider nodes `A` and `B` who share the same full node parent `P` and have no other siblings.
+	// During the execution of a block:
+	// - `A` self-destructs,
+	// - `C` is created, and also shares the parent `P`.
+	// If the self-destruct is handled first, then `P` would be left with only one child, thus collapsed
+	// into a shortnode. This requires `B` to be resolved from disk.
+	// Whereas if the created node is handled first, then the collapse is avoided, and `B` is not resolved.
+	var deletedAddrs []common.Address
 	for addr := range s.stateObjectsPending {
 		if obj := s.stateObjects[addr]; obj.deleted {
-			s.deleteStateObject(obj)
-			s.AccountDeleted += 1
+			deletedAddrs = append(deletedAddrs, obj.address)
 		} else {
 			s.updateStateObject(obj)
 			s.AccountUpdated += 1
 		}
 		usedAddrs = append(usedAddrs, addr) // Copy needed for closure
+	}
+	for _, deletedAddr := range deletedAddrs {
+		s.deleteStateObject(s.stateObjects[deletedAddr])
+		s.AccountDeleted += 1
 	}
 	if s.prefetcher != nil {
 		s.prefetcher.used(common.Hash{}, s.originalRoot, usedAddrs, nil)

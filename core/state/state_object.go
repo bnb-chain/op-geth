@@ -355,11 +355,14 @@ func (s *stateObject) finaliseRWSet() {
 // storage change at all.
 func (s *stateObject) updateTrie() (Trie, error) {
 	// Make sure all dirty slots are finalized into the pending storage area
-	// s.finalise(false)
+	s.finalise(false)
 
 	// Short circuit if nothing changed, don't bother with hashing anything
 	if len(s.pendingStorage) == 0 {
-		return s.trie, nil
+		if s.db.witness != nil || len(s.originStorage) == 0 {
+			log.Info("debug witness, updateTrie, no pending/origin storage", "addr", s.address)
+			return s.trie, nil
+		}
 	}
 	// Track the amount of time wasted on updating the storage trie
 	if metrics.EnabledExpensive {

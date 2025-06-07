@@ -17,7 +17,11 @@
 package vm
 
 import (
+	"strings"
+
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
@@ -245,7 +249,6 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		// execute the operation
 		res, err = operation.execute(&pc, in, callContext)
 		if err != nil {
-			log.Info("debug witness, failed to operation execute", "error", err)
 			break
 		}
 		pc++
@@ -253,6 +256,35 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 	if err == errStopToken {
 		err = nil // clear stop token error
+	}
+
+	if err != nil {
+		// Convert ret to readable error message if it's a revert
+		var errorMsg string
+		if len(res) >= 4 && hexutil.Encode(res[:4]) == "0x08c379a0" {
+			// Try to decode the revert reason
+			errorAbi, _ := abi.JSON(strings.NewReader(`[{"name":"Error","type":"function","inputs":[{"name":"message","type":"string"}]}]`))
+			unpacked, err := errorAbi.Unpack("Error", res[4:])
+			if err == nil && len(unpacked) > 0 {
+				errorMsg = unpacked[0].(string)
+			}
+		}
+
+		// If we couldn't decode the revert reason, use the raw hex
+		if errorMsg == "" {
+			errorMsg = hexutil.Encode(res)
+		}
+
+		log.Info("debug witness, failed to operation execute",
+			"error", err,
+			"op", op,
+			"pc", pc,
+			"res", res,
+			"revert_reason", errorMsg,
+			"raw_return", hexutil.Encode(res),
+			"contract_addr", contract.Address(),
+			"contract_code_hash", contract.CodeHash,
+		)
 	}
 
 	return res, err

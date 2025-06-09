@@ -799,7 +799,7 @@ func (s *MVStates) RecordOriginAccRead(addr common.Address, stateRoot common.Has
 	if !s.asyncWitnessRunning {
 		return
 	}
-	log.Debug("witness generation event", "event", AccReadFromDBEvent, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
+	//	log.Debug("witness generation event", "event", AccReadFromDBEvent, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
 	s.witnessEventCh <- RWEventItem{
 		Event:     AccReadFromDBEvent,
 		Addr:      addr,
@@ -811,7 +811,7 @@ func (s *MVStates) RecordOriginSlotRead(addr common.Address, slot common.Hash, s
 	if !s.asyncWitnessRunning {
 		return
 	}
-	log.Debug("witness generation event", "event", SlotReadFromDBEvent, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
+	//	log.Debug("witness generation event", "event", SlotReadFromDBEvent, "asyncWitnessRunning", s.asyncWitnessRunning, "trieDB", s.trieDB == nil)
 	s.witnessEventCh <- RWEventItem{
 		Event:       SlotReadFromDBEvent,
 		Addr:        addr,

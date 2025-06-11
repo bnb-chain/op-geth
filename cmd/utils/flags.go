@@ -1135,6 +1135,13 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Value:    "",
 		Category: flags.VMCategory,
 	}
+
+	ParallelTxDAGWitnessGenFlag = &cli.BoolFlag{
+		Name:     "parallel.txdagwitnessgen",
+		Usage:    "enable witness generation for TxDAG",
+		Value:    false,
+		Category: flags.VMCategory,
+	}
 )
 
 var (
@@ -2031,6 +2038,10 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(SelfStatelessValidationFlag.Name) {
 		cfg.EnableStatelessSelfValidation = ctx.Bool(SelfStatelessValidationFlag.Name)
+	}
+
+	if ctx.IsSet(ParallelTxDAGWitnessGenFlag.Name) {
+		cfg.EnableParallelTxDAGWitnessGen = ctx.Bool(ParallelTxDAGWitnessGenFlag.Name)
 	}
 
 	if ctx.IsSet(ParallelTxDAGSenderPrivFlag.Name) {

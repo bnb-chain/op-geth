@@ -253,3 +253,66 @@ func TestExecutionWitness(t *testing.T) {
 	_, _, err = core.ExecuteStateless(params.TestChainConfig, vm.Config{}, block, witness)
 	require.NoError(t, err)
 }
+
+func TestTxDAGExecutionWitness(t *testing.T) {
+	t.Parallel()
+
+	// Create transactions
+	privateKey, err := crypto.GenerateKey() // Generate a new private key
+	require.NoError(t, err)
+
+	// Get the address from the private key
+	fromAddr := crypto.PubkeyToAddress(privateKey.PublicKey)
+
+	// Create a database pre-initialize with a genesis block
+	db := rawdb.NewMemoryDatabase()
+	gspec := &core.Genesis{
+		Config: params.TestChainConfig,
+		Alloc: types.GenesisAlloc{
+			testAddr: {Balance: big.NewInt(1000000)},
+			fromAddr: {Balance: big.NewInt(1000000000000000000)},
+		},
+	}
+
+	chain, _ := core.NewBlockChain(db, nil, gspec, nil, ethash.NewFaker(), vm.Config{}, nil, nil)
+	chain.SetupTxDAGGeneration(true)
+	blockNum := 10
+
+	signer := types.LatestSigner(params.TestChainConfig)
+	baseFee := big.NewInt(875000000)
+
+	nonce := uint64(0)
+	_, bs, _ := core.GenerateChainWithGenesis(gspec, ethash.NewFaker(), blockNum, func(i int, gen *core.BlockGen) {
+		if i%2 == 0 && i > 0 { // Add transactions  starting from block 2
+			for j := 0; j < 2; j++ { // Add 2 transactions per block
+				tx := types.NewTx(&types.DynamicFeeTx{
+					ChainID:   params.TestChainConfig.ChainID,
+					Nonce:     nonce,
+					GasTipCap: big.NewInt(1000000000),
+					GasFeeCap: new(big.Int).Mul(baseFee, big.NewInt(2)),
+					Gas:       21000,
+					To:        &testAddr,
+					Value:     big.NewInt(100),
+					Data:      nil,
+				})
+				signedTx, err := types.SignTx(tx, signer, privateKey)
+				require.NoError(t, err)
+				gen.AddTx(signedTx)
+				nonce++
+			}
+		}
+	})
+
+	if _, err := chain.InsertChain(bs); err != nil {
+		panic(err)
+	}
+
+	block := chain.GetBlockByNumber(uint64(blockNum - 1))
+	require.NotNil(t, block)
+
+	witness, err := generateWitness(chain, block)
+	require.NoError(t, err)
+
+	_, _, err = core.ExecuteStateless(params.TestChainConfig, vm.Config{}, block, witness)
+	require.NoError(t, err)
+}

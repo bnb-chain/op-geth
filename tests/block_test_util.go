@@ -160,7 +160,7 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, tracer vm.EVMLogger, en
 	}
 	defer chain.Stop()
 	if enableTxDAG {
-		chain.SetupTxDAGGeneration()
+		chain.SetupTxDAGGeneration(false)
 	}
 
 	validBlocks, err := t.insertBlocks(chain)

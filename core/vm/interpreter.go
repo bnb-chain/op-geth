@@ -270,7 +270,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			errorMsg = hexutil.Encode(res)
 		}
 
-		log.Info("debug witness, failed to operation execute",
+		log.Error("failed to operation execute",
 			"error", err,
 			"op", op,
 			"pc", pc,

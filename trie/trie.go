@@ -685,9 +685,6 @@ func (t *Trie) hashRoot() (node, node) {
 
 // Witness returns a set containing all trie nodes that have been accessed.
 func (t *Trie) Witness() map[string]struct{} {
-	defer func() {
-		log.Info("debug witness, print trie witness len", "len", len(t.tracer.accessList), "owner", t.owner)
-	}()
 	if len(t.tracer.accessList) == 0 {
 		return nil
 	}

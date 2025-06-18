@@ -1977,7 +1977,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 					if err != nil {
 						return it.index, err
 					}
-					log.Info("debug witness, succeed to enable witness generator",
+					log.Debug("succeed to enable witness generator",
 						"hash", block.Hash(), "number", block.NumberU64(), "root", block.Root())
 				}
 				statedb.StartPrefetcher("chain", witness)
@@ -2006,7 +2006,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// Process block using the parent state as reference point
 			pstart = time.Now()
 			receipts, logs, usedGas, err = bc.processor.Process(block, statedb, bc.vmConfig)
-			log.Info("debug witness, print normal execute receipt", "block", block, "receipt", receipts, "vm_config", bc.vmConfig)
 			if err != nil {
 				bc.reportBlock(block, receipts, err)
 				followupInterrupt.Store(true)
@@ -2057,7 +2056,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			if crossReceiptRoot != block.ReceiptHash() {
 				return it.index, fmt.Errorf("stateless self-validation receipt root mismatch (cross: %x local: %x)", crossReceiptRoot, block.ReceiptHash())
 			}
-			log.Info("debug witness, succeed to stateless check", "block", block)
+			log.Debug("succeed to stateless check", "block", block)
 		}
 
 		vtime := time.Since(vstart)

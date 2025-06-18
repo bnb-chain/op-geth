@@ -112,19 +112,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		}
 	}
 
-	// TODO: remove it later
-	log.Info("debug witness, process txs", "block_number", block.NumberU64(), "tx_count", len(block.Transactions()), "receipts_count", len(receipts), "gas_used", *usedGas)
-	if len(block.Transactions()) == 1 {
-		tx := block.Transactions()[0]
-		log.Info("debug witness, Process tx",
-			"block_number", block.NumberU64(),
-			"tx_hash", tx.Hash().Hex(),
-			"tx_gas", tx.Gas(),
-			"tx_nonce", tx.Nonce(),
-			"receipt", receipts[0],
-			"gas_used", *usedGas)
-	}
-
 	if statedb.MVStates() != nil {
 		statedb.MVStates().BatchRecordHandle()
 	}
@@ -185,7 +172,6 @@ func applyTransaction(msg *Message, config *params.ChainConfig, gp *GasPool, sta
 	// by the tx.
 	receipt := &types.Receipt{Type: tx.Type(), PostState: root, CumulativeGasUsed: *usedGas}
 	if result.Failed() {
-		log.Info("debug witness, failed to execute tx", "tx", tx.Hash().Hex(), "error", result.Unwrap())
 		receipt.Status = types.ReceiptStatusFailed
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful

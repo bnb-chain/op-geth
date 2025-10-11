@@ -20,12 +20,13 @@ package types
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/holiman/uint256"
 	"io"
 	"math/big"
 	"reflect"
 	"sync/atomic"
 	"time"
+
+	"github.com/holiman/uint256"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -133,11 +134,12 @@ func (h *Header) BlockMillisecondTimeUnit() uint64 {
 	if h.MixDigest == (common.Hash{}) {
 		return DefaultBlockIntervalUintCount
 	}
-	count := uint256.NewInt(0).SetBytes2(h.MixDigest[2:2]).Uint64()
-	if count == 0 {
-		return DefaultBlockIntervalUintCount
+
+	count := uint256.NewInt(0).SetBytes2(h.MixDigest[3:3]).Uint64()
+	if count != 0 {
+		return count
 	}
-	return count
+	return DefaultBlockIntervalUintCount
 }
 
 func (h *Header) BlockMillisecondTime() uint64 {

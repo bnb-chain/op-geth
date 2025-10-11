@@ -271,6 +271,9 @@ func (db *Database) loadLayers() layer {
 	if (errors.Is(err, errMissJournal) || errors.Is(err, errUnmatchedJournal)) && db.fastRecovery &&
 		db.config.TrieNodeBufferType == NodeBufferList && !db.useBase {
 		start := time.Now()
+		if db.freezer == nil {
+			log.Crit("Use unopened freezer db to recover node buffer list")
+		}
 		log.Info("Recover node buffer list from ancient db")
 
 		nb, err = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
@@ -330,13 +333,23 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 	if stored > id {
 		return nil, fmt.Errorf("invalid state id: stored %d resolved %d", stored, id)
 	}
-
 	// Resolve nodes cached in node buffer
 	var encoded []journalNodes
 	if err := journalBuf.Decode(&encoded); err != nil {
 		return nil, fmt.Errorf("failed to load disk nodes: %v", err)
 	}
-	nodes := flattenTrieNodes(encoded)
+	nodes := make(map[common.Hash]map[string]*trienode.Node)
+	for _, entry := range encoded {
+		subset := make(map[string]*trienode.Node)
+		for _, n := range entry.Nodes {
+			if len(n.Blob) > 0 {
+				subset[string(n.Path)] = trienode.New(crypto.Keccak256Hash(n.Blob), n.Blob)
+			} else {
+				subset[string(n.Path)] = trienode.NewDeleted()
+			}
+		}
+		nodes[entry.Owner] = subset
+	}
 
 	if journalTypeForReader == JournalFileType {
 		var shaSum [32]byte
@@ -352,24 +365,11 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 
 	// Calculate the internal state transitions by id difference.
 	nb, err := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval,
-		db.config.NotifyKeep, db.freezer, db.fastRecovery, db.useBase)
+		db.config.NotifyKeep, nil, false, db.useBase)
 	if err != nil {
 		log.Error("Failed to new trie node buffer", "error", err)
 		return nil, err
 	}
-
-	if db.config.TrieNodeBufferType == NodeBufferList && !db.useBase && db.fastRecovery {
-		recoveredRoot, recoveredStateID, _ := nb.getLatestStatus()
-		if recoveredRoot != root && recoveredStateID != id {
-			log.Error("Recovered state root and state id are different from recording ones",
-				"recovered_root", recoveredRoot, "root", root, "recovered_state_id", recoveredStateID, "id", id)
-			return nil, errors.New("Unmatched root and state id with recovered")
-		}
-
-		log.Info("Disk layer finishes recovering node buffer list", "latest root hash", recoveredRoot.String(),
-			"latest state_id", recoveredStateID)
-	}
-
 	base := newDiskLayer(root, id, db, nil, nb)
 	nb.setClean(base.cleans)
 	return base, nil
@@ -486,7 +486,14 @@ func (dl *diskLayer) journal(w io.Writer, journalType JournalType) error {
 	}
 	// Step three, write all unwritten nodes into the journal
 	bufferNodes := dl.buffer.getAllNodes()
-	nodes := compressTrieNodes(bufferNodes)
+	nodes := make([]journalNodes, 0, len(bufferNodes))
+	for owner, subset := range bufferNodes {
+		entry := journalNodes{Owner: owner}
+		for path, node := range subset {
+			entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: node.Blob})
+		}
+		nodes = append(nodes, entry)
+	}
 	if err := rlp.Encode(journalBuf, nodes); err != nil {
 		return err
 	}

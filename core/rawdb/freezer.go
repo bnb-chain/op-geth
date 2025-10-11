@@ -127,7 +127,7 @@ func NewFreezer(datadir string, namespace string, readonly, writeTrieNode bool, 
 	// Create the tables.
 	for name, disableSnappy := range tables {
 		if name == stateHistoryTrieNodesData && !writeTrieNode {
-			log.Info("Not create trie node data in freezer db")
+			log.Info("Not create trie node data")
 			continue
 		}
 		table, err := newTable(datadir, name, readMeter, writeMeter, sizeGauge, maxTableSize, disableSnappy, readonly)

@@ -274,7 +274,7 @@ func (db *Database) loadLayers() layer {
 		log.Info("Recover node buffer list from ancient db")
 
 		nb, err = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
-			db.config.ProposeBlockInterval, db.config.ProposeBlockIntervalMultiplier, db.config.NotifyKeep, db.freezer, db.fastRecovery, db.useBase)
+			db.config.ProposeBlockInterval, db.config.NotifyKeep, db.freezer, db.fastRecovery, db.useBase)
 		if err != nil {
 			log.Error("Failed to new trie node buffer for recovery", "error", err)
 		} else {
@@ -286,7 +286,7 @@ func (db *Database) loadLayers() layer {
 	if nb == nil || err != nil {
 		// Return single layer with persistent state.
 		nb, err = NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nil, 0,
-			db.config.ProposeBlockInterval, db.config.ProposeBlockIntervalMultiplier, db.config.NotifyKeep, nil, false, db.useBase)
+			db.config.ProposeBlockInterval, db.config.NotifyKeep, nil, false, db.useBase)
 		if err != nil {
 			log.Crit("Failed to new trie node buffer", "error", err)
 			return nil
@@ -352,7 +352,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream, journalTypeForReader JournalTyp
 
 	// Calculate the internal state transitions by id difference.
 	nb, err := NewTrieNodeBuffer(db.diskdb, db.config.TrieNodeBufferType, db.bufferSize, nodes, id-stored, db.config.ProposeBlockInterval,
-		db.config.ProposeBlockIntervalMultiplier, db.config.NotifyKeep, db.freezer, db.fastRecovery, db.useBase)
+		db.config.NotifyKeep, db.freezer, db.fastRecovery, db.useBase)
 	if err != nil {
 		log.Error("Failed to new trie node buffer", "error", err)
 		return nil, err

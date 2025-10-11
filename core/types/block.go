@@ -35,7 +35,7 @@ import (
 
 var (
 	DefaultBlockIntervalUintCount uint64 = 2
-	BlockMillisecondsIntervalUint uint64 = 500
+	BlockMillisecondsIntervalUint uint64 = 250
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the

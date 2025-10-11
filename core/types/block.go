@@ -135,7 +135,7 @@ func (h *Header) BlockMillisecondTimeUnit() uint64 {
 		return DefaultBlockIntervalUintCount
 	}
 
-	count := uint256.NewInt(0).SetBytes2(h.MixDigest[3:3]).Uint64()
+	count := uint64(h.MixDigest[3])
 	if count != 0 {
 		return count
 	}

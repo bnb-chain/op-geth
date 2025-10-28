@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.5.8
+
+This release introduces the implementation of Fourier Hardfork, effectively reducing the block time from 500 milliseconds to an impressive 250 milliseconds.
+This enhancement significantly improves transaction efficiency and overall network performance, allowing for faster processing and a more seamless experience for users.
+
+It is set to be activated on both the opBNB Mainnet and Testnet environments according to the following schedule:
+
+- Testnet: Nov-06-2025 03:00 AM +UTC
+- Mainnet: Early-Dec-2025
+
+All mainnet and testnet nodes must upgrade to this release before the hardfork time.
+
+### What's Changed
+
+#### FEATURE
+* [\#279](https://github.com/bnb-chain/op-geth/pull/279) parse block interval from engine api
+* [\#298](https://github.com/bnb-chain/op-geth/pull/298) container run as none root
+
+### BUGFIX
+* [\#303](https://github.com/bnb-chain/op-geth/pull/303) parser block interval count
+
+### Docker Images
+ghcr.io/bnb-chain/op-geth:v0.5.8
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.7...v0.5.8
+
 ## v0.5.7
 
 This release introduces the implementation of [BEP-543](https://github.com/bnb-chain/BEPs/blob/master/BEPs/BEP-543.md), effectively reducing the block time from 1 second to an impressive 500 milliseconds.

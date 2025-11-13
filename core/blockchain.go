@@ -195,6 +195,7 @@ func (c *CacheConfig) triedbConfig(keepFunc pathdb.NotifyKeepFunc) *triedb.Confi
 			NotifyKeep:           keepFunc,
 			JournalFilePath:      c.JournalFilePath,
 			JournalFile:          c.JournalFile,
+			UseBase:              c.UseBase,
 		}
 	}
 	return config
@@ -216,6 +217,7 @@ var defaultCacheConfig = &CacheConfig{
 func DefaultCacheConfigWithScheme(scheme string) *CacheConfig {
 	config := *defaultCacheConfig
 	config.StateScheme = scheme
+	config.UseBase = true
 	return &config
 }
 

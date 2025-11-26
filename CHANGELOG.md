@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.5.9
+
+This release confirm the time of Mainnet Fourier Hardfork, effectively reducing the block time from 500 milliseconds to an impressive 250 milliseconds.
+
+- Mainnet: Jan-07-2026 03:00:00 AM +UTC
+
+All mainnet and nodes must upgrade to this release before the hardfork time.
+Also note that the `op-node` should be upgraded to v0.5.5 accordingly, check [this](https://github.com/bnb-chain/op-node/releases/tag/v0.5.5) for more details.
+
+### What's Changed
+
+### BUGFIX
+
+* [\#306](https://github.com/bnb-chain/op-geth/pull/306) fix: solve op-geth compile error on windows system
+* [\#310](https://github.com/bnb-chain/op-geth/pull/310) fix: solve proof keeper incorrect block truncation
+
+### Docker Images
+
+ghcr.io/bnb-chain/op-geth:v0.5.9
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.8...v0.5.9
+
 ## v0.5.8
 
 This release introduces the implementation of Fourier Hardfork, effectively reducing the block time from 500 milliseconds to an impressive 250 milliseconds.

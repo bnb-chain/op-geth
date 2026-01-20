@@ -332,9 +332,9 @@ func (w *worker) mergeBundles(
 		log.Info("included bundle",
 			"gasUsed", simulatedBundle.BundleGasUsed,
 			"gasPrice", simulatedBundle.BundleGasPrice,
-			"txcount", len(simulatedBundle.OriginalBundle.Txs))
+			"txcount", len(simulatedBundle.SucceedTxs))
 
-		includedTxs = append(includedTxs, bundle.OriginalBundle.Txs...)
+		includedTxs = append(includedTxs, simulatedBundle.SucceedTxs...)
 
 		mergedBundle.BundleGasFees.Add(mergedBundle.BundleGasFees, simulatedBundle.BundleGasFees)
 		mergedBundle.BundleGasUsed += simulatedBundle.BundleGasUsed
@@ -367,13 +367,24 @@ func (w *worker) simulateBundle(
 		bundleGasFees = new(big.Int)
 	)
 
-	for i, tx := range bundle.Txs {
-		state.SetTxContext(tx.Hash(), i+currentTxCount)
+	succeedTxs := types.Transactions{}
+	succeedTxCount := 0
+	for _, tx := range bundle.Txs {
+		state.SetTxContext(tx.Hash(), succeedTxCount+currentTxCount)
+
+		snap := state.Snapshot()
+		gp := gasPool.Gas()
 
 		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &w.coinbase, gasPool, state, env.header, tx,
 			&tempGasUsed, *w.chain.GetVMConfig())
 		if err != nil {
 			log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
+			if containsHash(bundle.DroppingTxHashes, tx.Hash()) {
+				log.Warn("drop tx in bundle", "hash", tx.Hash().String())
+				state.RevertToSnapshot(snap)
+				gasPool.SetGas(gp)
+				continue
+			}
 
 			if prune {
 				if errors.Is(err, core.ErrGasLimitReached) && !pruneGasExceed {
@@ -388,6 +399,12 @@ func (w *worker) simulateBundle(
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed && !containsHash(bundle.RevertingTxHashes, receipt.TxHash) {
+			// for unRevertible tx but itself can be dropped, we drop it and revert the state and gas pool
+			if containsHash(bundle.DroppingTxHashes, receipt.TxHash) {
+				log.Warn("drop tx in bundle", "hash", receipt.TxHash.String())
+				gasPool.SetGas(gp)
+				continue
+			}
 			err = errNonRevertingTxInBundleFailed
 			log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
 
@@ -412,7 +429,17 @@ func (w *worker) simulateBundle(
 			txGasFees := new(big.Int).Mul(txGasUsed, effectiveTip)
 			bundleGasFees.Add(bundleGasFees, txGasFees)
 		}
+		succeedTxs = append(succeedTxs, tx)
+		succeedTxCount++
 	}
+
+	// prune bundle when all txs are dropped
+	if len(succeedTxs) == 0 {
+		log.Warn("prune bundle", "hash", bundle.Hash().String(), "err", "empty bundle")
+		w.eth.TxPool().PruneBundle(bundle.Hash())
+		return nil, errors.New("empty bundle")
+	}
+
 	// if all txs in the bundle are from txpool, we accept the bundle without checking gas price
 	bundleGasPrice := big.NewInt(0)
 	if bundleGasUsed != 0 {
@@ -433,6 +460,7 @@ func (w *worker) simulateBundle(
 
 	return &types.SimulatedBundle{
 		OriginalBundle: bundle,
+		SucceedTxs:     succeedTxs,
 		BundleGasFees:  bundleGasFees,
 		BundleGasPrice: bundleGasPrice,
 		BundleGasUsed:  bundleGasUsed,

@@ -36,6 +36,9 @@ import (
 var (
 	DefaultBlockIntervalUintCount uint64 = 2
 	BlockMillisecondsIntervalUint uint64 = 250
+
+	DefaultBlockIntervalUintCountV2 uint64 = 5
+	BlockMillisecondsIntervalUintV2 uint64 = 25
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
@@ -135,15 +138,26 @@ func (h *Header) BlockMillisecondTimeUnit() uint64 {
 		return DefaultBlockIntervalUintCount
 	}
 
-	count := uint64(h.MixDigest[3])
-	if count != 0 {
-		return count
+	hasV1 := h.MixDigest[3] != 0
+	hasV2 := h.MixDigest[4] != 0
+	if hasV1 && hasV2 {
+		return DefaultBlockIntervalUintCountV2
 	}
-	return DefaultBlockIntervalUintCount
+	if hasV1 {
+		return uint64(h.MixDigest[3])
+	}
+	if hasV2 {
+		return uint64(h.MixDigest[4])
+	}
+	return DefaultBlockIntervalUintCountV2
 }
 
 func (h *Header) BlockMillisecondTime() uint64 {
-	return h.BlockMillisecondTimeUnit() * BlockMillisecondsIntervalUint
+	interval := BlockMillisecondsIntervalUintV2
+	if h.MixDigest[3] != 0 && h.MixDigest[4] == 0 {
+		interval = BlockMillisecondsIntervalUint
+	}
+	return h.BlockMillisecondTimeUnit() * interval
 }
 
 func (h *Header) NextSecondsTimestamp() uint64 { return h.NextMilliTimestamp() / 1000 }

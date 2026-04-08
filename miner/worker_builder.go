@@ -57,9 +57,15 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 		return errFillBundleInterrupted
 	}
 
+	bundleHashes := make([]common.Hash, len(bundles))
+	for i, b := range bundles {
+		bundleHashes[i] = b.Hash()
+	}
+
 	commitStart := time.Now()
 	if err = w.commitBundles(env, txs, interrupt); err != nil {
 		log.Error("Failed to commit bundles", "err", err, "bundleCount", len(bundles), "txCount", len(txs),
+			"bundleHashes", bundleHashes,
 			"pendingElapsed", common.PrettyDuration(pendingDuration),
 			"generateElapsed", common.PrettyDuration(genDuration),
 			"commitElapsed", common.PrettyDuration(time.Since(commitStart)),
@@ -67,6 +73,7 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 		return errFillBundleInterrupted
 	}
 	log.Info("Filled bundles", "bundles_count", len(bundles), "txCount", len(txs),
+		"bundleHashes", bundleHashes,
 		"pendingElapsed", common.PrettyDuration(pendingDuration),
 		"generateElapsed", common.PrettyDuration(genDuration),
 		"commitElapsed", common.PrettyDuration(time.Since(commitStart)),

@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"math/big"
+
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -123,12 +124,17 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBund
 		bundle.MaxBlockNumber = currentHeader.Number.Uint64() + types.MaxBundleAliveBlock
 	}
 
+	hash := bundle.Hash()
+	log.Info("Received bundle via RPC", "hash", hash, "txCount", len(txs), "maxBlockNumber", bundle.MaxBlockNumber, "minTimestamp", minTimestamp, "maxTimestamp", maxTimestamp)
+
 	err := s.b.SendBundle(ctx, bundle, &args)
 	if err != nil {
+		log.Error("Failed to add bundle", "hash", hash, "err", err)
 		return common.Hash{}, err
 	}
 
-	return bundle.Hash(), nil
+	log.Info("Bundle accepted into pool", "hash", hash)
+	return hash, nil
 }
 
 func newBundleError(err error) *bundleError {

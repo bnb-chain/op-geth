@@ -4,13 +4,11 @@ import (
 	"container/heap"
 	"context"
 	"errors"
-	mapset "github.com/deckarep/golang-set/v2"
-	"github.com/ethereum/go-ethereum/miner"
-	"github.com/ethereum/go-ethereum/rpc"
 	"math/big"
 	"sync"
 	"time"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -19,7 +17,9 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 const (
@@ -167,8 +167,10 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 		return ErrBundleTimestampTooHigh
 	}
 
+	hash := bundle.Hash()
 	price, err := p.simulator.SimulateBundle(bundle)
 	if err != nil {
+		log.Warn("Bundle simulation failed", "hash", hash, "err", err)
 		return err
 	}
 	bundle.Price = price
@@ -176,13 +178,14 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	hash := bundle.Hash()
 	if _, ok := p.bundles[hash]; ok {
+		log.Debug("Bundle already exists in pool", "hash", hash)
 		return ErrBundleAlreadyExist
 	}
 
 	if p.slots+numSlots(bundle) > p.config.GlobalSlots {
 		if !p.drop(bundle) {
+			log.Warn("Bundle rejected, gas price too low to replace existing", "hash", hash, "price", price)
 			return ErrBundleGasPriceLow
 		}
 	}
@@ -205,13 +208,15 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 	heap.Push(&p.bundleHeap, bundle)
 	p.slots += numSlots(bundle)
 
+	log.Info("Bundle added to pool", "hash", hash, "price", price, "txCount", len(bundle.Txs), "poolSize", len(p.bundles), "slots", p.slots)
+
 	bundleGauge.Update(int64(len(p.bundles)))
 	slotsGauge.Update(int64(p.slots))
 	return nil
 }
 
 func (p *BundlePool) GetBundle(hash common.Hash) *types.Bundle {
-	p.mu.RUnlock()
+	p.mu.RLock()
 	defer p.mu.RUnlock()
 
 	return p.bundles[hash]
@@ -220,6 +225,7 @@ func (p *BundlePool) GetBundle(hash common.Hash) *types.Bundle {
 func (p *BundlePool) PruneBundle(hash common.Hash) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	log.Debug("Bundle pruned externally", "hash", hash)
 	p.deleteBundle(hash)
 }
 
@@ -232,6 +238,7 @@ func (p *BundlePool) PendingBundles(blockNumber uint64, blockTimestamp uint64) [
 		// Prune outdated bundles
 		if (bundle.MaxTimestamp != 0 && blockTimestamp > bundle.MaxTimestamp) ||
 			(bundle.MaxBlockNumber != 0 && blockNumber > bundle.MaxBlockNumber) {
+			log.Debug("Bundle expired in PendingBundles", "hash", hash, "maxTimestamp", bundle.MaxTimestamp, "blockTimestamp", blockTimestamp, "maxBlockNumber", bundle.MaxBlockNumber, "blockNumber", blockNumber)
 			p.deleteBundle(hash)
 			continue
 		}
@@ -373,9 +380,11 @@ func (p *BundlePool) reset(newHead *types.Header) {
 	for hash, bundle := range p.bundles {
 		if (bundle.MaxTimestamp != 0 && newHead.Time > bundle.MaxTimestamp) ||
 			(bundle.MaxBlockNumber != 0 && newHead.Number.Cmp(new(big.Int).SetUint64(bundle.MaxBlockNumber)) > 0) {
+			log.Debug("Bundle pruned on reset (expired)", "hash", hash, "headNumber", newHead.Number, "headTime", newHead.Time, "maxBlockNumber", bundle.MaxBlockNumber, "maxTimestamp", bundle.MaxTimestamp)
 			p.slots -= numSlots(p.bundles[hash])
 			delete(p.bundles, hash)
 		} else if txSet.Contains(bundle.Txs[0].Hash()) {
+			log.Debug("Bundle pruned on reset (tx already included)", "hash", hash, "headNumber", newHead.Number, "firstTx", bundle.Txs[0].Hash())
 			p.slots -= numSlots(p.bundles[hash])
 			delete(p.bundles, hash)
 		}
@@ -402,6 +411,7 @@ func (p *BundlePool) drop(bundle *types.Bundle) bool {
 	for len(p.bundleHeap) > 0 {
 		if dropSlots >= numSlots(bundle) {
 			for _, dropBundle := range dropBundles {
+				log.Info("Bundle dropped due to slot limit", "hash", dropBundle.Hash(), "price", dropBundle.Price)
 				p.deleteBundle(dropBundle.Hash())
 			}
 			return true

@@ -52,10 +52,10 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 	}
 
 	if err = w.commitBundles(env, txs, interrupt); err != nil {
-		log.Error("fail to commit bundles", "err", err)
+		log.Error("fail to commit bundles", "err", err, "bundleCount", len(bundles), "txCount", len(txs))
 		return errFillBundleInterrupted
 	}
-	log.Info("fill bundles", "bundles_count", len(bundles))
+	log.Info("fill bundles", "bundles_count", len(bundles), "txCount", len(txs))
 
 	w.mu.RLock()
 	tip := w.tip

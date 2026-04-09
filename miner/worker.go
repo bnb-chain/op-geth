@@ -1234,7 +1234,7 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     new(big.Int).Add(parent.Number, common.Big1),
-		GasLimit:   w.config.GasCeil,
+		GasLimit:   core.CalcGasLimit(parent.GasLimit, w.config.GasCeil),
 		Time:       timestamp,
 		Coinbase:   genParams.coinbase,
 	}
@@ -1255,11 +1255,12 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 		}
 	}
 	if genParams.gasLimit != nil { // override gas limit if specified
-		header.GasLimit = *genParams.gasLimit
+		header.GasLimit = w.config.GasCeil
 	} else if w.chain.Config().Optimism != nil && w.config.GasCeil != 0 {
 		// configure the gas limit of pending blocks with the miner gas limit config when using optimism
 		header.GasLimit = w.config.GasCeil
 	}
+	log.Debug("header.GasLimit", "gasLimit", header.GasLimit, "parent.GasLimit", parent.GasLimit, "w.config.GasCeil", w.config.GasCeil)
 	// Apply EIP-4844, EIP-4788.
 	if w.chainConfig.IsCancun(header.Number, header.Time) {
 		var excessBlobGas uint64

@@ -1445,6 +1445,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		timer := time.AfterFunc(w.newpayloadTimeout, func() {
 			interrupt.Store(commitInterruptTimeout)
 		})
+		log.Info("Print new payload timeout", "timeout", common.PrettyDuration(w.newpayloadTimeout))
 		if w.config.Mev.MevEnabled {
 			newWork := work.copy()
 			var wg sync.WaitGroup

@@ -360,7 +360,7 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     new(big.Int).Add(parent.Number, common.Big1),
-		GasLimit:   core.CalcGasLimit(parent.GasLimit, miner.worker.config.GasCeil),
+		GasLimit:   miner.worker.config.GasCeil,
 		Time:       timestamp / 1000,
 		MixDigest:  mixDigest,
 		Coinbase:   defaultCoinBaseAddress,

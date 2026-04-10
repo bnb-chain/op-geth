@@ -561,6 +561,11 @@ var (
 		Value:    0,
 		Category: flags.MinerCategory,
 	}
+	MinerTxGasLimitFlag = &cli.Uint64Flag{
+		Name:     "miner.txgaslimit",
+		Usage:    fmt.Sprintf("Maximum gas allowed per transaction (default = 0, disabled; min = %d)", params.MaxTxGas),
+		Category: flags.MinerCategory,
+	}
 	MinerGasPriceFlag = &flags.BigFlag{
 		Name:     "miner.gasprice",
 		Usage:    "Minimum gas price for mining a transaction",
@@ -1775,6 +1780,13 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 	if ctx.IsSet(MinerEffectiveGasLimitFlag.Name) {
 		cfg.EffectiveGasCeil = ctx.Uint64(MinerEffectiveGasLimitFlag.Name)
+	}
+	if ctx.IsSet(MinerTxGasLimitFlag.Name) {
+		limit := ctx.Uint64(MinerTxGasLimitFlag.Name)
+		if limit != 0 && limit < params.MaxTxGas {
+			Fatalf("Invalid --miner.txgaslimit: %d (must be >= %d or 0)", limit, params.MaxTxGas)
+		}
+		cfg.TxGasLimit = limit
 	}
 	if ctx.IsSet(MinerGasPriceFlag.Name) {
 		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)

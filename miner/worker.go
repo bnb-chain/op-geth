@@ -386,6 +386,12 @@ func (w *worker) setGasTip(tip *big.Int) {
 	w.tip = uint256.MustFromBig(tip)
 }
 
+func (w *worker) getTxGasLimit() uint64 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.config.TxGasLimit
+}
+
 // setRecommitInterval updates the interval for miner sealing work recommitting.
 func (w *worker) setRecommitInterval(interval time.Duration) {
 	select {
@@ -1319,6 +1325,9 @@ func (w *worker) fillTransactions(interrupt *atomic.Int32, env *environment) err
 	}
 	if env.header.ExcessBlobGas != nil {
 		filter.BlobFee = uint256.MustFromBig(eip4844.CalcBlobFee(*env.header.ExcessBlobGas))
+	}
+	if cap := w.getTxGasLimit(); cap > 0 {
+		filter.GasLimitCap = cap
 	}
 	filter.OnlyPlainTxs, filter.OnlyBlobTxs = true, false
 	pendingPlainTxs := w.eth.TxPool().Pending(filter)

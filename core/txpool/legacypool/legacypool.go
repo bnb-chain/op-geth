@@ -276,6 +276,7 @@ type LegacyPool struct {
 	chainconfig  *params.ChainConfig
 	chain        BlockChain
 	gasTip       atomic.Pointer[uint256.Int]
+	maxTxGas     atomic.Uint64
 	txFeed       event.Feed
 	reannoTxFeed event.Feed
 	signer       types.Signer
@@ -585,6 +586,15 @@ func (pool *LegacyPool) SetGasTip(tip *big.Int) {
 	log.Info("Legacy pool tip threshold updated", "tip", newTip)
 }
 
+func (pool *LegacyPool) GetMaxTxGas() uint64 {
+	return pool.maxTxGas.Load()
+}
+
+// SetMaxGas updates the maximum gas allowed per individual transaction.
+func (pool *LegacyPool) SetMaxTxGas(maxTxGas uint64) {
+	pool.maxTxGas.Store(maxTxGas)
+}
+
 // Nonce returns the next nonce of an account, with all transactions executable
 // by the pool already applied on top.
 func (pool *LegacyPool) Nonce(addr common.Address) uint64 {
@@ -705,10 +715,16 @@ func (pool *LegacyPool) Pending(filter txpool.PendingFilter) map[common.Address]
 			txs = txs[noncetoolow+1:]
 		}
 
-		// If the miner requests tip enforcement, cap the lists now
-		if minTipBig != nil && !localAddrs[addr] {
+		// If the miner requests tip enforcement or tx gas cap, filter the lists now
+		if (minTipBig != nil && !localAddrs[addr]) || filter.GasLimitCap != 0 {
 			for i, tx := range txs {
-				if tx.EffectiveGasTipIntCmp(minTipBig, baseFeeBig) < 0 {
+				if minTipBig != nil && !localAddrs[addr] {
+					if tx.EffectiveGasTipIntCmp(minTipBig, baseFeeBig) < 0 {
+						txs = txs[:i]
+						break
+					}
+				}
+				if filter.GasLimitCap != 0 && tx.Gas() > filter.GasLimitCap {
 					txs = txs[:i]
 					break
 				}
@@ -790,6 +806,7 @@ func (pool *LegacyPool) validateTxBasics(tx *types.Transaction, local bool) erro
 		MaxSize:          txMaxSize,
 		MinTip:           pool.gasTip.Load().ToBig(),
 		EffectiveGasCeil: pool.config.EffectiveGasCeil,
+		MaxTxGas:         pool.GetMaxTxGas(),
 	}
 	if local {
 		opts.MinTip = new(big.Int)

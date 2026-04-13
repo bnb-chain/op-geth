@@ -1781,13 +1781,6 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.IsSet(MinerEffectiveGasLimitFlag.Name) {
 		cfg.EffectiveGasCeil = ctx.Uint64(MinerEffectiveGasLimitFlag.Name)
 	}
-	if ctx.IsSet(MinerTxGasLimitFlag.Name) {
-		limit := ctx.Uint64(MinerTxGasLimitFlag.Name)
-		if limit != 0 && limit < params.MaxTxGas {
-			Fatalf("Invalid --miner.txgaslimit: %d (must be >= %d or 0)", limit, params.MaxTxGas)
-		}
-		cfg.TxGasLimit = limit
-	}
 	if ctx.IsSet(MinerGasPriceFlag.Name) {
 		cfg.GasPrice = flags.GlobalBig(ctx, MinerGasPriceFlag.Name)
 	}
@@ -1809,6 +1802,13 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	}
 	if ctx.IsSet(MevBundleGasPriceFloorFlag.Name) {
 		cfg.Mev.MevBundleGasPriceFloor = ctx.Int64(MevBundleGasPriceFloorFlag.Name)
+	}
+	if ctx.IsSet(MinerTxGasLimitFlag.Name) {
+		limit := ctx.Uint64(MinerTxGasLimitFlag.Name)
+		if limit != 0 && limit > params.MaxTxGas {
+			Fatalf("Invalid --miner.txgaslimit: %d (must be <= %d or 0)", limit, params.MaxTxGas)
+		}
+		cfg.TxGasLimit = limit
 	}
 }
 

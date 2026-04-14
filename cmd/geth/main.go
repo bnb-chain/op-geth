@@ -135,7 +135,6 @@ var (
 		utils.MiningEnabledFlag,
 		utils.MinerGasLimitFlag,
 		utils.MinerEffectiveGasLimitFlag,
-		utils.MinerTxGasLimitFlag,
 		utils.MinerGasPriceFlag,
 		utils.MinerEtherbaseFlag,
 		utils.MinerExtraDataFlag,

@@ -109,7 +109,7 @@ type Config struct {
 
 	RollupComputePendingBlock bool   // Compute the pending block from tx-pool, instead of copying the latest-block
 	EffectiveGasCeil          uint64 // if non-zero, a gas ceiling to apply independent of the header's gaslimit value
-	TxGasLimit                uint64 // if non-zero, maximum gas allowed per individual transaction
+	TxGasLimit                uint64 // Maximum gas allowed per individual transaction
 
 	Mev MevConfig // Mev configuration
 
@@ -302,7 +302,7 @@ func (miner *Miner) SetGasCeil(ceil uint64) {
 	miner.worker.setGasCeil(ceil)
 }
 
-// GetTxGasLimit returns the maximum gas allowed per transaction.
+// TxGasLimit returns the maximum gas allowed per transaction.
 func (miner *Miner) TxGasLimit() uint64 {
 	return miner.worker.getTxGasLimit()
 }

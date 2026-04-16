@@ -113,4 +113,8 @@ var (
 
 	// ErrSystemTxNotSupported is returned for any deposit tx with IsSystemTx=true after the Regolith fork
 	ErrSystemTxNotSupported = errors.New("system tx not supported")
+
+	// -- EIP-7825 errors --
+	// ErrTxGasLimitTooHigh is returned if a transaction's gas limit exceeds the per-tx cap.
+	ErrTxGasLimitTooHigh = errors.New("transaction gas limit too high")
 )

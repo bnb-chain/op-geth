@@ -448,7 +448,7 @@ func (p *BundlePool) minimalBundleGasPrice() *big.Int {
 	return new(big.Int)
 }
 
-func (p *BundlePool) SetMaxGas(maxGas uint64) {}
+func (p *BundlePool) SetMaxTxGas(maxTxGas uint64) {}
 
 // =====================================================================================================================
 

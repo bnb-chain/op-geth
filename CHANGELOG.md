@@ -1,5 +1,6 @@
 # Changelog
 
+
 ## v0.5.10
 
 This release enforces a per-transaction gas limit (EIP-7825, 16,777,216) at both tx pool admission and block packing to prevent oversized transactions from impacting network security. It also adds essential logging to the bundle pool for production debugging, and adjusts MaxBundleAliveBlock to 240 to align with the current 250ms block time.
@@ -17,6 +18,7 @@ This release enforces a per-transaction gas limit (EIP-7825, 16,777,216) at both
 ghcr.io/bnb-chain/op-geth:v0.5.10
 
 **Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.9...v0.5.10
+
 
 ## v0.5.9
 
@@ -39,6 +41,7 @@ Also note that the `op-node` should be upgraded to v0.5.5 accordingly, check [th
 ghcr.io/bnb-chain/op-geth:v0.5.9
 
 **Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.8...v0.5.9
+
 
 ## v0.5.8
 

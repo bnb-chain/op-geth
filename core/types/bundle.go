@@ -11,7 +11,7 @@ import (
 
 const (
 	// MaxBundleAliveBlock is the max alive block for bundle
-	MaxBundleAliveBlock = 60
+	MaxBundleAliveBlock = 240
 	// MaxBundleAliveTime is the max alive time for bundle
 	MaxBundleAliveTime = 60 // second
 )

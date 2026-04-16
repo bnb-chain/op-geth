@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.5.10
+
+This release enforces a per-transaction gas limit (EIP-7825, 16,777,216) at both tx pool admission and block packing to prevent oversized transactions from impacting network security. It also adds essential logging to the bundle pool for production debugging, and adjusts MaxBundleAliveBlock to 240 to align with the current 250ms block time.
+
+### What's Changed
+
+### BUGFIX
+
+* [\#315](https://github.com/bnb-chain/op-geth/pull/315) fix: add bundle logs
+* [\#318](https://github.com/bnb-chain/op-geth/pull/318) feat: support config tx gas limit
+* [\#319](https://github.com/bnb-chain/op-geth/pull/318) fix: adjust MaxBundleAliveBlock to 240
+
+### Docker Images
+
+ghcr.io/bnb-chain/op-geth:v0.5.10
+
+**Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.9...v0.5.10
+
 ## v0.5.9
 
 This release confirm the time of Mainnet Fourier Hardfork, effectively reducing the block time from 500 milliseconds to an impressive 250 milliseconds.
@@ -21,7 +39,6 @@ Also note that the `op-node` should be upgraded to v0.5.5 accordingly, check [th
 ghcr.io/bnb-chain/op-geth:v0.5.9
 
 **Full Changelog**: https://github.com/bnb-chain/op-geth/compare/v0.5.8...v0.5.9
-
 
 ## v0.5.8
 

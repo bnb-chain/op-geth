@@ -1798,6 +1798,8 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.IsSet(MevBundleGasPriceFloorFlag.Name) {
 		cfg.Mev.MevBundleGasPriceFloor = ctx.Int64(MevBundleGasPriceFloorFlag.Name)
 	}
+	// Set the maximum gas allowed per individual transaction to the default 16,777,216
+	cfg.TxGasLimit = params.MaxTxGas
 }
 
 func setRequiredBlocks(ctx *cli.Context, cfg *ethconfig.Config) {

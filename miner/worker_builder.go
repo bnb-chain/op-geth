@@ -37,7 +37,11 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 		}
 	}
 
+	fillBundlesStart := time.Now()
+
+	pendingStart := time.Now()
 	bundles := w.eth.TxPool().PendingBundles(env.header.Number.Uint64(), env.header.Time)
+	pendingDuration := time.Since(pendingStart)
 
 	// if no bundles, not necessary to fill transactions
 	if len(bundles) == 0 {
@@ -45,17 +49,35 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 		return errFillBundleInterrupted
 	}
 
+	genStart := time.Now()
 	txs, _, err := w.generateOrderedBundles(env, bundles)
+	genDuration := time.Since(genStart)
 	if err != nil {
-		log.Error("fail to generate ordered bundles", "err", err)
+		log.Error("fail to generate ordered bundles", "err", err, "elapsed", common.PrettyDuration(genDuration))
 		return errFillBundleInterrupted
 	}
 
+	bundleHashes := make([]common.Hash, len(bundles))
+	for i, b := range bundles {
+		bundleHashes[i] = b.Hash()
+	}
+
+	commitStart := time.Now()
 	if err = w.commitBundles(env, txs, interrupt); err != nil {
-		log.Error("fail to commit bundles", "err", err)
+		log.Error("Failed to commit bundles", "err", err, "bundleCount", len(bundles), "txCount", len(txs),
+			"bundleHashes", bundleHashes,
+			"pendingElapsed", common.PrettyDuration(pendingDuration),
+			"generateElapsed", common.PrettyDuration(genDuration),
+			"commitElapsed", common.PrettyDuration(time.Since(commitStart)),
+			"totalElapsed", common.PrettyDuration(time.Since(fillBundlesStart)))
 		return errFillBundleInterrupted
 	}
-	log.Info("fill bundles", "bundles_count", len(bundles))
+	log.Info("Filled bundles", "bundles_count", len(bundles), "txCount", len(txs),
+		"bundleHashes", bundleHashes,
+		"pendingElapsed", common.PrettyDuration(pendingDuration),
+		"generateElapsed", common.PrettyDuration(genDuration),
+		"commitElapsed", common.PrettyDuration(time.Since(commitStart)),
+		"totalElapsed", common.PrettyDuration(time.Since(fillBundlesStart)))
 
 	w.mu.RLock()
 	tip := w.tip

@@ -65,6 +65,7 @@ type ValidationOptions struct {
 	MinTip  *big.Int // Minimum gas tip needed to allow a transaction into the caller pool
 
 	EffectiveGasCeil uint64 // if non-zero, a gas ceiling to enforce independent of the header's gaslimit value
+	MaxTxGas         uint64 // if non-zero, maximum gas allowed per individual transaction
 }
 
 // ValidateTransaction is a helper method to check whether a transaction is valid
@@ -119,6 +120,10 @@ func ValidateTransaction(tx *types.Transaction, head *types.Header, signer types
 	// Ensure the transaction doesn't exceed the current block limit gas
 	if EffectiveGasLimit(opts.Config, head.GasLimit, opts.EffectiveGasCeil) < tx.Gas() {
 		return ErrGasLimit
+	}
+	// Ensure the transaction doesn't exceed the per-tx gas limit cap
+	if opts.MaxTxGas > 0 && tx.Gas() > opts.MaxTxGas {
+		return fmt.Errorf("%w (cap: %d, tx: %d)", core.ErrTxGasLimitTooHigh, opts.MaxTxGas, tx.Gas())
 	}
 	// Sanity check for extremely large numbers (supported by RLP or RPC)
 	if tx.GasFeeCap().BitLen() > 256 {

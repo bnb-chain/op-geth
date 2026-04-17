@@ -476,6 +476,13 @@ func startNode(ctx *cli.Context, stack *node.Node, backend ethapi.Backend, isCon
 		}()
 	}
 
+	// Set per-transaction gas limit cap on the txpool if configured
+	if ethBackend, ok := backend.(*eth.EthAPIBackend); ok {
+		if txGasLimit := ethBackend.Miner().TxGasLimit(); txGasLimit > 0 {
+			ethBackend.TxPool().SetMaxTxGas(txGasLimit)
+		}
+	}
+
 	// Start auxiliary services if enabled
 	if ctx.Bool(utils.MiningEnabledFlag.Name) {
 		// Mining only makes sense if a full Ethereum node is running

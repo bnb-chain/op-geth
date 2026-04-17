@@ -81,6 +81,8 @@ type PendingFilter struct {
 	BaseFee *uint256.Int // Minimum 1559 basefee needed to include a transaction
 	BlobFee *uint256.Int // Minimum 4844 blobfee needed to include a blob transaction
 
+	GasLimitCap uint64 // Maximum gas allowed per transaction (0 = no cap)
+
 	OnlyPlainTxs bool // Return only plain EVM transactions (peer-join announces, block space filling)
 	OnlyBlobTxs  bool // Return only blob transactions (block blob-space filling)
 }
@@ -166,6 +168,9 @@ type SubPool interface {
 	// Status returns the known status (unknown/pending/queued) of a transaction
 	// identified by their hashes.
 	Status(hash common.Hash) TxStatus
+
+	// SetMaxTxGas updates the maximum gas allowed per individual transaction.
+	SetMaxTxGas(maxTxGas uint64)
 }
 
 type BundleSubpool interface {

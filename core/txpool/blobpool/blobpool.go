@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -305,6 +306,8 @@ type BlobPool struct {
 	head   *types.Header  // Current head of the chain
 	state  *state.StateDB // Current state at the head of the chain
 	gasTip *uint256.Int   // Currently accepted minimum gas tip
+
+	maxTxGas atomic.Uint64 // Maximum gas allowed per individual transaction
 
 	lookup map[common.Hash]uint64           // Lookup table mapping hashes to tx billy entries
 	index  map[common.Address][]*blobTxMeta // Blob transactions grouped by accounts, sorted by nonce
@@ -1076,16 +1079,27 @@ func (p *BlobPool) SetGasTip(tip *big.Int) {
 	p.updateStorageMetrics()
 }
 
+// SetMaxTxGas implements txpool.SubPool, allowing the blob pool's per-tx gas
+// limit to be kept in sync with the main transaction pool.
+func (p *BlobPool) SetMaxTxGas(maxTxGas uint64) {
+	p.maxTxGas.Store(maxTxGas)
+}
+
+func (p *BlobPool) GetMaxTxGas() uint64 {
+	return p.maxTxGas.Load()
+}
+
 // validateTx checks whether a transaction is valid according to the consensus
 // rules and adheres to some heuristic limits of the local node (price and size).
 func (p *BlobPool) validateTx(tx *types.Transaction) error {
 	// Ensure the transaction adheres to basic pool filters (type, size, tip) and
 	// consensus rules
 	baseOpts := &txpool.ValidationOptions{
-		Config:  p.chain.Config(),
-		Accept:  1 << types.BlobTxType,
-		MaxSize: txMaxSize,
-		MinTip:  p.gasTip.ToBig(),
+		Config:   p.chain.Config(),
+		Accept:   1 << types.BlobTxType,
+		MaxSize:  txMaxSize,
+		MinTip:   p.gasTip.ToBig(),
+		MaxTxGas: p.GetMaxTxGas(),
 	}
 	if err := txpool.ValidateTransaction(tx, p.head, p.signer, baseOpts); err != nil {
 		return err
@@ -1487,6 +1501,9 @@ func (p *BlobPool) Pending(filter txpool.PendingFilter) map[common.Address][]*tx
 				if tx.blobFeeCap.Lt(filter.BlobFee) {
 					break // blobfee too low, cannot be included, discard rest of txs from the account
 				}
+			}
+			if filter.GasLimitCap != 0 && tx.execGas > filter.GasLimitCap {
+				break // execution gas limit too high, discard rest of txs from the account
 			}
 			// Transaction was accepted according to the filter, append to the pending list
 			lazies = append(lazies, &txpool.LazyTransaction{

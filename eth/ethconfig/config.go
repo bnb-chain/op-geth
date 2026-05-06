@@ -51,54 +51,56 @@ var FullNodeGPO = gasprice.Config{
 
 // Defaults contains default settings for use on the Ethereum main net.
 var Defaults = Config{
-	SyncMode:               downloader.SnapSync,
-	NetworkId:              0,
-	TxLookupLimit:          2350000,
-	TransactionHistory:     2350000,
-	StateHistory:           params.FullImmutabilityThreshold,
-	LightPeers:             100,
-	DatabaseCache:          512,
-	TrieCleanCache:         154,
-	TrieDirtyCache:         256,
-	TrieTimeout:            60 * time.Minute,
-	TrieCommitInterval:     0,
-	SnapshotCache:          102,
-	FilterLogCacheSize:     32,
-	Miner:                  miner.DefaultConfig,
-	TxPool:                 legacypool.DefaultConfig,
-	BlobPool:               blobpool.DefaultConfig,
-	RPCGasCap:              50000000,
-	RPCEVMTimeout:          5 * time.Second,
-	GPO:                    FullNodeGPO,
-	RPCTxFeeCap:            1, // 1 ether
-	EnableOpcodeOptimizing: false,
+	SyncMode:                      downloader.SnapSync,
+	NetworkId:                     0,
+	TxLookupLimit:                 2350000,
+	TransactionHistory:            2350000,
+	StateHistory:                  params.FullImmutabilityThreshold,
+	LightPeers:                    100,
+	DatabaseCache:                 512,
+	TrieCleanCache:                154,
+	TrieDirtyCache:                256,
+	TrieTimeout:                   60 * time.Minute,
+	TrieCommitInterval:            0,
+	SnapshotCache:                 102,
+	FilterLogCacheSize:            32,
+	Miner:                         miner.DefaultConfig,
+	TxPool:                        legacypool.DefaultConfig,
+	BlobPool:                      blobpool.DefaultConfig,
+	RPCGasCap:                     50000000,
+	RPCEVMTimeout:                 5 * time.Second,
+	GPO:                           FullNodeGPO,
+	RPCTxFeeCap:                   1, // 1 ether
+	EnableOpcodeOptimizing:        false,
+	EnableStatelessSelfValidation: false,
 }
 
 // OpBNBDefaults contains default settings for use on the opBNB main net.
 var OpBNBDefaults = Config{
-	SyncMode:               downloader.FullSync,
-	NetworkId:              204,
-	TxLookupLimit:          2350000,
-	TransactionHistory:     2350000,
-	StateHistory:           params.FullImmutabilityThreshold,
-	LightPeers:             100,
-	DatabaseCache:          512,
-	TrieCleanCache:         154,
-	TrieDirtyCache:         256,
-	TrieTimeout:            60 * time.Minute,
-	TrieCommitInterval:     3600,
-	NoTries:                false,
-	SnapshotCache:          102,
-	FilterLogCacheSize:     32,
-	Miner:                  miner.DefaultConfig,
-	TxPool:                 legacypool.DefaultConfig,
-	BlobPool:               blobpool.DefaultConfig,
-	RPCGasCap:              50000000,
-	RPCEVMTimeout:          5 * time.Second,
-	GPO:                    FullNodeGPO,
-	RPCTxFeeCap:            1, // 1 ether
-	Preimages:              true,
-	EnableOpcodeOptimizing: false,
+	SyncMode:                      downloader.FullSync,
+	NetworkId:                     204,
+	TxLookupLimit:                 2350000,
+	TransactionHistory:            2350000,
+	StateHistory:                  params.FullImmutabilityThreshold,
+	LightPeers:                    100,
+	DatabaseCache:                 512,
+	TrieCleanCache:                154,
+	TrieDirtyCache:                256,
+	TrieTimeout:                   60 * time.Minute,
+	TrieCommitInterval:            3600,
+	NoTries:                       false,
+	SnapshotCache:                 102,
+	FilterLogCacheSize:            32,
+	Miner:                         miner.DefaultConfig,
+	TxPool:                        legacypool.DefaultConfig,
+	BlobPool:                      blobpool.DefaultConfig,
+	RPCGasCap:                     50000000,
+	RPCEVMTimeout:                 5 * time.Second,
+	GPO:                           FullNodeGPO,
+	RPCTxFeeCap:                   1, // 1 ether
+	Preimages:                     true,
+	EnableOpcodeOptimizing:        false,
+	EnableStatelessSelfValidation: false,
 }
 
 //go:generate go run github.com/fjl/gencodec -type Config -formats toml -out gen_config.go
@@ -218,8 +220,9 @@ type Config struct {
 	RollupDisableTxPoolAdmission            bool
 	RollupHaltOnIncompatibleProtocolVersion string
 
-	EnableOpcodeOptimizing bool
-	EnableParallelTxDAG    bool
+	EnableOpcodeOptimizing        bool
+	EnableParallelTxDAG           bool
+	EnableStatelessSelfValidation bool
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain config.

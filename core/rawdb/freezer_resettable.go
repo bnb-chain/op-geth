@@ -33,10 +33,11 @@ type freezerOpenFunc = func() (*Freezer, error)
 // ResettableFreezer is a wrapper of the freezer which makes the
 // freezer resettable.
 type ResettableFreezer struct {
-	freezer *Freezer
-	opener  freezerOpenFunc
-	datadir string
-	lock    sync.RWMutex
+	readOnly bool
+	freezer  *Freezer
+	opener   freezerOpenFunc
+	datadir  string
+	lock     sync.RWMutex
 }
 
 // NewResettableFreezer creates a resettable freezer, note freezer is
@@ -48,21 +49,22 @@ type ResettableFreezer struct {
 //
 // The reset function will delete directory atomically and re-create the
 // freezer from scratch.
-func NewResettableFreezer(datadir string, namespace string, readonly, writeTrieNodes bool, maxTableSize uint32, tables map[string]bool) (*ResettableFreezer, error) {
+func NewResettableFreezer(datadir string, namespace string, readonly bool, maxTableSize uint32, tables map[string]freezerTableConfig) (*ResettableFreezer, error) {
 	if err := cleanup(datadir); err != nil {
 		return nil, err
 	}
 	opener := func() (*Freezer, error) {
-		return NewFreezer(datadir, namespace, readonly, writeTrieNodes, maxTableSize, tables)
+		return NewFreezer(datadir, namespace, readonly, maxTableSize, tables)
 	}
 	freezer, err := opener()
 	if err != nil {
 		return nil, err
 	}
 	return &ResettableFreezer{
-		freezer: freezer,
-		opener:  opener,
-		datadir: datadir,
+		readOnly: readonly,
+		freezer:  freezer,
+		opener:   opener,
+		datadir:  datadir,
 	}, nil
 }
 
@@ -74,6 +76,9 @@ func (f *ResettableFreezer) Reset() error {
 	f.lock.Lock()
 	defer f.lock.Unlock()
 
+	if f.readOnly {
+		return errReadOnly
+	}
 	if err := f.freezer.Close(); err != nil {
 		return err
 	}
@@ -128,6 +133,15 @@ func (f *ResettableFreezer) AncientRange(kind string, start, count, maxBytes uin
 	defer f.lock.RUnlock()
 
 	return f.freezer.AncientRange(kind, start, count, maxBytes)
+}
+
+// AncientBytes retrieves the value segment of the element specified by the id
+// and value offsets.
+func (f *ResettableFreezer) AncientBytes(kind string, id, offset, length uint64) ([]byte, error) {
+	f.lock.RLock()
+	defer f.lock.RUnlock()
+
+	return f.freezer.AncientBytes(kind, id, offset, length)
 }
 
 // Ancients returns the length of the frozen items.
@@ -199,12 +213,12 @@ func (f *ResettableFreezer) Sync() error {
 
 // MigrateTable processes the entries in a given table in sequence
 // converting them to a new format if they're of an old format.
-func (f *ResettableFreezer) MigrateTable(kind string, convert convertLegacyFn) error {
-	f.lock.RLock()
-	defer f.lock.RUnlock()
+// func (f *ResettableFreezer) MigrateTable(kind string, convert convertLegacyFn) error {
+// 	f.lock.RLock()
+// 	defer f.lock.RUnlock()
 
-	return f.freezer.MigrateTable(kind, convert)
-}
+// 	return f.freezer.MigrateTable(kind, convert)
+// }
 
 // cleanup removes the directory located in the specified path
 // has the name with deletion marker suffix.

@@ -17,10 +17,42 @@
 package rawdb
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 )
+
+// syncDir ensures that the directory metadata (e.g. newly renamed files)
+// is flushed to durable storage.
+func syncDir(name string) error {
+	f, err := os.Open(name)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	// Some file systems do not support fsyncing directories (e.g. some FUSE
+	// mounts). Ignore EINVAL in those cases.
+	if err := f.Sync(); err != nil {
+		if errors.Is(err, os.ErrInvalid) {
+			return nil
+		}
+		if patherr, ok := err.(*os.PathError); ok && patherr.Err == syscall.EINVAL {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func atomicRename(src, dest string) error {
+	if err := os.Rename(src, dest); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(src))
+}
 
 // copyFrom copies data from 'srcPath' at offset 'offset' into 'destPath'.
 // The 'destPath' is created if it doesn't exist, otherwise it is overwritten.
@@ -69,11 +101,50 @@ func copyFrom(srcPath, destPath string, offset uint64, before func(f *os.File) e
 	// we do the final move.
 	src.Close()
 
+	// Permanently persist the content into disk
+	if err := f.Sync(); err != nil {
+		return err
+	}
+
 	if err := f.Close(); err != nil {
 		return err
 	}
 	f = nil
-	return os.Rename(fname, destPath)
+	return atomicRename(fname, destPath)
+}
+
+// reset atomically replaces the file at the given path with the provided content.
+func reset(path string, content []byte) error {
+	// Create a temp file in the same dir where we want it to wind up
+	f, err := os.CreateTemp(filepath.Dir(path), "*")
+	if err != nil {
+		return err
+	}
+	fname := f.Name()
+
+	// Clean up the leftover file
+	defer func() {
+		if f != nil {
+			f.Close()
+		}
+		os.Remove(fname)
+	}()
+
+	// Write the content into the temp file
+	_, err = f.Write(content)
+	if err != nil {
+		return err
+	}
+	// Permanently persist the content into disk
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	f = nil
+
+	return atomicRename(fname, path)
 }
 
 // openFreezerFileForAppend opens a freezer table file and seeks to the end

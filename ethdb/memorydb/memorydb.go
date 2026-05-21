@@ -100,6 +100,11 @@ func (db *Database) AncientRange(kind string, start, count, maxBytes uint64) ([]
 	panic("implement me")
 }
 
+func (db *Database) AncientBytes(kind string, id, offset, length uint64) ([]byte, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (db *Database) Ancients() (uint64, error) {
 	//TODO implement me
 	panic("implement me")

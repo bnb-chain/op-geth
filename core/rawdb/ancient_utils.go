@@ -18,13 +18,10 @@ package rawdb
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/log"
 )
 
 type tableSize struct {
@@ -37,12 +34,8 @@ type freezerInfo struct {
 	name  string      // The identifier of freezer
 	head  uint64      // The number of last stored item in the freezer
 	tail  uint64      // The number of first stored item in the freezer
+	count uint64      // The number of stored items in the freezer
 	sizes []tableSize // The storage size per table
-}
-
-// count returns the number of stored items in the freezer.
-func (info *freezerInfo) count() uint64 {
-	return info.head - info.tail + 1
 }
 
 // size returns the storage size of the entire freezer.
@@ -54,7 +47,7 @@ func (info *freezerInfo) size() common.StorageSize {
 	return total
 }
 
-func inspect(name string, order map[string]bool, reader ethdb.AncientReader) (freezerInfo, error) {
+func inspect(name string, order map[string]freezerTableConfig, reader ethdb.AncientReader) (freezerInfo, error) {
 	info := freezerInfo{name: name}
 	for t := range order {
 		size, err := reader.AncientSize(t)
@@ -68,7 +61,11 @@ func inspect(name string, order map[string]bool, reader ethdb.AncientReader) (fr
 	if err != nil {
 		return freezerInfo{}, err
 	}
-	info.head = ancients - 1
+	if ancients > 0 {
+		info.head = ancients - 1
+	} else {
+		info.head = 0
+	}
 
 	// Retrieve the number of first stored item
 	tail, err := reader.Tail()
@@ -76,6 +73,12 @@ func inspect(name string, order map[string]bool, reader ethdb.AncientReader) (fr
 		return freezerInfo{}, err
 	}
 	info.tail = tail
+
+	if ancients == 0 {
+		info.count = 0
+	} else {
+		info.count = info.head - info.tail + 1
+	}
 	return info, nil
 }
 
@@ -85,48 +88,41 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 	for _, freezer := range freezers {
 		switch freezer {
 		case ChainFreezerName:
-			info, err := inspect(ChainFreezerName, chainFreezerNoSnappy, db.BlockStore())
+			info, err := inspect(ChainFreezerName, chainFreezerTableConfigs, db.BlockStore())
 			if err != nil {
 				return nil, err
 			}
 			infos = append(infos, info)
 
-		case StateFreezerName:
-			if ReadStateScheme(db) != PathScheme {
-				continue
-			}
-			datadir, err := db.StateStore().AncientDatadir()
-			if err != nil {
-				return nil, err
-			}
-			f, err := NewStateFreezer(datadir, true, DetectTrieNodesFile(datadir))
-			if err != nil {
-				return nil, err
-			}
-			defer f.Close()
-
-			info, err := inspect(StateFreezerName, stateFreezerNoSnappy, f)
-			if err != nil {
-				return nil, err
-			}
-			infos = append(infos, info)
-
-		case ProofFreezerName:
-			if ReadStateScheme(db) != PathScheme {
-				continue
-			}
+		case MerkleStateFreezerName:
 			datadir, err := db.AncientDatadir()
 			if err != nil {
 				return nil, err
 			}
-			f, err := NewProofFreezer(datadir, true)
+			f, err := NewStateFreezer(datadir, true)
 			if err != nil {
-				log.Warn("If proof keeper is not enabled, there will be no ProofFreezer.")
-				return nil, nil
+				continue // might be possible the state freezer is not existent
 			}
 			defer f.Close()
 
-			info, err := inspect(ProofFreezerName, proofFreezerNoSnappy, f)
+			info, err := inspect(freezer, stateFreezerTableConfigs, f)
+			if err != nil {
+				return nil, err
+			}
+			infos = append(infos, info)
+
+		case MerkleTrienodeFreezerName:
+			datadir, err := db.AncientDatadir()
+			if err != nil {
+				return nil, err
+			}
+			f, err := NewTrienodeFreezer(datadir, true)
+			if err != nil {
+				continue // might be possible the trienode freezer is not existent
+			}
+			defer f.Close()
+
+			info, err := inspect(freezer, trienodeFreezerTableConfigs, f)
 			if err != nil {
 				return nil, err
 			}
@@ -143,25 +139,18 @@ func inspectFreezers(db ethdb.Database) ([]freezerInfo, error) {
 // ancient indicates the path of root ancient directory where the chain freezer can
 // be opened. Start and end specify the range for dumping out indexes.
 // Note this function can only be used for debugging purposes.
-func InspectFreezerTable(ancient string, freezerName string, tableName string, start, end int64, multiDatabase bool) error {
+func InspectFreezerTable(ancient string, freezerName string, tableName string, start, end int64) error {
 	var (
 		path   string
-		tables map[string]bool
+		tables map[string]freezerTableConfig
 	)
 	switch freezerName {
 	case ChainFreezerName:
-		if multiDatabase {
-			path, tables = resolveChainFreezerDir(filepath.Dir(ancient)+"/block/ancient"), chainFreezerNoSnappy
-		} else {
-			path, tables = resolveChainFreezerDir(ancient), chainFreezerNoSnappy
-		}
-
-	case StateFreezerName:
-		if multiDatabase {
-			path, tables = filepath.Join(filepath.Dir(ancient)+"/state/ancient", freezerName), stateFreezerNoSnappy
-		} else {
-			path, tables = filepath.Join(ancient, freezerName), stateFreezerNoSnappy
-		}
+		path, tables = resolveChainFreezerDir(ancient), chainFreezerTableConfigs
+	case MerkleStateFreezerName:
+		path, tables = filepath.Join(ancient, freezerName), stateFreezerTableConfigs
+	case MerkleTrienodeFreezerName:
+		path, tables = filepath.Join(ancient, freezerName), trienodeFreezerTableConfigs
 	default:
 		return fmt.Errorf("unknown freezer, supported ones: %v", freezers)
 	}
@@ -177,46 +166,7 @@ func InspectFreezerTable(ancient string, freezerName string, tableName string, s
 	if err != nil {
 		return err
 	}
+	defer table.Close()
 	table.dumpIndexStdout(start, end)
-	return nil
-}
-
-// DetectTrieNodesFile detects whether trie nodes data exists
-func DetectTrieNodesFile(ancientDir string) bool {
-	trieNodesFilePath := filepath.Join(ancientDir, StateFreezerName, fmt.Sprintf("%s.%s",
-		stateHistoryTrieNodesData, "cidx"))
-	return common.FileExist(trieNodesFilePath)
-}
-
-// DeleteTrieNodesFile deletes all trie nodes data in state directory
-func DeleteTrieNodesFile(ancientDir string) error {
-	statePath := filepath.Join(ancientDir, StateFreezerName)
-	dir, err := os.Open(statePath)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-
-	names, err := dir.Readdirnames(0)
-	if err != nil {
-		return err
-	}
-
-	for _, name := range names {
-		filePath := filepath.Join(statePath, name)
-		fileInfo, err := os.Stat(filePath)
-		if err != nil {
-			return err
-		}
-
-		if !fileInfo.IsDir() && strings.Contains(filepath.Base(filePath), stateHistoryTrieNodesData) {
-			err = os.Remove(filePath)
-			if err != nil {
-				return err
-			}
-			log.Info(fmt.Sprintf("Delete %s file", filePath))
-		}
-	}
-
 	return nil
 }

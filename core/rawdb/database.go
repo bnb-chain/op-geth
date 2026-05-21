@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -175,6 +174,12 @@ func (db *nofreezedb) AncientRange(kind string, start, max, maxByteSize uint64) 
 	return nil, errNotSupported
 }
 
+// AncientBytes retrieves the value segment of the element specified by the id
+// and value offsets.
+func (db *nofreezedb) AncientBytes(kind string, id, offset, length uint64) ([]byte, error) {
+	return nil, errNotSupported
+}
+
 // Ancients returns an error as we don't have a backing chain freezer.
 func (db *nofreezedb) Ancients() (uint64, error) {
 	return 0, errNotSupported
@@ -301,9 +306,9 @@ func resolveChainFreezerDir(ancient string) string {
 	// sub folder, if not then two possibilities:
 	// - chain freezer is not initialized
 	// - chain freezer exists in legacy location (root ancient folder)
-	freezer := path.Join(ancient, ChainFreezerName)
+	freezer := filepath.Join(ancient, ChainFreezerName)
 	if !common.FileExist(freezer) {
-		if !common.FileExist(ancient) {
+		if !common.FileExist(ancient) || !common.IsNonEmptyDir(ancient) {
 			// The entire ancient store is not initialized, still use the sub
 			// folder for initialization.
 		} else {
@@ -321,9 +326,9 @@ func resolveChainFreezerDir(ancient string) string {
 // value data store with a freezer moving immutable chain segments into cold
 // storage. The passed ancient indicates the path of root ancient directory
 // where the chain freezer can be opened.
-func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace string, readonly bool, multiDatabase bool) (ethdb.Database, error) {
+func NewDatabaseWithFreezer(db ethdb.KeyValueStore, ancient string, namespace string, readonly bool) (ethdb.Database, error) {
 	// Create the idle freezer instance
-	frdb, err := newChainFreezer(resolveChainFreezerDir(ancient), namespace, readonly, multiDatabase)
+	frdb, err := newChainFreezer(resolveChainFreezerDir(ancient), namespace, readonly)
 	// We are creating the freezerdb here because the validation logic for db and freezer below requires certain interfaces
 	// that need a database type. Therefore, we are pre-creating it for subsequent use.
 	freezerDb := &freezerdb{
@@ -542,7 +547,7 @@ func Open(o OpenOptions) (ethdb.Database, error) {
 	if len(o.AncientsDirectory) == 0 {
 		return kvdb, nil
 	}
-	frdb, err := NewDatabaseWithFreezer(kvdb, o.AncientsDirectory, o.Namespace, o.ReadOnly, o.MultiDataBase)
+	frdb, err := NewDatabaseWithFreezer(kvdb, o.AncientsDirectory, o.Namespace, o.ReadOnly)
 	if err != nil {
 		kvdb.Close()
 		return nil, err
@@ -907,7 +912,7 @@ func InspectDatabase(db ethdb.Database, keyPrefix, keyStart []byte) error {
 				fmt.Sprintf("Ancient store (%s)", strings.Title(ancient.name)),
 				strings.Title(table.name),
 				table.size.String(),
-				fmt.Sprintf("%d", ancient.count()),
+				fmt.Sprintf("%d", ancient.count),
 			})
 		}
 		total += ancient.size()

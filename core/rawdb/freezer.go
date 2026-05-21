@@ -24,13 +24,12 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
-	"time"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/gofrs/flock"
+
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
-	"github.com/gofrs/flock"
 )
 
 var (
@@ -62,8 +61,9 @@ const freezerTableSize = 2 * 1000 * 1000 * 1000
 //     reserving it for go-ethereum. This would also reduce the memory requirements
 //     of Geth, and thus also GC overhead.
 type Freezer struct {
-	frozen atomic.Uint64 // Number of blocks already frozen
-	tail   atomic.Uint64 // Number of the first stored item in the freezer
+	datadir string
+	head    atomic.Uint64 // Number of blocks already frozen
+	tail    atomic.Uint64 // Number of the first stored item in the freezer
 
 	// This lock synchronizes writers and the truncate operation, as well as
 	// the "atomic" (batched) read operations.
@@ -79,7 +79,7 @@ type Freezer struct {
 // NewChainFreezer is a small utility method around NewFreezer that sets the
 // default parameters for the chain storage.
 func NewChainFreezer(datadir string, namespace string, readonly bool) (*Freezer, error) {
-	return NewFreezer(datadir, namespace, readonly, false, freezerTableSize, chainFreezerNoSnappy)
+	return NewFreezer(datadir, namespace, readonly, freezerTableSize, chainFreezerTableConfigs)
 }
 
 // NewFreezer creates a freezer instance for maintaining immutable ordered
@@ -87,7 +87,7 @@ func NewChainFreezer(datadir string, namespace string, readonly bool) (*Freezer,
 //
 // The 'tables' argument defines the data tables. If the value of a map
 // entry is true, snappy compression is disabled for the table.
-func NewFreezer(datadir string, namespace string, readonly, writeTrieNode bool, maxTableSize uint32, tables map[string]bool) (*Freezer, error) {
+func NewFreezer(datadir string, namespace string, readonly bool, maxTableSize uint32, tables map[string]freezerTableConfig) (*Freezer, error) {
 	// Create the initial freezer object
 	var (
 		readMeter  = metrics.NewRegisteredMeter(namespace+"ancient/read", nil)
@@ -96,6 +96,11 @@ func NewFreezer(datadir string, namespace string, readonly, writeTrieNode bool, 
 	)
 	// Ensure the datadir is not a symbolic link if it exists.
 	if info, err := os.Lstat(datadir); !os.IsNotExist(err) {
+		if info == nil {
+			log.Warn("Could not Lstat the database", "path", datadir)
+			return nil, errors.New("lstat failed")
+		}
+
 		if info.Mode()&os.ModeSymlink != 0 {
 			log.Warn("Symbolic link ancient database is not supported", "path", datadir)
 			return nil, errSymlinkDatadir
@@ -119,18 +124,15 @@ func NewFreezer(datadir string, namespace string, readonly, writeTrieNode bool, 
 	}
 	// Open all the supported data tables
 	freezer := &Freezer{
+		datadir:      datadir,
 		readonly:     readonly,
 		tables:       make(map[string]*freezerTable),
 		instanceLock: lock,
 	}
 
 	// Create the tables.
-	for name, disableSnappy := range tables {
-		if name == stateHistoryTrieNodesData && !writeTrieNode {
-			log.Info("Not create trie node data")
-			continue
-		}
-		table, err := newTable(datadir, name, readMeter, writeMeter, sizeGauge, maxTableSize, disableSnappy, readonly)
+	for name, config := range tables {
+		table, err := newTable(datadir, name, readMeter, writeMeter, sizeGauge, maxTableSize, config, readonly)
 		if err != nil {
 			for _, table := range freezer.tables {
 				table.Close()
@@ -173,17 +175,21 @@ func (f *Freezer) Close() error {
 	f.closeOnce.Do(func() {
 		for _, table := range f.tables {
 			if err := table.Close(); err != nil {
+				log.Error("Failed to close freezer table", "table", table.name, "err", err)
 				errs = append(errs, err)
 			}
 		}
 		if err := f.instanceLock.Unlock(); err != nil {
+			log.Error("Failed to unlock instance lock", "err", err)
 			errs = append(errs, err)
 		}
 	})
-	if errs != nil {
-		return fmt.Errorf("%v", errs)
-	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// AncientDatadir returns the path of the ancient store.
+func (f *Freezer) AncientDatadir() (string, error) {
+	return f.datadir, nil
 }
 
 // HasAncient returns an indicator whether the specified ancient data exists
@@ -216,9 +222,18 @@ func (f *Freezer) AncientRange(kind string, start, count, maxBytes uint64) ([][]
 	return nil, errUnknownTable
 }
 
+// AncientBytes retrieves the value segment of the element specified by the id
+// and value offsets.
+func (f *Freezer) AncientBytes(kind string, id, offset, length uint64) ([]byte, error) {
+	if table := f.tables[kind]; table != nil {
+		return table.RetrieveBytes(id, offset, length)
+	}
+	return nil, errUnknownTable
+}
+
 // Ancients returns the length of the frozen items.
 func (f *Freezer) Ancients() (uint64, error) {
-	return f.frozen.Load(), nil
+	return f.head.Load(), nil
 }
 
 // Tail returns the number of first stored item in the freezer.
@@ -257,7 +272,7 @@ func (f *Freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize
 	defer f.writeLock.Unlock()
 
 	// Roll back all tables to the starting position in case of error.
-	prevItem := f.frozen.Load()
+	prevItem := f.head.Load()
 	defer func() {
 		if err != nil {
 			// The write operation has failed. Go back to the previous item position.
@@ -278,7 +293,7 @@ func (f *Freezer) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (writeSize
 	if err != nil {
 		return 0, err
 	}
-	f.frozen.Store(item)
+	f.head.Store(item)
 	return writeSize, nil
 }
 
@@ -291,7 +306,7 @@ func (f *Freezer) TruncateHead(items uint64) (uint64, error) {
 	f.writeLock.Lock()
 	defer f.writeLock.Unlock()
 
-	oitems := f.frozen.Load()
+	oitems := f.head.Load()
 	if oitems <= items {
 		return oitems, nil
 	}
@@ -300,7 +315,7 @@ func (f *Freezer) TruncateHead(items uint64) (uint64, error) {
 			return 0, err
 		}
 	}
-	f.frozen.Store(items)
+	f.head.Store(items)
 	return oitems, nil
 }
 
@@ -317,11 +332,18 @@ func (f *Freezer) TruncateTail(tail uint64) (uint64, error) {
 		return old, nil
 	}
 	for _, table := range f.tables {
-		if err := table.truncateTail(tail); err != nil {
-			return 0, err
+		if table.config.prunable {
+			if err := table.truncateTail(tail); err != nil {
+				return 0, err
+			}
 		}
 	}
 	f.tail.Store(tail)
+
+	// Update the head if the requested tail exceeds the current head
+	if f.head.Load() < tail {
+		f.head.Store(tail)
+	}
 	return old, nil
 }
 
@@ -346,57 +368,78 @@ func (f *Freezer) validate() error {
 		return nil
 	}
 	var (
-		head uint64
-		tail uint64
-		name string
+		head       uint64
+		prunedTail *uint64
 	)
-	// Hack to get boundary of any table
-	for kind, table := range f.tables {
+	// get any head value
+	for _, table := range f.tables {
 		head = table.items.Load()
-		tail = table.itemHidden.Load()
-		name = kind
 		break
 	}
-	// Now check every table against those boundaries.
 	for kind, table := range f.tables {
+		// all tables have to have the same head
 		if head != table.items.Load() {
-			return fmt.Errorf("freezer tables %s and %s have differing head: %d != %d", kind, name, table.items.Load(), head)
+			return fmt.Errorf("freezer table %s has a differing head: %d != %d", kind, table.items.Load(), head)
 		}
-		if tail != table.itemHidden.Load() {
-			return fmt.Errorf("freezer tables %s and %s have differing tail: %d != %d", kind, name, table.itemHidden.Load(), tail)
+		if !table.config.prunable {
+			// non-prunable tables have to start at 0
+			if table.itemHidden.Load() != 0 {
+				return fmt.Errorf("non-prunable freezer table '%s' has a non-zero tail: %d", kind, table.itemHidden.Load())
+			}
+		} else {
+			// prunable tables have to have the same length
+			if prunedTail == nil {
+				tmp := table.itemHidden.Load()
+				prunedTail = &tmp
+			}
+			if *prunedTail != table.itemHidden.Load() {
+				return fmt.Errorf("freezer table %s has differing tail: %d != %d", kind, table.itemHidden.Load(), *prunedTail)
+			}
 		}
 	}
-	f.frozen.Store(head)
-	f.tail.Store(tail)
+
+	if prunedTail == nil {
+		tmp := uint64(0)
+		prunedTail = &tmp
+	}
+
+	f.head.Store(head)
+	f.tail.Store(*prunedTail)
 	return nil
 }
 
 // repair truncates all data tables to the same length.
 func (f *Freezer) repair() error {
 	var (
-		head = uint64(math.MaxUint64)
-		tail = uint64(0)
+		head       = uint64(math.MaxUint64)
+		prunedTail = uint64(0)
 	)
+	// get the minimal head and the maximum tail
 	for _, table := range f.tables {
-		items := table.items.Load()
-		if head > items {
-			head = items
-		}
-		hidden := table.itemHidden.Load()
-		if hidden > tail {
-			tail = hidden
-		}
+		head = min(head, table.items.Load())
+		prunedTail = max(prunedTail, table.itemHidden.Load())
 	}
-	for _, table := range f.tables {
+	// apply the pruning
+	for kind, table := range f.tables {
+		// all tables need to have the same head
 		if err := table.truncateHead(head); err != nil {
 			return err
 		}
-		if err := table.truncateTail(tail); err != nil {
-			return err
+		if !table.config.prunable {
+			// non-prunable tables have to start at 0
+			if table.itemHidden.Load() != 0 {
+				panic(fmt.Sprintf("non-prunable freezer table %s has non-zero tail: %v", kind, table.itemHidden.Load()))
+			}
+		} else {
+			// prunable tables have to have the same length
+			if err := table.truncateTail(prunedTail); err != nil {
+				return err
+			}
 		}
 	}
-	f.frozen.Store(head)
-	f.tail.Store(tail)
+
+	f.head.Store(head)
+	f.tail.Store(prunedTail)
 	return nil
 }
 
@@ -406,108 +449,108 @@ type convertLegacyFn = func([]byte) ([]byte, error)
 
 // MigrateTable processes the entries in a given table in sequence
 // converting them to a new format if they're of an old format.
-func (f *Freezer) MigrateTable(kind string, convert convertLegacyFn) error {
-	if f.readonly {
-		return errReadOnly
-	}
-	f.writeLock.Lock()
-	defer f.writeLock.Unlock()
+// func (f *Freezer) MigrateTable(kind string, convert convertLegacyFn) error {
+// 	if f.readonly {
+// 		return errReadOnly
+// 	}
+// 	f.writeLock.Lock()
+// 	defer f.writeLock.Unlock()
 
-	table, ok := f.tables[kind]
-	if !ok {
-		return errUnknownTable
-	}
-	// forEach iterates every entry in the table serially and in order, calling `fn`
-	// with the item as argument. If `fn` returns an error the iteration stops
-	// and that error will be returned.
-	forEach := func(t *freezerTable, offset uint64, fn func(uint64, []byte) error) error {
-		var (
-			items     = t.items.Load()
-			batchSize = uint64(1024)
-			maxBytes  = uint64(1024 * 1024)
-		)
-		for i := offset; i < items; {
-			if i+batchSize > items {
-				batchSize = items - i
-			}
-			data, err := t.RetrieveItems(i, batchSize, maxBytes)
-			if err != nil {
-				return err
-			}
-			for j, item := range data {
-				if err := fn(i+uint64(j), item); err != nil {
-					return err
-				}
-			}
-			i += uint64(len(data))
-		}
-		return nil
-	}
-	// TODO(s1na): This is a sanity-check since as of now no process does tail-deletion. But the migration
-	// process assumes no deletion at tail and needs to be modified to account for that.
-	if table.itemOffset.Load() > 0 || table.itemHidden.Load() > 0 {
-		return errors.New("migration not supported for tail-deleted freezers")
-	}
-	ancientsPath := filepath.Dir(table.index.Name())
-	// Set up new dir for the migrated table, the content of which
-	// we'll at the end move over to the ancients dir.
-	migrationPath := filepath.Join(ancientsPath, "migration")
-	newTable, err := newFreezerTable(migrationPath, kind, table.noCompression, false)
-	if err != nil {
-		return err
-	}
-	var (
-		batch  = newTable.newBatch()
-		out    []byte
-		start  = time.Now()
-		logged = time.Now()
-		offset = newTable.items.Load()
-	)
-	if offset > 0 {
-		log.Info("found previous migration attempt", "migrated", offset)
-	}
-	// Iterate through entries and transform them
-	if err := forEach(table, offset, func(i uint64, blob []byte) error {
-		if i%10000 == 0 && time.Since(logged) > 16*time.Second {
-			log.Info("Processing legacy elements", "count", i, "elapsed", common.PrettyDuration(time.Since(start)))
-			logged = time.Now()
-		}
-		out, err = convert(blob)
-		if err != nil {
-			return err
-		}
-		if err := batch.AppendRaw(i, out); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	if err := batch.commit(); err != nil {
-		return err
-	}
-	log.Info("Replacing old table files with migrated ones", "elapsed", common.PrettyDuration(time.Since(start)))
-	// Release and delete old table files. Note this won't
-	// delete the index file.
-	table.releaseFilesAfter(0, true)
+// 	table, ok := f.tables[kind]
+// 	if !ok {
+// 		return errUnknownTable
+// 	}
+// 	// forEach iterates every entry in the table serially and in order, calling `fn`
+// 	// with the item as argument. If `fn` returns an error the iteration stops
+// 	// and that error will be returned.
+// 	forEach := func(t *freezerTable, offset uint64, fn func(uint64, []byte) error) error {
+// 		var (
+// 			items     = t.items.Load()
+// 			batchSize = uint64(1024)
+// 			maxBytes  = uint64(1024 * 1024)
+// 		)
+// 		for i := offset; i < items; {
+// 			if i+batchSize > items {
+// 				batchSize = items - i
+// 			}
+// 			data, err := t.RetrieveItems(i, batchSize, maxBytes)
+// 			if err != nil {
+// 				return err
+// 			}
+// 			for j, item := range data {
+// 				if err := fn(i+uint64(j), item); err != nil {
+// 					return err
+// 				}
+// 			}
+// 			i += uint64(len(data))
+// 		}
+// 		return nil
+// 	}
+// 	// TODO(s1na): This is a sanity-check since as of now no process does tail-deletion. But the migration
+// 	// process assumes no deletion at tail and needs to be modified to account for that.
+// 	if table.itemOffset.Load() > 0 || table.itemHidden.Load() > 0 {
+// 		return errors.New("migration not supported for tail-deleted freezers")
+// 	}
+// 	ancientsPath := filepath.Dir(table.index.Name())
+// 	// Set up new dir for the migrated table, the content of which
+// 	// we'll at the end move over to the ancients dir.
+// 	migrationPath := filepath.Join(ancientsPath, "migration")
+// 	newTable, err := newFreezerTable(migrationPath, kind, table.noCompression, false)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	var (
+// 		batch  = newTable.newBatch()
+// 		out    []byte
+// 		start  = time.Now()
+// 		logged = time.Now()
+// 		offset = newTable.items.Load()
+// 	)
+// 	if offset > 0 {
+// 		log.Info("found previous migration attempt", "migrated", offset)
+// 	}
+// 	// Iterate through entries and transform them
+// 	if err := forEach(table, offset, func(i uint64, blob []byte) error {
+// 		if i%10000 == 0 && time.Since(logged) > 16*time.Second {
+// 			log.Info("Processing legacy elements", "count", i, "elapsed", common.PrettyDuration(time.Since(start)))
+// 			logged = time.Now()
+// 		}
+// 		out, err = convert(blob)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		if err := batch.AppendRaw(i, out); err != nil {
+// 			return err
+// 		}
+// 		return nil
+// 	}); err != nil {
+// 		return err
+// 	}
+// 	if err := batch.commit(); err != nil {
+// 		return err
+// 	}
+// 	log.Info("Replacing old table files with migrated ones", "elapsed", common.PrettyDuration(time.Since(start)))
+// 	// Release and delete old table files. Note this won't
+// 	// delete the index file.
+// 	table.releaseFilesAfter(0, true)
 
-	if err := newTable.Close(); err != nil {
-		return err
-	}
-	files, err := os.ReadDir(migrationPath)
-	if err != nil {
-		return err
-	}
-	// Move migrated files to ancients dir.
-	for _, f := range files {
-		// This will replace the old index file as a side-effect.
-		if err := os.Rename(filepath.Join(migrationPath, f.Name()), filepath.Join(ancientsPath, f.Name())); err != nil {
-			return err
-		}
-	}
-	// Delete by now empty dir.
-	if err := os.Remove(migrationPath); err != nil {
-		return err
-	}
-	return nil
-}
+// 	if err := newTable.Close(); err != nil {
+// 		return err
+// 	}
+// 	files, err := os.ReadDir(migrationPath)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	// Move migrated files to ancients dir.
+// 	for _, f := range files {
+// 		// This will replace the old index file as a side-effect.
+// 		if err := os.Rename(filepath.Join(migrationPath, f.Name()), filepath.Join(ancientsPath, f.Name())); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	// Delete by now empty dir.
+// 	if err := os.Remove(migrationPath); err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }

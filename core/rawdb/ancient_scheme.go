@@ -16,7 +16,13 @@
 
 package rawdb
 
-import "path/filepath"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/ethereum/go-ethereum/log"
+)
 
 // The list of table names of chain freezer.
 const (
@@ -36,14 +42,22 @@ const (
 	ChainFreezerDifficultyTable = "diffs"
 )
 
-// chainFreezerNoSnappy configures whether compression is disabled for the ancient-tables.
-// Hashes and difficulties don't compress well.
-var chainFreezerNoSnappy = map[string]bool{
-	ChainFreezerHeaderTable:     false,
-	ChainFreezerHashTable:       true,
-	ChainFreezerBodiesTable:     false,
-	ChainFreezerReceiptTable:    false,
-	ChainFreezerDifficultyTable: true,
+// chainFreezerTableConfigs configures the settings for tables in the chain freezer.
+// Compression is disabled for hashes as they don't compress well. Additionally,
+// tail truncation is disabled for the header and hash tables, as these are intended
+// to be retained long-term.
+var chainFreezerTableConfigs = map[string]freezerTableConfig{
+	ChainFreezerHeaderTable:     {noSnappy: false, prunable: true},
+	ChainFreezerHashTable:       {noSnappy: true, prunable: true},
+	ChainFreezerBodiesTable:     {noSnappy: false, prunable: true},
+	ChainFreezerReceiptTable:    {noSnappy: false, prunable: true},
+	ChainFreezerDifficultyTable: {noSnappy: true, prunable: true},
+}
+
+// freezerTableConfig contains the settings for a freezer table.
+type freezerTableConfig struct {
+	noSnappy bool // disables item compression
+	prunable bool // true for tables that can be pruned by TruncateTail
 }
 
 const (
@@ -51,47 +65,122 @@ const (
 	stateHistoryTableSize = 2 * 1000 * 1000 * 1000
 
 	// stateHistoryAccountIndex indicates the name of the freezer state history table.
-	stateHistoryMeta          = "history.meta"
-	stateHistoryAccountIndex  = "account.index"
-	stateHistoryStorageIndex  = "storage.index"
-	stateHistoryAccountData   = "account.data"
-	stateHistoryStorageData   = "storage.data"
+	stateHistoryMeta         = "history.meta"
+	stateHistoryAccountIndex = "account.index"
+	stateHistoryStorageIndex = "storage.index"
+	stateHistoryAccountData  = "account.data"
+	stateHistoryStorageData  = "storage.data"
+
+	// Used to fast recovery, shouble be deleted after supporting pbsss archive mode.
 	stateHistoryTrieNodesData = "trienodes.data"
 )
 
-var stateFreezerNoSnappy = map[string]bool{
-	stateHistoryMeta:          true,
-	stateHistoryAccountIndex:  false,
-	stateHistoryStorageIndex:  false,
-	stateHistoryAccountData:   false,
-	stateHistoryStorageData:   false,
-	stateHistoryTrieNodesData: false,
+// stateFreezerTableConfigs configures the settings for tables in the state freezer.
+var stateFreezerTableConfigs = map[string]freezerTableConfig{
+	stateHistoryMeta:         {noSnappy: true, prunable: true},
+	stateHistoryAccountIndex: {noSnappy: false, prunable: true},
+	stateHistoryStorageIndex: {noSnappy: false, prunable: true},
+	stateHistoryAccountData:  {noSnappy: false, prunable: true},
+	stateHistoryStorageData:  {noSnappy: false, prunable: true},
 }
 
 const (
-	proposeProofTable = "propose.proof"
+	trienodeHistoryHeaderTable       = "trienode.header"
+	trienodeHistoryKeySectionTable   = "trienode.key"
+	trienodeHistoryValueSectionTable = "trienode.value"
 )
 
-var proofFreezerNoSnappy = map[string]bool{
-	proposeProofTable: true,
+// trienodeFreezerTableConfigs configures the settings for tables in the trienode freezer.
+var trienodeFreezerTableConfigs = map[string]freezerTableConfig{
+	trienodeHistoryHeaderTable: {noSnappy: false, prunable: true},
+
+	// Disable snappy compression to allow efficient partial read.
+	trienodeHistoryKeySectionTable: {noSnappy: true, prunable: true},
+
+	// Disable snappy compression to allow efficient partial read.
+	trienodeHistoryValueSectionTable: {noSnappy: true, prunable: true},
 }
 
 // The list of identifiers of ancient stores.
 var (
-	ChainFreezerName = "chain" // the folder name of chain segment ancient store.
-	StateFreezerName = "state" // the folder name of reverse diff ancient store.
+	ChainFreezerName          = "chain"    // the folder name of chain segment ancient store.
+	MerkleStateFreezerName    = "state"    // the folder name of reverse diff ancient store.
+	MerkleTrienodeFreezerName = "trienode" // the folder name of trienode history ancient store.
+
+	// Used to get withdraw proof, shouble be deleted after supporting pbsss archive mode.
 	ProofFreezerName = "proof" // the folder name of propose withdraw proof store.
 )
 
 // freezers the collections of all builtin freezers.
-var freezers = []string{ChainFreezerName, StateFreezerName, ProofFreezerName}
+var freezers = []string{ChainFreezerName, MerkleStateFreezerName, MerkleTrienodeFreezerName}
 
-// NewStateFreezer initializes the freezer for state history.
-func NewStateFreezer(ancientDir string, readOnly, writeTrieNode bool) (*ResettableFreezer, error) {
-	return NewResettableFreezer(filepath.Join(ancientDir, StateFreezerName), "eth/db/state", readOnly, writeTrieNode, stateHistoryTableSize, stateFreezerNoSnappy)
+// CleanupUnusedAncientStores removes legacy ancient data that is no longer
+// used after PBSS archive mode: the proof freezer directory and trie nodes
+// data files in the state freezer.
+func CleanupUnusedAncientStores(ancientDir string) error {
+	proofPath := filepath.Join(ancientDir, ProofFreezerName)
+	if info, err := os.Stat(proofPath); err == nil && info.IsDir() {
+		if err := os.RemoveAll(proofPath); err != nil {
+			return err
+		}
+		log.Info("Removed unused ancient proof store", "path", proofPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	statePath := filepath.Join(ancientDir, MerkleStateFreezerName)
+	info, err := os.Stat(statePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if !info.IsDir() {
+		return nil
+	}
+	entries, err := os.ReadDir(statePath)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !strings.Contains(entry.Name(), "trienodes") {
+			continue
+		}
+		filePath := filepath.Join(statePath, entry.Name())
+		if err := os.Remove(filePath); err != nil {
+			return err
+		}
+		log.Info("Removed unused trienodes ancient file", "path", filePath)
+	}
+	return nil
 }
 
-// NewProofFreezer initializes the freezer for propose withdraw proof.
-func NewProofFreezer(ancientDir string, readOnly bool) (*ResettableFreezer, error) {
-	return NewResettableFreezer(filepath.Join(ancientDir, ProofFreezerName), "eth/db/proof", readOnly, false, stateHistoryTableSize, proofFreezerNoSnappy)
+// NewStateFreezer initializes the ancient store for state history.
+//
+//   - if the empty directory is given, initializes the pure in-memory
+//     state freezer (e.g. dev mode).
+//   - if non-empty directory is given, initializes the regular file-based
+//     state freezer.
+func NewStateFreezer(ancientDir string, readOnly bool) (*ResettableFreezer, error) {
+	if err := CleanupUnusedAncientStores(ancientDir); err != nil {
+		log.Crit("Failed to cleanup unused ancient stores", "error", err)
+	}
+	return NewResettableFreezer(filepath.Join(ancientDir, MerkleStateFreezerName), "eth/db/state", readOnly, stateHistoryTableSize, stateFreezerTableConfigs)
+}
+
+// NewTrienodeFreezer initializes the ancient store for trienode history.
+//
+//   - if the empty directory is given, initializes the pure in-memory
+//     trienode freezer (e.g. dev mode).
+//   - if non-empty directory is given, initializes the regular file-based
+//     trienode freezer.
+func NewTrienodeFreezer(ancientDir string, readOnly bool) (*ResettableFreezer, error) {
+	if err := CleanupUnusedAncientStores(ancientDir); err != nil {
+		log.Crit("Failed to cleanup unused ancient stores", "error", err)
+	}
+	return NewResettableFreezer(filepath.Join(ancientDir, MerkleTrienodeFreezerName), "eth/db/trienode", readOnly, stateHistoryTableSize, trienodeFreezerTableConfigs)
 }

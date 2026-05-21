@@ -88,6 +88,12 @@ func (t *table) AncientRange(kind string, start, count, maxBytes uint64) ([][]by
 	return t.db.AncientRange(kind, start, count, maxBytes)
 }
 
+// AncientBytes is a noop passthrough that just forwards the request to the underlying
+// database.
+func (t *table) AncientBytes(kind string, id, offset, length uint64) ([]byte, error) {
+	return t.db.AncientBytes(kind, id, offset, length)
+}
+
 // Ancients is a noop passthrough that just forwards the request to the underlying
 // database.
 func (t *table) Ancients() (uint64, error) {
@@ -135,9 +141,9 @@ func (t *table) Sync() error {
 
 // MigrateTable processes the entries in a given table in sequence
 // converting them to a new format if they're of an old format.
-func (t *table) MigrateTable(kind string, convert convertLegacyFn) error {
-	return t.db.MigrateTable(kind, convert)
-}
+// func (t *table) MigrateTable(kind string, convert convertLegacyFn) error {
+// 	return t.db.MigrateTable(kind, convert)
+// }
 
 // AncientDatadir returns the ancient datadir of the underlying database.
 func (t *table) AncientDatadir() (string, error) {

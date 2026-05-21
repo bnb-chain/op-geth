@@ -85,6 +85,10 @@ type AncientReaderOp interface {
 	//   - if maxBytes is not specified, 'count' items will be returned if they are present
 	AncientRange(kind string, start, count, maxBytes uint64) ([][]byte, error)
 
+	// AncientBytes retrieves the value segment of the element specified by the id
+	// and value offsets.
+	AncientBytes(kind string, id, offset, length uint64) ([]byte, error)
+
 	// Ancients returns the ancient item numbers in the ancient store.
 	Ancients() (uint64, error)
 
@@ -129,7 +133,7 @@ type AncientWriter interface {
 	// MigrateTable processes and migrates entries of a given table to a new format.
 	// The second argument is a function that takes a raw entry and returns it
 	// in the newest format.
-	MigrateTable(string, func([]byte) ([]byte, error)) error
+	// MigrateTable(string, func([]byte) ([]byte, error)) error
 }
 
 // AncientWriteOp is given to the function argument of ModifyAncients.
@@ -199,6 +203,14 @@ type AncientStore interface {
 	AncientReader
 	AncientWriter
 	io.Closer
+}
+
+// ResettableAncientStore extends the AncientStore interface by adding a Reset method.
+type ResettableAncientStore interface {
+	AncientStore
+
+	// Reset is designed to reset the entire ancient store to its default state.
+	Reset() error
 }
 
 type StateStore interface {

@@ -415,22 +415,36 @@ func verifyStorageSlot(storageRoot common.Hash, storageKey common.Hash, sp stora
 // fetchWithdrawalHashesFromLogs queries MessagePassed events in [fromBlock, toBlock]
 // and extracts the withdrawalHash from each log entry.
 func fetchWithdrawalHashesFromLogs(ctx context.Context, contractAddr common.Address, fromBlock, toBlock uint64) ([]common.Hash, error) {
-	logs, err := getLogs(ctx, contractAddr, messagePassedTopic,
-		hexutil.EncodeUint64(fromBlock), hexutil.EncodeUint64(toBlock))
+	fromHex := hexutil.EncodeUint64(fromBlock)
+	toHex := hexutil.EncodeUint64(toBlock)
+	fmt.Printf("       getLogs: addr=%s topic=%s from=%s to=%s\n",
+		contractAddr.Hex(), messagePassedTopic.Hex(), fromHex, toHex)
+
+	logs, err := getLogs(ctx, contractAddr, messagePassedTopic, fromHex, toHex)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("       getLogs: returned %d log(s)\n", len(logs))
+
 	hashes := make([]common.Hash, 0, len(logs))
+	skipped := 0
 	for _, lg := range logs {
 		// Non-indexed ABI layout: value(32) | gasLimit(32) | dataOffset(32) | withdrawalHash(32) | ...
 		// withdrawalHash sits at byte offset 96.
 		if len(lg.Data) < 128 {
-			continue // malformed log, skip
+			skipped++
+			fmt.Printf("       getLogs: skipping log with data len=%d (need >=128), tx=%s\n",
+				len(lg.Data), lg.TxHash.Hex())
+			continue
 		}
 		var h common.Hash
 		copy(h[:], lg.Data[96:128])
 		hashes = append(hashes, h)
 	}
+	if skipped > 0 {
+		fmt.Printf("       getLogs: skipped %d malformed log(s)\n", skipped)
+	}
+	fmt.Printf("       getLogs: extracted %d withdrawal hash(es)\n", len(hashes))
 	return hashes, nil
 }
 
@@ -597,9 +611,13 @@ func getLogs(ctx context.Context, addr common.Address, topic common.Hash, fromBl
 		"fromBlock": fromBlock,
 		"toBlock":   toBlock,
 	}
+	if *verbose {
+		filterJSON, _ := json.Marshal(filter)
+		fmt.Printf("       eth_getLogs filter: %s\n", string(filterJSON))
+	}
 	var out []logEntry
 	if err := rpcCall(ctx, "eth_getLogs", []any{filter}, &out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("eth_getLogs [%s, %s]: %w", fromBlock, toBlock, err)
 	}
 	return out, nil
 }

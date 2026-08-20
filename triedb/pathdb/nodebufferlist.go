@@ -146,10 +146,10 @@ func newNodeBufferList(
 			waitStopCh:      make(chan struct{}),
 			forceKeepCh:     make(chan struct{}),
 			waitForceKeepCh: make(chan struct{}),
-			keepFunc:        keepFunc,
 		}
 		nf.useBase.Store(useBase)
 	}
+	nf.keepFunc = keepFunc
 
 	go nf.loop()
 

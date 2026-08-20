@@ -6,9 +6,10 @@ import (
 	"os"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/trie/testutil"
-	"github.com/stretchr/testify/assert"
 )
 
 func randomJournalNodes(n int) []journalNodes {

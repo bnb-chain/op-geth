@@ -19,6 +19,11 @@ package pathdb
 import (
 	"reflect"
 	"testing"
+	"time"
+
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/trie/testutil"
 )
 
 // TestCreateBlockIntervalBoundaryStartPreservesProposerBlock ensures that a
@@ -48,5 +53,59 @@ func TestCreateBlockIntervalNonAlignedStart(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("createBlockInterval(3601, 7200) = %v, want %v", got, want)
+	}
+}
+
+// TestRecoverNodeBufferListDoesNotBlockOnKeepFunc reproduces the startup
+// deadlock: ProofKeeper.GetNotifyKeepRecordFunc sends on an unbuffered channel
+// whose receiver (eventLoop) is only started after NewBlockChain returns, but
+// recoverNodeBufferList runs inside NewBlockChain → triedb.New. Calling
+// keepFunc from the synchronous diffToBase therefore blocks forever.
+func TestRecoverNodeBufferListDoesNotBlockOnKeepFunc(t *testing.T) {
+	const (
+		histories = 5
+		wpBlocks  = 2 // yields rsevMdNum=3, dlInMd=1, so every block is its own layer
+		limit     = 1024 * 1024
+	)
+
+	freezer, err := rawdb.NewStateFreezer(t.TempDir(), false, true)
+	if err != nil {
+		t.Fatalf("Failed to open freezer: %v", err)
+	}
+	defer freezer.Close()
+
+	parent := types.EmptyRootHash
+	for i := uint64(1); i <= histories; i++ {
+		root := testutil.RandomHash()
+		h := newHistory(root, parent, i, randomStateSet(1), randomTrieNodes(1))
+		accountData, storageData, accountIndex, storageIndex, trieNodes := h.encode()
+		rawdb.WriteStateHistoryWithTrieNodes(freezer, i, h.meta.encode(),
+			accountIndex, storageIndex, accountData, storageData, trieNodes)
+		parent = root
+	}
+
+	// Unbuffered send with no receiver: the production keepFunc shape.
+	keepCh := make(chan *KeepRecord)
+	keepFunc := func(record *KeepRecord) { keepCh <- record }
+
+	done := make(chan error, 1)
+	var nbl *nodebufferlist
+	go func() {
+		var recErr error
+		nbl, recErr = newNodeBufferList(rawdb.NewMemoryDatabase(), limit, nil, 0, wpBlocks,
+			keepFunc, freezer, true, false)
+		done <- recErr
+	}()
+
+	select {
+	case recErr := <-done:
+		if recErr != nil {
+			t.Fatalf("Failed to recover node buffer list: %v", recErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("recoverNodeBufferList blocked on keepFunc; ProofKeeper event loop is not running during recovery")
+	}
+	if nbl.keepFunc == nil {
+		t.Fatal("keepFunc was dropped by the recovery path")
 	}
 }

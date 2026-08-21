@@ -429,6 +429,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		}
 	}
 
+	// Records whether this startup rewound the executable head to recover a
+	// missing head state. Only then may the canonical blocks above it be
+	// re-executed; a snap syncing node is legitimately ahead.
+	var stateRepaired bool
+
 	if !bc.NoTries() && !bc.HasState(head.Root) {
 		if head.Number.Uint64() == 0 {
 			// The genesis state is missing, which is only possible in the path-based
@@ -458,6 +463,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 				if err != nil {
 					return nil, err
 				}
+				stateRepaired = true
 				// Chain rewound, persist old snapshot number to indicate recovery procedure
 				if snapDisk != 0 {
 					rawdb.WriteSnapshotRecoveryNumber(bc.db, snapDisk)
@@ -467,6 +473,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 				if _, err := bc.setHeadBeyondRoot(head.Number.Uint64(), 0, common.Hash{}, true); err != nil {
 					return nil, err
 				}
+				stateRepaired = true
 			}
 		}
 	}
@@ -558,6 +565,14 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 			bc.SetHead(compat.RewindToBlock)
 		}
 		rawdb.WriteChainConfig(db, genesisHash, chainConfig)
+	}
+	// Path-based state repair can rewind the executable head after the header
+	// chain and the safe and finalized markers were loaded. Realign them once
+	// every startup rewind is complete, and after the snapshot is loaded since
+	// re-execution needs it, so consumers never observe a head marker ahead of
+	// the executable head.
+	if bc.triedb.Scheme() == rawdb.PathScheme {
+		bc.alignHeadsAfterStateRepair(stateRepaired)
 	}
 	// Start tx indexer if it's enabled.
 	if txLookupLimit != nil {
@@ -721,6 +736,136 @@ func (bc *BlockChain) SetSafe(header *types.Header) {
 	} else {
 		headSafeBlockGauge.Update(0)
 	}
+}
+
+// alignHeadsAfterStateRepair reconciles the canonical header chain with the
+// executable head after path-based state repair. The repair rewinds the
+// executable head without touching the header chain, leaving the blocks in
+// between canonical but stateless: op-node replays them and the engine API
+// answers each as already known without executing it, so the head can never
+// advance again.
+//
+// The gap is closed by re-executing those blocks, never by deleting them.
+// Deleting them would strip the sequencer of the only material it has to roll
+// its own head forward after an unclean shutdown, and every height it could not
+// restore it would re-sequence despite having already gossiped a block there.
+//
+// Re-execution is confined to Optimism chains that actually repaired their head
+// state. The same shape is normal for a snap syncing node, which is legitimately
+// ahead of its executable head, and for vanilla geth, which keeps stale headers
+// for the beacon downloader to refill from.
+func (bc *BlockChain) alignHeadsAfterStateRepair(stateRepaired bool) {
+	head := bc.CurrentBlock()
+	if head == nil {
+		log.Error("Cannot align PBSS chain heads without an executable head")
+		return
+	}
+	header := bc.CurrentHeader()
+	log.Debug("PBSS chain heads before startup alignment", bc.chainHeadContext()...)
+
+	if stateRepaired && header != nil && bc.chainConfig.IsOptimism() && head.Number.Uint64() > 0 &&
+		header.Number.Uint64() > head.Number.Uint64() && bc.HasState(head.Root) {
+		bc.rollHeadForwardToHeaderChain(head, header)
+	}
+
+	// Roll-forward is best effort, so clamp afterwards: if it could not run or
+	// did not reach the header head, the node must still come up with markers
+	// that do not sit above the block it can actually execute.
+	bc.clampHeadMarkersToCurrentBlock()
+	log.Info("PBSS chain heads after startup alignment", bc.chainHeadContext()...)
+}
+
+// rollHeadForwardToHeaderChain re-executes the canonical blocks that path-based
+// state repair left without state, restoring the executable head to the header
+// head.
+//
+// The amount of work is deliberately uncapped. It is bounded by how far the
+// repair rewound, every block is already on disk, and abandoning the attempt is
+// never the cheaper option: whatever is not restored here has to be re-derived
+// from L1 by op-node instead, which costs strictly more per block. Only a
+// failure to execute a block aborts the attempt.
+func (bc *BlockChain) rollHeadForwardToHeaderChain(head *types.Header, header *types.Header) {
+	target := bc.GetBlock(header.Hash(), header.Number.Uint64())
+	if target == nil {
+		log.Warn("Cannot roll executable head forward, header head block is missing",
+			"header_number", header.Number.Uint64(), "header_hash", header.Hash())
+		return
+	}
+	log.Warn("Header chain ahead of executable head after state repair, re-executing",
+		"header_number", header.Number.Uint64(), "header_hash", header.Hash(),
+		"head_number", head.Number.Uint64(), "head_hash", head.Hash(),
+		"blocks", header.Number.Uint64()-head.Number.Uint64())
+
+	start := time.Now()
+	if latestValid, err := bc.SetCanonical(target); err != nil {
+		log.Error("Failed to roll executable head forward after state repair",
+			"latest_valid", latestValid, "elapsed", common.PrettyDuration(time.Since(start)), "err", err)
+		return
+	}
+	log.Info("Rolled executable head forward after state repair",
+		"number", target.NumberU64(), "hash", target.Hash(),
+		"elapsed", common.PrettyDuration(time.Since(start)))
+}
+
+// chainHeadContext reports every head marker that the startup sequence can move
+// independently, so a lagging layer can be identified from a single record.
+func (bc *BlockChain) chainHeadContext() []interface{} {
+	var context []interface{}
+	if header := bc.CurrentHeader(); header != nil {
+		context = append(context, "header", header.Number.Uint64())
+	}
+	if snap := bc.CurrentSnapBlock(); snap != nil {
+		context = append(context, "snap", snap.Number.Uint64())
+	}
+	if head := bc.CurrentBlock(); head != nil {
+		context = append(context, "executable", head.Number.Uint64(), "executable_hash", head.Hash())
+	}
+	if safe := bc.CurrentSafeBlock(); safe != nil {
+		context = append(context, "safe", safe.Number.Uint64())
+	}
+	if finalized := bc.CurrentFinalBlock(); finalized != nil {
+		context = append(context, "finalized", finalized.Number.Uint64())
+	}
+	return context
+}
+
+// clampHeadMarkersToCurrentBlock repairs safe and finalized markers that are
+// ahead of the executable head after path-based state recovery.
+func (bc *BlockChain) clampHeadMarkersToCurrentBlock() {
+	head := bc.CurrentBlock()
+	if head == nil {
+		log.Error("Cannot validate PBSS head markers without an executable head")
+		return
+	}
+
+	safe := bc.CurrentSafeBlock()
+	finalized := bc.CurrentFinalBlock()
+	clampSafe := safe != nil && safe.Number.Uint64() > head.Number.Uint64()
+	clampFinalized := finalized != nil && finalized.Number.Uint64() > head.Number.Uint64()
+	if !clampSafe && !clampFinalized {
+		return
+	}
+
+	context := []interface{}{
+		"head_number", head.Number.Uint64(), "head_hash", head.Hash(),
+	}
+	if safe != nil {
+		context = append(context, "safe_number", safe.Number.Uint64(), "safe_hash", safe.Hash())
+	}
+	if finalized != nil {
+		context = append(context, "finalized_number", finalized.Number.Uint64(), "finalized_hash", finalized.Hash())
+	}
+	log.Warn("PBSS state repair left head markers ahead of executable head", context...)
+
+	if clampSafe {
+		bc.SetSafe(head)
+	}
+	if clampFinalized {
+		bc.SetFinalized(head)
+	}
+	log.Info("Clamped PBSS head markers after state repair",
+		"head_number", head.Number.Uint64(), "head_hash", head.Hash(),
+		"safe_clamped", clampSafe, "finalized_clamped", clampFinalized)
 }
 
 // setHeadBeyondRoot rewinds the local chain to a new head with the extra condition

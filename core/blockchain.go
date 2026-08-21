@@ -427,7 +427,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 				}
 			}
 		}
-
 	}
 
 	if !bc.NoTries() && !bc.HasState(head.Root) {

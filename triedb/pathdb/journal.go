@@ -244,6 +244,16 @@ func (db *Database) loadJournal(diskRoot common.Hash) (layer, error) {
 	return head, nil
 }
 
+// shouldRecoverFromStateHistory reports whether a failed journal load should
+// fall back to rebuilding the node buffer list from the state history kept in
+// the ancient store.
+func (db *Database) shouldRecoverFromStateHistory(journalErr error) bool {
+	if journalErr == nil {
+		return false
+	}
+	return db.fastRecovery && db.config.TrieNodeBufferType == NodeBufferList && !db.useBase
+}
+
 // loadLayers loads a pre-existing state layer backed by a key-value store.
 func (db *Database) loadLayers() layer {
 	// Retrieve the root node of persistent state.
@@ -268,8 +278,7 @@ func (db *Database) loadLayers() layer {
 		stateID = rawdb.ReadPersistentStateID(db.diskdb)
 	)
 
-	if (errors.Is(err, errMissJournal) || errors.Is(err, errUnmatchedJournal)) && db.fastRecovery &&
-		db.config.TrieNodeBufferType == NodeBufferList && !db.useBase {
+	if db.shouldRecoverFromStateHistory(err) {
 		start := time.Now()
 		if db.freezer == nil {
 			log.Crit("Use unopened freezer db to recover node buffer list")

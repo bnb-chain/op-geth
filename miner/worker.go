@@ -1159,17 +1159,28 @@ func (g *generateParams) MilliTimestamp() uint64 { return g.timestamp*1000 + g.m
 
 func (g *generateParams) BlockMillisecondTimeUnit() uint64 {
 	if g.random == (common.Hash{}) {
-		return types.DefaultBlockIntervalUintCount
+		return types.DefaultBlockIntervalUintCountV2
 	}
-	count := uint64(g.random[3])
-	if count == 0 {
-		return types.DefaultBlockIntervalUintCount
+	hasV1 := g.random[3] != 0
+	hasV2 := g.random[4] != 0
+	if hasV1 && hasV2 {
+		return types.DefaultBlockIntervalUintCountV2
 	}
-	return count
+	if hasV1 {
+		return uint64(g.random[3])
+	}
+	if hasV2 {
+		return uint64(g.random[4])
+	}
+	return types.DefaultBlockIntervalUintCountV2
 }
 
 func (g *generateParams) BlockMillisecondTime() uint64 {
-	return g.BlockMillisecondTimeUnit() * types.BlockMillisecondsIntervalUint
+	interval := types.BlockMillisecondsIntervalUintV2
+	if g.random[3] != 0 && g.random[4] == 0 {
+		interval = types.BlockMillisecondsIntervalUint
+	}
+	return g.BlockMillisecondTimeUnit() * interval
 }
 
 // validateParams validates the given parameters.

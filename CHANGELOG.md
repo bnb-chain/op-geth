@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.5.11
+
+This release makes path-based state recovery after an unclean shutdown reliable: the node buffer list is rebuilt from ancient history without dropping the start-of-interval block, and withdrawal proofs collected during recovery are preserved. It also upgrades the Go toolchain and security-related dependencies. No hardfork is involved, so nodes can upgrade at their convenience.
+
+### MetaInfo
+
+Mandatory Update Required: No
+Target Audience: all opBNB Mainnet/Testnet node operators
+Procedure: binary replacement
+Schedule(Timeline): no scheduled upgrade timeline
+
+### What's Changed
+
+* [\#327](https://github.com/bnb-chain/op-geth/pull/327) fix: make pathdb node buffer list recovery reliable and proof-preserving
+* [\#326](https://github.com/bnb-chain/op-geth/pull/326) fix: preserve boundary-aligned start block during nodebufferlist recovery
+* [\#325](https://github.com/bnb-chain/op-geth/pull/325) fix: upgrade Go toolchain and security dependencies
+
+### Docker Images
+
+- ghcr.io/bnb-chain/op-geth:v0.5.11
+
+https://github.com/bnb-chain/op-geth/compare/v0.5.10...v0.5.11
 
 ## v0.5.10
 

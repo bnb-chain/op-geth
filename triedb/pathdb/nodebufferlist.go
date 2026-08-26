@@ -146,10 +146,10 @@ func newNodeBufferList(
 			waitStopCh:      make(chan struct{}),
 			forceKeepCh:     make(chan struct{}),
 			waitForceKeepCh: make(chan struct{}),
-			keepFunc:        keepFunc,
 		}
 		nf.useBase.Store(useBase)
 	}
+	nf.keepFunc = keepFunc
 
 	go nf.loop()
 
@@ -262,7 +262,13 @@ func (nf *nodebufferlist) readStateHistory(freezer *rawdb.ResettableFreezer, sta
 
 func (nf *nodebufferlist) createBlockInterval(startBlock, endBlock uint64) [][]uint64 {
 	var intervalBoundaries [][]uint64
+	// Intervals are inclusive on both ends, so an already aligned startBlock has to
+	// stay the first interval end. Advancing past it would leave no recovered layer
+	// ending on that boundary, making the block unaddressable as a proposed block.
 	firstIntervalEnd := startBlock + nf.dlInMd - (startBlock % nf.dlInMd)
+	if startBlock%nf.dlInMd == 0 {
+		firstIntervalEnd = startBlock
+	}
 	if endBlock < firstIntervalEnd {
 		firstIntervalEnd = endBlock
 	}

@@ -35,14 +35,12 @@ import (
 type BlockValidator struct {
 	config *params.ChainConfig // Chain configuration options
 	bc     *BlockChain         // Canonical block chain
-	engine consensus.Engine    // Consensus engine used for validating
 }
 
 // NewBlockValidator returns a new block validator which is safe for re-use
-func NewBlockValidator(config *params.ChainConfig, blockchain *BlockChain, engine consensus.Engine) *BlockValidator {
+func NewBlockValidator(config *params.ChainConfig, blockchain *BlockChain) *BlockValidator {
 	validator := &BlockValidator{
 		config: config,
-		engine: engine,
 		bc:     blockchain,
 	}
 	return validator
@@ -60,7 +58,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	// Header validity is known at this point. Here we verify that uncles, transactions
 	// and withdrawals given in the block body match the header.
 	header := block.Header()
-	if err := v.engine.VerifyUncles(v.bc, block); err != nil {
+	if err := v.bc.engine.VerifyUncles(v.bc, block); err != nil {
 		return err
 	}
 	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
@@ -162,7 +160,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 
 // ValidateState validates the various changes that happen after a state transition,
 // such as amount of used gas, the receipt roots and the state root itself.
-func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas uint64, skipRoot bool) error {
+func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas uint64, skipRoot bool, stateless bool) error {
 	header := block.Header()
 	if block.GasUsed() != usedGas {
 		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
@@ -179,6 +177,11 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 			return nil
 		},
 		func() error {
+			if stateless {
+				// In stateless mode, return early because the receipt and state root are not
+				// provided through the witness, rather the cross validator needs to return it.
+				return nil
+			}
 			// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, Rn]]))
 			receiptSha := types.DeriveSha(receipts, trie.NewStackTrie(nil))
 			if receiptSha != header.ReceiptHash {
@@ -187,7 +190,7 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 			return nil
 		},
 	}
-	if !skipRoot {
+	if !skipRoot && !stateless {
 		validateFuns = append(validateFuns, func() error {
 			// Validate the state root against the received state root and throw
 			// an error if they don't match.

@@ -20,6 +20,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -84,6 +85,8 @@ type StateDB interface {
 
 	// parallel DAG related
 	CheckFeeReceiversRWSet()
+
+	Witness() *stateless.Witness
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

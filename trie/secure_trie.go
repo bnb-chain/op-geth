@@ -306,3 +306,8 @@ func (t *StateTrie) getSecKeyCache() map[string][]byte {
 	}
 	return t.secKeyCache
 }
+
+// Witness returns a set containing all trie nodes that have been accessed.
+func (t *StateTrie) Witness() map[string]struct{} {
+	return t.trie.Witness()
+}

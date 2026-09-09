@@ -17,9 +17,10 @@
 package vm
 
 import (
-	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 	"math/big"
 	"sync/atomic"
+
+	"github.com/ethereum/go-ethereum/core/opcodeCompiler/compiler"
 
 	"github.com/holiman/uint256"
 

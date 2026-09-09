@@ -17,7 +17,11 @@
 package vm
 
 import (
+	"strings"
+
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
@@ -29,12 +33,14 @@ type PrecompileOverrides func(params.Rules, PrecompiledContract, common.Address)
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Tracer                      EVMLogger           // Opcode logger
-	NoBaseFee                   bool                // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
-	EnablePreimageRecording     bool                // Enables recording of SHA3/keccak preimages
-	ExtraEips                   []int               // Additional EIPS that are to be enabled
-	OptimismPrecompileOverrides PrecompileOverrides // Precompile overrides for Optimism
-	EnableOpcodeOptimizations   bool                // Enable opcode optimization
+	Tracer                        EVMLogger           // Opcode logger
+	NoBaseFee                     bool                // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
+	EnablePreimageRecording       bool                // Enables recording of SHA3/keccak preimages
+	ExtraEips                     []int               // Additional EIPS that are to be enabled
+	OptimismPrecompileOverrides   PrecompileOverrides // Precompile overrides for Optimism
+	EnableOpcodeOptimizations     bool                // Enable opcode optimization
+	EnableTxDAG                   bool                // parallel EVM related
+	EnableStatelessSelfValidation bool                // Generate execution witnesses and self-check against them (testing purpose)
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
@@ -245,6 +251,35 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 
 	if err == errStopToken {
 		err = nil // clear stop token error
+	}
+
+	if err != nil {
+		// Convert ret to readable error message if it's a revert
+		var errorMsg string
+		if len(res) >= 4 && hexutil.Encode(res[:4]) == "0x08c379a0" {
+			// Try to decode the revert reason
+			errorAbi, _ := abi.JSON(strings.NewReader(`[{"name":"Error","type":"function","inputs":[{"name":"message","type":"string"}]}]`))
+			unpacked, err := errorAbi.Unpack("Error", res[4:])
+			if err == nil && len(unpacked) > 0 {
+				errorMsg = unpacked[0].(string)
+			}
+		}
+
+		// If we couldn't decode the revert reason, use the raw hex
+		if errorMsg == "" {
+			errorMsg = hexutil.Encode(res)
+		}
+
+		log.Error("failed to operation execute",
+			"error", err,
+			"op", op,
+			"pc", pc,
+			"res", res,
+			"revert_reason", errorMsg,
+			"raw_return", hexutil.Encode(res),
+			"contract_addr", contract.Address(),
+			"contract_code_hash", contract.CodeHash,
+		)
 	}
 
 	return res, err

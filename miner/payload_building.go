@@ -296,6 +296,19 @@ func (w *worker) fix(blockHash common.Hash) error {
 
 // buildPayload builds the payload according to the provided parameters.
 func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
+	// Reject oversized forced prefixes synchronously. Otherwise background work
+	// could never produce a payload. NoTxPool is also used for historical
+	// derivation, which must retain the pre-existing block acceptance rules.
+	if w.chainConfig.IsOptimism() && !args.NoTxPool {
+		var size uint64
+		for _, tx := range args.Transactions {
+			txSize := tx.WithoutBlobTxSidecar().Size()
+			if txSize > maxRollupPayloadTxBytes-size {
+				return nil, fmt.Errorf("forced transactions exceed %d bytes: %w", maxRollupPayloadTxBytes, errBlockSizeLimitReached)
+			}
+			size += txSize
+		}
+	}
 	if args.NoTxPool {
 		// don't start the background payload updating job if there is no tx pool to pull from
 		// Build the initial version with no transaction included. It should be fast

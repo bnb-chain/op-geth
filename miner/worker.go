@@ -82,6 +82,11 @@ const (
 
 	// staleThreshold is the maximum depth of the acceptable stale block.
 	staleThreshold = 7
+
+	// Keep rollup payloads below the 10 MB batch channel and 10 MiB gossip
+	// limits. Reserve space for block, batch and SSZ framing. This is a
+	// production policy, not a consensus limit on historical blocks.
+	maxRollupPayloadTxBytes = 8*1024*1024 - 1_000_000
 )
 
 var (
@@ -91,6 +96,7 @@ var (
 	errBlockInterruptedByResolve      = errors.New("payload resolution while building block")
 	errBlockInterruptedByBundleCommit = errors.New("failed bundle commit while building block")
 	errFillBundleInterrupted          = errors.New("fill bundle interrupted")
+	errBlockSizeLimitReached          = errors.New("rollup payload transaction byte limit reached")
 )
 
 var (
@@ -111,11 +117,13 @@ var (
 // environment is the worker's current environment and holds all
 // information of the sealing block generation.
 type environment struct {
-	signer   types.Signer
-	state    *state.StateDB // apply state changes here
-	tcount   int            // tx count in cycle
-	gasPool  *core.GasPool  // available gas used to pack transactions
-	coinbase common.Address
+	signer    types.Signer
+	state     *state.StateDB // apply state changes here
+	tcount    int            // tx count in cycle
+	gasPool   *core.GasPool  // available gas used to pack transactions
+	coinbase  common.Address
+	size      uint64 // canonical bytes of included transactions, excluding blob sidecars
+	sizeLimit uint64 // zero disables the production byte limit
 
 	header   *types.Header
 	txs      []*types.Transaction
@@ -138,6 +146,8 @@ func (env *environment) copy() *environment {
 		header:      types.CopyHeader(env.header),
 		receipts:    copyReceipts(env.receipts),
 		gasForTxDAG: env.gasForTxDAG,
+		size:        env.size,
+		sizeLimit:   env.sizeLimit,
 	}
 	if env.gasPool != nil {
 		gasPool := *env.gasPool
@@ -866,6 +876,7 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 		return nil, err
 	}
 	env.txs = append(env.txs, tx)
+	env.size += tx.Size()
 	env.receipts = append(env.receipts, receipt)
 	return receipt.Logs, nil
 }
@@ -882,6 +893,7 @@ func (w *worker) commitBundleTransaction(env *environment, tx *types.Transaction
 		return nil, errors.New("no revertible transaction failed")
 	}
 	env.txs = append(env.txs, tx)
+	env.size += tx.Size()
 	env.receipts = append(env.receipts, receipt)
 	return receipt.Logs, nil
 }
@@ -903,6 +915,7 @@ func (w *worker) commitBlobTransaction(env *environment, tx *types.Transaction) 
 		return nil, err
 	}
 	env.txs = append(env.txs, tx.WithoutBlobTxSidecar())
+	env.size += tx.WithoutBlobTxSidecar().Size()
 	env.receipts = append(env.receipts, receipt)
 	env.sidecars = append(env.sidecars, sc)
 	env.blobs += len(sc.Blobs)
@@ -912,6 +925,11 @@ func (w *worker) commitBlobTransaction(env *environment, tx *types.Transaction) 
 
 // applyTransaction runs the transaction. If execution fails, state and gas pool are reverted.
 func (w *worker) applyTransaction(env *environment, tx *types.Transaction) (*types.Receipt, error) {
+	// Check before touching state or gas, for both ordinary and bundle commits.
+	// Sidecars are not part of a block's canonical transaction encoding.
+	if env.sizeLimit != 0 && (env.size > env.sizeLimit || tx.WithoutBlobTxSidecar().Size() > env.sizeLimit-env.size) {
+		return nil, errBlockSizeLimitReached
+	}
 	var (
 		snap = env.state.Snapshot()
 		gp   = env.gasPool.Gas()
@@ -1291,6 +1309,9 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 	if err != nil {
 		log.Error("Failed to create sealing context", "err", err)
 		return nil, err
+	}
+	if w.chainConfig.IsOptimism() && !genParams.noTxs {
+		env.sizeLimit = maxRollupPayloadTxBytes
 	}
 	if header.ParentBeaconRoot != nil {
 		context := core.NewEVMBlockContext(header, w.chain, nil, w.chainConfig, env.state)

@@ -85,6 +85,73 @@ func makeHistories(n int) []*history {
 	return result
 }
 
+// A failed history write must leave the disk layer and its persistent state
+// untouched, even when the caller requests an immediate node buffer flush.
+func TestCommitHistoryWriteFailure(t *testing.T) {
+	for _, fastRecovery := range []bool{false, true} {
+		for _, failure := range []string{"out-of-order", "read-only"} {
+			t.Run(fmt.Sprintf("fastRecovery=%t/%s", fastRecovery, failure), func(t *testing.T) {
+				dir := t.TempDir()
+				freezer, err := rawdb.NewStateFreezer(dir, false, fastRecovery)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if failure == "read-only" {
+					if err := freezer.Close(); err != nil {
+						t.Fatal(err)
+					}
+					freezer, err = rawdb.NewStateFreezer(dir, true, fastRecovery)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				defer freezer.Close()
+				store := rawdb.NewMemoryDatabase()
+				defer store.Close()
+				db := &Database{diskdb: store, freezer: freezer, fastRecovery: fastRecovery, config: &Config{}}
+				buffer, err := newNodeBuffer(1024, nil, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				disk := newDiskLayer(types.EmptyRootHash, 0, db, nil, buffer)
+				diff := newDiffLayer(disk, testutil.RandomHash(), 1, 1, randomTrieNodes(1), randomStateSet(1))
+				if failure == "out-of-order" {
+					// Seed history 1 so the commit attempts a duplicate append.
+					if err := writeHistory(freezer, diff, fastRecovery); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if next, err := disk.commit(diff, true); err == nil {
+					t.Error("commit succeeded despite a failed history write")
+				} else if next != nil {
+					t.Error("failed commit returned a new disk layer")
+				}
+				if disk.stale {
+					t.Error("failed history write marked the disk layer stale")
+				}
+				for _, root := range []common.Hash{disk.root, diff.root} {
+					if id := rawdb.ReadStateID(store, root); id != nil {
+						t.Errorf("failed history write stored a root mapping: root %x, id %d", root, *id)
+					}
+				}
+				if id := rawdb.ReadPersistentStateID(store); id != 0 {
+					t.Errorf("failed history write advanced persistent state ID to %d", id)
+				}
+				if !buffer.empty() || len(buffer.nodes) != 0 {
+					t.Error("failed history write changed the node buffer")
+				}
+				for owner, subset := range diff.nodes {
+					for path := range subset {
+						if blob, _ := rawdb.ReadStorageTrieNode(store, owner, []byte(path)); len(blob) != 0 {
+							t.Error("failed history write persisted a trie node")
+						}
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestEncodeDecodeHistory(t *testing.T) {
 	var (
 		m   meta
@@ -152,7 +219,9 @@ func TestTruncateHeadHistory(t *testing.T) {
 
 	for i := 0; i < len(hs); i++ {
 		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
-		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
+		if err := rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData); err != nil {
+			t.Fatal(err)
+		}
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 		roots = append(roots, hs[i].meta.root)
 	}
@@ -180,7 +249,9 @@ func TestTruncateTailHistory(t *testing.T) {
 
 	for i := 0; i < len(hs); i++ {
 		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
-		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
+		if err := rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData); err != nil {
+			t.Fatal(err)
+		}
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 		roots = append(roots, hs[i].meta.root)
 	}
@@ -223,7 +294,9 @@ func TestTruncateTailHistories(t *testing.T) {
 
 		for i := 0; i < len(hs); i++ {
 			accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
-			rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
+			if err := rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData); err != nil {
+				t.Fatal(err)
+			}
 			rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 			roots = append(roots, hs[i].meta.root)
 		}
@@ -251,7 +324,9 @@ func TestTruncateOutOfRange(t *testing.T) {
 
 	for i := 0; i < len(hs); i++ {
 		accountData, storageData, accountIndex, storageIndex, _ := hs[i].encode()
-		rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData)
+		if err := rawdb.WriteStateHistory(freezer, uint64(i+1), hs[i].meta.encode(), accountIndex, storageIndex, accountData, storageData); err != nil {
+			t.Fatal(err)
+		}
 		rawdb.WriteStateID(db, hs[i].meta.root, uint64(i+1))
 	}
 	truncateFromTail(db, freezer, uint64(len(hs)/2))

@@ -79,8 +79,10 @@ func TestRecoverNodeBufferListDoesNotBlockOnKeepFunc(t *testing.T) {
 		root := testutil.RandomHash()
 		h := newHistory(root, parent, i, randomStateSet(1), randomTrieNodes(1))
 		accountData, storageData, accountIndex, storageIndex, trieNodes := h.encode()
-		rawdb.WriteStateHistoryWithTrieNodes(freezer, i, h.meta.encode(),
-			accountIndex, storageIndex, accountData, storageData, trieNodes)
+		if err := rawdb.WriteStateHistoryWithTrieNodes(freezer, i, h.meta.encode(),
+			accountIndex, storageIndex, accountData, storageData, trieNodes); err != nil {
+			t.Fatal(err)
+		}
 		parent = root
 	}
 

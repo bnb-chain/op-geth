@@ -638,11 +638,15 @@ func writeHistory(freezer *rawdb.ResettableFreezer, dl *diffLayer, fastRecovery 
 	dataSize := common.StorageSize(len(accountData) + len(storageData))
 	indexSize := common.StorageSize(len(accountIndex) + len(storageIndex))
 
-	// Write history data into five freezer table respectively.
+	// Write history data into the freezer tables before advancing the state.
+	var err error
 	if fastRecovery {
-		rawdb.WriteStateHistoryWithTrieNodes(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
+		err = rawdb.WriteStateHistoryWithTrieNodes(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData, trieNodes)
 	} else {
-		rawdb.WriteStateHistory(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData)
+		err = rawdb.WriteStateHistory(freezer, dl.stateID(), history.meta.encode(), accountIndex, storageIndex, accountData, storageData)
+	}
+	if err != nil {
+		return fmt.Errorf("write state history %d: %w", dl.stateID(), err)
 	}
 
 	historyDataBytesMeter.Mark(int64(dataSize))

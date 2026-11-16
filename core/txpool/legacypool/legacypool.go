@@ -842,14 +842,8 @@ func (pool *LegacyPool) validateTx(tx *types.Transaction, local bool) error {
 		},
 		ExistingCost: func(addr common.Address, nonce uint64) *big.Int {
 			if list := pool.pending[addr]; list != nil {
-				if tx := list.txs.Get(nonce); tx != nil {
-					cost := tx.Cost()
-					if pool.l1CostFn != nil {
-						if l1Cost := pool.l1CostFn(tx.RollupCostData()); l1Cost != nil { // add rollup cost
-							cost = cost.Add(cost, l1Cost)
-						}
-					}
-					return cost
+				if cost := list.costs[nonce]; cost != nil {
+					return cost.ToBig()
 				}
 			}
 			return nil

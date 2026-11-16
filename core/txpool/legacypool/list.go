@@ -284,9 +284,10 @@ type list struct {
 	strict bool       // Whether nonces are strictly continuous or not
 	txs    *sortedMap // Heap indexed sorted hash map of the transactions
 
-	costcap   *uint256.Int // Price of the highest costing transaction (reset only if exceeds balance)
-	gascap    uint64       // Gas limit of the highest spending transaction (reset only if exceeds block limit)
-	totalcost *uint256.Int // Total cost of all transactions in the list
+	costcap   *uint256.Int            // Price of the highest costing transaction (reset only if exceeds balance)
+	gascap    uint64                  // Gas limit of the highest spending transaction (reset only if exceeds block limit)
+	totalcost *uint256.Int            // Total cost of all transactions in the list
+	costs     map[uint64]*uint256.Int // Per-nonce costs, including L1 estimates at insertion
 }
 
 // newList creates a new transaction list for maintaining nonce-indexable fast,
@@ -297,6 +298,7 @@ func newList(strict bool) *list {
 		txs:       newSortedMap(),
 		costcap:   new(uint256.Int),
 		totalcost: new(uint256.Int),
+		costs:     make(map[uint64]*uint256.Int),
 	}
 }
 
@@ -334,22 +336,36 @@ func (l *list) Add(tx *types.Transaction, priceBump uint64, l1CostFn txpool.L1Co
 		if tx.GasFeeCapIntCmp(thresholdFeeCap) < 0 || tx.GasTipCapIntCmp(thresholdTip) < 0 {
 			return false, nil
 		}
-		// Old is being replaced, subtract old cost
-		l.subTotalCost([]*types.Transaction{old})
 	}
-	// Add new tx cost to totalcost
+	// Compute the complete reservation before modifying the list. Keep costcap
+	// based on L2 cost, as Filter receives a balance already reduced by L1 cost.
 	cost, overflow := uint256.FromBig(tx.Cost())
 	if overflow {
 		return false, nil
 	}
-	l.totalcost.Add(l.totalcost, cost)
+	reserved := new(uint256.Int).Set(cost)
 	if l1CostFn != nil {
-		if l1Cost := l1CostFn(tx.RollupCostData()); l1Cost != nil { // add rollup cost
-			l.totalcost.Add(l.totalcost, cost)
+		if l1Cost := l1CostFn(tx.RollupCostData()); l1Cost != nil {
+			l1Cost256, overflow := uint256.FromBig(l1Cost)
+			if overflow {
+				return false, nil
+			}
+			if _, overflow := reserved.AddOverflow(reserved, l1Cost256); overflow {
+				return false, nil
+			}
 		}
+	}
+	totalcost := new(uint256.Int).Set(l.totalcost)
+	if old != nil {
+		totalcost.Sub(totalcost, l.costs[old.Nonce()])
+	}
+	if _, overflow := totalcost.AddOverflow(totalcost, reserved); overflow {
+		return false, nil
 	}
 	// Otherwise overwrite the old transaction with the current one
 	l.txs.Put(tx)
+	l.totalcost = totalcost
+	l.costs[tx.Nonce()] = reserved
 	if l.costcap.Cmp(cost) < 0 {
 		l.costcap = cost
 	}
@@ -478,10 +494,12 @@ func (l *list) LastElement() *types.Transaction {
 // total cost of all transactions.
 func (l *list) subTotalCost(txs []*types.Transaction) {
 	for _, tx := range txs {
-		_, underflow := l.totalcost.SubOverflow(l.totalcost, uint256.MustFromBig(tx.Cost()))
+		// Refund the original reservation even if the L1 estimator has changed.
+		_, underflow := l.totalcost.SubOverflow(l.totalcost, l.costs[tx.Nonce()])
 		if underflow {
 			panic("totalcost underflow")
 		}
+		delete(l.costs, tx.Nonce())
 	}
 }
 

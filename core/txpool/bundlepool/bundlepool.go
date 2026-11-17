@@ -4,8 +4,10 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -89,7 +91,8 @@ type BundlePool struct {
 	bundleHeap BundleHeap
 	mu         sync.RWMutex
 
-	slots uint64 // Number of slots currently allocated
+	slots    uint64        // Number of slots currently allocated
+	maxTxGas atomic.Uint64 // Maximum gas per transaction (0 = no cap)
 
 	simulator BundleSimulator
 
@@ -168,6 +171,9 @@ func (p *BundlePool) AddBundle(ctx context.Context, bundle *types.Bundle, origin
 	if err := bundle.ValidateBasic(); err != nil {
 		return err
 	}
+	if err := p.validateTxGas(bundle); err != nil {
+		return err
+	}
 	if p.simulator == nil {
 		return ErrSimulatorMissing
 	}
@@ -220,6 +226,10 @@ func (p *BundlePool) AddBundle(ctx context.Context, bundle *types.Bundle, origin
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// The cap may have changed while simulation ran without the pool lock.
+	if err := p.validateTxGas(bundle); err != nil {
 		return err
 	}
 
@@ -280,6 +290,11 @@ func (p *BundlePool) PendingBundles(blockNumber uint64, blockTimestamp uint64) [
 
 	ret := make([]*types.Bundle, 0)
 	for hash, bundle := range p.bundles {
+		if err := p.validateTxGas(bundle); err != nil {
+			log.Debug("Bundle exceeds transaction gas cap", "hash", hash, "err", err)
+			p.deleteBundle(hash)
+			continue
+		}
 		// Prune outdated bundles
 		if (bundle.MaxTimestamp != 0 && blockTimestamp > bundle.MaxTimestamp) ||
 			(bundle.MaxBlockNumber != 0 && blockNumber > bundle.MaxBlockNumber) {
@@ -496,7 +511,26 @@ func (p *BundlePool) minimalBundleGasPrice() *big.Int {
 	return new(big.Int)
 }
 
-func (p *BundlePool) SetMaxTxGas(maxTxGas uint64) {}
+// SetMaxTxGas updates the maximum gas allowed per transaction. Zero disables the cap.
+func (p *BundlePool) SetMaxTxGas(maxTxGas uint64) {
+	// Serialize updates with the final admission check and pending selection.
+	p.mu.Lock()
+	p.maxTxGas.Store(maxTxGas)
+	p.mu.Unlock()
+}
+
+func (p *BundlePool) validateTxGas(bundle *types.Bundle) error {
+	cap := p.maxTxGas.Load()
+	if cap == 0 {
+		return nil
+	}
+	for _, tx := range bundle.Txs {
+		if tx.Gas() > cap {
+			return fmt.Errorf("%w (cap: %d, tx: %d)", core.ErrTxGasLimitTooHigh, cap, tx.Gas())
+		}
+	}
+	return nil
+}
 
 // =====================================================================================================================
 

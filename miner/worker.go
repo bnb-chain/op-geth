@@ -870,18 +870,35 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	return receipt.Logs, nil
 }
 
-func (w *worker) commitBundleTransaction(env *environment, tx *types.Transaction, unRevertible bool) ([]*types.Log, error) {
+// commitBundleTransaction runs only on the disposable bundle environment.
+// Cancellation can follow Finalise, which invalidates snapshots: propagate the
+// error and discard this entire environment rather than reverting a snapshot.
+func (w *worker) commitBundleTransaction(ctx context.Context, env *environment, tx *types.Transaction, unRevertible bool) ([]*types.Log, error) {
+	var sidecar *types.BlobTxSidecar
 	if tx.Type() == types.BlobTxType {
-		return w.commitBlobTransaction(env, tx)
+		sidecar = tx.BlobTxSidecar()
+		if sidecar == nil {
+			return nil, errors.New("blob transaction without blobs in bundle")
+		}
+		if (env.blobs+len(sidecar.Blobs))*params.BlobTxBlobGasPerBlob > params.MaxBlobGasPerBlock {
+			return nil, errors.New("max data blobs reached")
+		}
 	}
-	receipt, err := w.applyTransaction(env, tx)
+	receipt, err := core.ApplyTransactionWithContext(ctx, w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
 		return nil, err
 	}
 	if receipt.Status == types.ReceiptStatusFailed && unRevertible {
 		return nil, errors.New("no revertible transaction failed")
 	}
-	env.txs = append(env.txs, tx)
+	if sidecar != nil {
+		env.txs = append(env.txs, tx.WithoutBlobTxSidecar())
+		env.sidecars = append(env.sidecars, sidecar)
+		env.blobs += len(sidecar.Blobs)
+		*env.header.BlobGasUsed += receipt.BlobGasUsed
+	} else {
+		env.txs = append(env.txs, tx)
+	}
 	env.receipts = append(env.receipts, receipt)
 	return receipt.Logs, nil
 }
@@ -1142,6 +1159,8 @@ type generateParams struct {
 	beaconRoot  *common.Hash      // The beacon root (cancun field).
 	noTxs       bool              // Flag whether an empty block without any transaction is expected
 
+	blockTime time.Duration      // Effective target timestamp minus the selected parent timestamp
+	ctx       context.Context    // Absolute payload lifetime, shared by recommits
 	txs       types.Transactions // Deposit transactions to include at the start of the block
 	gasLimit  *uint64            // Optional gas limit override
 	interrupt *atomic.Int32      // Optional interruption signal to pass down to worker.generateWork
@@ -1197,8 +1216,8 @@ func (w *worker) validateParams(genParams *generateParams) (time.Duration, error
 		return 0, fmt.Errorf("invalid milltimestamp, parent %d given %d", parent.MilliTimestamp(), genParams.MilliTimestamp())
 	}
 
-	if blockTime < int64(genParams.BlockMillisecondTime()) {
-		blockTime = int64(genParams.BlockMillisecondTime())
+	if blockTime <= 0 {
+		blockTime = int64(parent.NextMilliTimestamp() - parent.MilliTimestamp())
 	}
 	return time.Duration(blockTime) * time.Millisecond, nil
 }
@@ -1234,6 +1253,9 @@ func (w *worker) prepareWork(genParams *generateParams) (*environment, error) {
 			genParams.random[2] = parent.MixDigest[2]
 		}
 	}
+	// Direct sealing callers may not have a validated interval. Recompute it
+	// from the resolved parent and effective timestamp, including corrections.
+	genParams.blockTime = time.Duration(timestamp-parent.MilliTimestamp()) * time.Millisecond
 	timestamp = timestamp / 1000
 
 	// Construct the sealing block header.
@@ -1399,17 +1421,18 @@ func (w *worker) estimateGasForTxDAG(env *environment) uint64 {
 
 // generateWork generates a sealing block based on the given parameters.
 func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
+	generationStart := time.Now()
 	// TODO delete after debug performance metrics
-	core.DebugInnerExecutionDuration = 0
+	core.DebugInnerExecutionDuration.Store(0)
 	defer func() {
-		core.DebugInnerExecutionDuration = 0
+		core.DebugInnerExecutionDuration.Store(0)
 	}()
 
 	work, err := w.prepareWork(genParams)
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
-	defer work.discard()
+	defer func() { work.discard() }()
 	if work.gasPool == nil {
 		gasLimit := w.config.EffectiveGasCeil
 		if gasLimit == 0 || gasLimit > work.header.GasLimit {
@@ -1451,9 +1474,20 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		if interrupt == nil {
 			interrupt = new(atomic.Int32)
 		}
-		timer := time.AfterFunc(w.newpayloadTimeout, func() {
-			interrupt.Store(commitInterruptTimeout)
-		})
+
+		parent := genParams.ctx
+		if parent == nil {
+			parent = context.Background()
+		}
+		bundleCtx, cancelBundles := w.bundleBuildContext(parent, generationStart, genParams.blockTime)
+		defer cancelBundles()
+		var timer *time.Timer
+		if w.newpayloadTimeout > 0 {
+			timer = time.AfterFunc(w.newpayloadTimeout, func() {
+				interrupt.Store(commitInterruptTimeout)
+				cancelBundles()
+			})
+		}
 		log.Info("Print new payload timeout", "timeout", common.PrettyDuration(w.newpayloadTimeout))
 		if w.config.Mev.MevEnabled {
 			newWork := work.copy()
@@ -1476,22 +1510,27 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 			if w.chain.TxDAGEnabledWhenMine() {
 				work.state.MVStates().EnableAsyncGen()
 			}
-			err := w.fillTransactionsAndBundles(interrupt, work)
+			err := w.fillTransactionsAndBundles(bundleCtx, interrupt, work)
 			wg.Wait()
-			timer.Stop() // don't need timeout interruption any more
-			if errors.Is(err, errFillBundleInterrupted) {
+			if timer != nil {
+				timer.Stop() // don't need timeout interruption any more
+			}
+			if err != nil {
 				log.Warn("fill bundles is interrupted, discard", "err", err)
 				work, newWork = newWork, work
 			}
 			if w.chain.TxDAGEnabledWhenMine() {
 				newWork.state.MVStates().Stop()
 			}
+			newWork.discard()
 		} else {
 			if w.chain.TxDAGEnabledWhenMine() {
 				work.state.MVStates().EnableAsyncGen()
 			}
 			err := w.fillTransactions(interrupt, work)
-			timer.Stop() // don't need timeout interruption any more
+			if timer != nil {
+				timer.Stop() // don't need timeout interruption any more
+			}
 			if errors.Is(err, errBlockInterruptedByTimeout) {
 				log.Warn("Block building is interrupted", "allowance", common.PrettyDuration(w.newpayloadTimeout), "parentHash", genParams.parentHash)
 				isBuildBlockInterruptCounter.Inc(1)
@@ -1506,8 +1545,16 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 		}
 	}
 
-	if intr := genParams.interrupt; intr != nil && genParams.isUpdate && intr.Load() != commitInterruptNone {
-		return &newPayloadResult{err: errInterruptedUpdate}
+	if genParams.isUpdate {
+		if intr := genParams.interrupt; intr != nil && intr.Load() != commitInterruptNone {
+			return &newPayloadResult{err: errInterruptedUpdate}
+		}
+		// The absolute payload lifetime also interrupts recommits independently
+		// of the atomic signal. A bundle-local timeout with a live parent still
+		// permits the completed ordinary-transaction fallback.
+		if genParams.ctx != nil && genParams.ctx.Err() != nil {
+			return &newPayloadResult{err: errInterruptedUpdate}
+		}
 	}
 
 	start = time.Now()
@@ -1532,7 +1579,7 @@ func (w *worker) generateWork(genParams *generateParams) *newPayloadResult {
 	storageHashTimer.Update(work.state.StorageHashes)                // Storage hashes are complete(in FinalizeAndAssemble)
 	txDAGGenerateTimer.Update(work.state.TxDAGGenerate)
 
-	innerExecutionTimer.Update(core.DebugInnerExecutionDuration)
+	innerExecutionTimer.Update(time.Duration(core.DebugInnerExecutionDuration.Load()))
 
 	log.Debug("build payload statedb metrics", "parentHash", genParams.parentHash, "accountReads", common.PrettyDuration(work.state.AccountReads), "storageReads", common.PrettyDuration(work.state.StorageReads), "snapshotAccountReads", common.PrettyDuration(work.state.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(work.state.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(work.state.AccountUpdates), "storageUpdates", common.PrettyDuration(work.state.StorageUpdates), "accountHashes", common.PrettyDuration(work.state.AccountHashes), "storageHashes", common.PrettyDuration(work.state.StorageHashes))
 	return &newPayloadResult{

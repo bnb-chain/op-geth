@@ -20,7 +20,6 @@ package miner
 import (
 	"context"
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -74,15 +73,21 @@ var (
 var defaultCoinBaseAddress = common.HexToAddress("0x4200000000000000000000000000000000000011")
 
 type MevConfig struct {
-	MevEnabled             bool     // Whether to enable Mev or not
-	MevReceivers           []string // The list of Mev bundle receivers
-	MevBundleGasPriceFloor int64    // The minimal bundle gas Price
+	MevEnabled               bool          // Whether to enable Mev or not
+	MevReceivers             []string      // The list of Mev bundle receivers
+	MevBundleGasPriceFloor   int64         // The minimal bundle gas Price
+	MaxConcurrentSimulations int           // Maximum concurrent RPC bundle simulations
+	SimulationGasRate        uint64        // Declared simulation gas admitted per second
+	SimulationTimeout        time.Duration // Maximum RPC bundle simulation duration
 }
 
 var DefaultMevConfig = MevConfig{
-	MevEnabled:             false,
-	MevReceivers:           nil,
-	MevBundleGasPriceFloor: 1,
+	MevEnabled:               false,
+	MevReceivers:             nil,
+	MevBundleGasPriceFloor:   1,
+	MaxConcurrentSimulations: 1,
+	SimulationGasRate:        params.BundleGasLimit,
+	SimulationTimeout:        time.Second,
 }
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -133,13 +138,15 @@ var DefaultConfig = Config{
 
 // Miner creates blocks and searches for proof-of-work values.
 type Miner struct {
-	mux     *event.TypeMux
-	eth     Backend
-	engine  consensus.Engine
-	exitCh  chan struct{}
-	startCh chan struct{}
-	stopCh  chan struct{}
-	worker  *worker
+	mux            *event.TypeMux
+	eth            Backend
+	engine         consensus.Engine
+	exitCh         chan struct{}
+	startCh        chan struct{}
+	stopCh         chan struct{}
+	worker         *worker
+	simulationOnce sync.Once
+	simulations    *bundleSimulationLimiter
 
 	wg sync.WaitGroup
 }
@@ -318,41 +325,58 @@ func (miner *Miner) BuildPayload(args *BuildPayloadArgs) (*Payload, error) {
 	return miner.worker.buildPayload(args)
 }
 
-func (miner *Miner) SimulateBundle(bundle *types.Bundle) (*big.Int, error) {
-
-	env, err := miner.prepareSimulationEnv()
+func (miner *Miner) SimulateBundle(ctx context.Context, bundle *types.Bundle) (*big.Int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := bundle.ValidateBasic(); err != nil {
+		return nil, err
+	}
+	public, err := miner.admissionTxPoolSnapshot(bundle)
 	if err != nil {
 		return nil, err
 	}
-
-	s, err := miner.worker.simulateBundles(env, []*types.Bundle{bundle})
+	ctx, finish, err := miner.startBundleSimulation(ctx, bundle, false)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(s) == 0 {
-		return nil, errors.New("no valid sim result")
+	defer finish()
+	env, err := miner.prepareSimulationEnv(ctx)
+	if err != nil {
+		return nil, err
 	}
-
-	return s[0].BundleGasPrice, nil
+	// Admission results depend on txpool membership. Do not populate or reuse
+	// the payload builder's cache, or retain failed public requests there.
+	result, err := miner.worker.simulateBundleWithContext(ctx, env, bundle, env.state, env.gasPool, 0, false, true, public)
+	if err != nil {
+		return nil, err
+	}
+	return result.BundleGasPrice, nil
 }
 
-func (miner *Miner) SimulateGaslessBundle(bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
-
-	env, err := miner.prepareSimulationEnv()
+func (miner *Miner) SimulateGaslessBundle(ctx context.Context, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := bundle.ValidateBasic(); err != nil {
+		return nil, err
+	}
+	ctx, finish, err := miner.startBundleSimulation(ctx, bundle, true)
 	if err != nil {
 		return nil, err
 	}
-
-	resp, err := miner.worker.simulateGaslessBundle(env, bundle)
+	defer finish()
+	env, err := miner.prepareSimulationEnv(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	return resp, nil
+	return miner.worker.simulateGaslessBundle(ctx, env, bundle)
 }
 
-func (miner *Miner) prepareSimulationEnv() (*environment, error) {
+func (miner *Miner) prepareSimulationEnv(ctx context.Context) (*environment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	parent := miner.eth.BlockChain().CurrentBlock()
 	// fork check
 	timestamp := parent.NextMilliTimestamp()
@@ -405,6 +429,9 @@ func (miner *Miner) prepareSimulationEnv() (*environment, error) {
 		return nil, err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	env := &environment{
 		header:  header,
 		state:   state.Copy(),

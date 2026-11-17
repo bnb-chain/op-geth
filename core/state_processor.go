@@ -17,6 +17,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
@@ -225,6 +226,32 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	txContext := NewEVMTxContext(msg)
 	vmenv := vm.NewEVM(blockContext, txContext, statedb, config, cfg)
 	return applyTransaction(msg, config, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv)
+}
+
+// ApplyTransactionWithContext applies a transaction to disposable simulation
+// state. Callers must discard the state on cancellation: execution may have
+// applied partial changes before the EVM observes the abort.
+func ApplyTransactionWithContext(ctx context.Context, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	msg, err := TransactionToMessage(tx, types.MakeSigner(config, header.Number, header.Time), header.BaseFee)
+	if err != nil {
+		return nil, err
+	}
+	// Create a new context to be used in the EVM environment
+	blockContext := NewEVMBlockContext(header, bc, author, config, statedb)
+	txContext := NewEVMTxContext(msg)
+	vmenv := vm.NewEVM(blockContext, txContext, statedb, config, cfg)
+	if ctx.Done() != nil {
+		stop := context.AfterFunc(ctx, vmenv.Cancel)
+		defer stop()
+	}
+	receipt, err := applyTransaction(msg, config, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv)
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return receipt, err
 }
 
 // ProcessBeaconBlockRoot applies the EIP-4788 system call to the beacon block root

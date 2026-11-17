@@ -1,6 +1,7 @@
 package miner
 
 import (
+	"context"
 	"errors"
 	"math/big"
 	"slices"
@@ -383,6 +384,13 @@ func (w *worker) simulateBundle(
 	env *environment, bundle *types.Bundle, state *state.StateDB, gasPool *core.GasPool, currentTxCount int,
 	prune, pruneGasExceed bool,
 ) (*types.SimulatedBundle, error) {
+	return w.simulateBundleWithContext(context.Background(), env, bundle, state, gasPool, currentTxCount, prune, pruneGasExceed, nil)
+}
+
+func (w *worker) simulateBundleWithContext(
+	ctx context.Context, env *environment, bundle *types.Bundle, state *state.StateDB, gasPool *core.GasPool, currentTxCount int,
+	prune, pruneGasExceed bool, publicTxs map[common.Hash]bool,
+) (*types.SimulatedBundle, error) {
 	var (
 		tempGasUsed   uint64
 		bundleGasUsed uint64
@@ -390,9 +398,12 @@ func (w *worker) simulateBundle(
 	)
 
 	for i, tx := range bundle.Txs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		state.SetTxContext(tx.Hash(), i+currentTxCount)
 
-		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &w.coinbase, gasPool, state, env.header, tx,
+		receipt, err := core.ApplyTransactionWithContext(ctx, w.chainConfig, w.chain, &w.coinbase, gasPool, state, env.header, tx,
 			&tempGasUsed, *w.chain.GetVMConfig())
 		if err != nil {
 			log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
@@ -420,7 +431,11 @@ func (w *worker) simulateBundle(
 
 			return nil, err
 		}
-		if !w.eth.TxPool().Has(tx.Hash()) {
+		known := publicTxs[tx.Hash()]
+		if publicTxs == nil {
+			known = w.eth.TxPool().Has(tx.Hash())
+		}
+		if !known {
 			bundleGasUsed += receipt.GasUsed
 
 			txGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
@@ -435,7 +450,7 @@ func (w *worker) simulateBundle(
 			bundleGasFees.Add(bundleGasFees, txGasFees)
 		}
 	}
-	// if all txs in the bundle are from txpool, we accept the bundle without checking gas price
+	// Transactions already in the ordinary txpool do not contribute to bundle price.
 	bundleGasPrice := big.NewInt(0)
 	if bundleGasUsed != 0 {
 		bundleGasPrice = new(big.Int).Div(bundleGasFees, new(big.Int).SetUint64(bundleGasUsed))
@@ -461,12 +476,15 @@ func (w *worker) simulateBundle(
 	}, nil
 }
 
-func (w *worker) simulateGaslessBundle(env *environment, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+func (w *worker) simulateGaslessBundle(ctx context.Context, env *environment, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
 	validResults := make([]types.GaslessTxSimResult, 0)
 	gasReachedResults := make([]types.GaslessTxSimResult, 0)
 
 	txIdx := 0
 	for _, tx := range bundle.Txs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		env.state.SetTxContext(tx.Hash(), txIdx)
 
 		var (
@@ -474,9 +492,12 @@ func (w *worker) simulateGaslessBundle(env *environment, bundle *types.Bundle) (
 			gp   = env.gasPool.Gas()
 		)
 
-		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &w.coinbase, env.gasPool, env.state, env.header, tx,
+		receipt, err := core.ApplyTransactionWithContext(ctx, w.chainConfig, w.chain, &w.coinbase, env.gasPool, env.state, env.header, tx,
 			&env.header.GasUsed, *w.chain.GetVMConfig())
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			env.state.RevertToSnapshot(snap)
 			env.gasPool.SetGas(gp)
 			log.Error("fail to simulate gasless bundle, skipped", "txHash", tx.Hash(), "err", err)

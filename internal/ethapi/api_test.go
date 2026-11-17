@@ -748,7 +748,7 @@ func (b testBackend) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) even
 func (b testBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
 	panic("implement me")
 }
-func (b testBackend) SimulateGaslessBundle(bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+func (b testBackend) SimulateGaslessBundle(ctx context.Context, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
 	panic("implement me")
 }
 func (b testBackend) SendBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error {

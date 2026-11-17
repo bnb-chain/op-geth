@@ -606,6 +606,25 @@ var (
 		Category: flags.MEVCategory,
 	}
 
+	MevMaxConcurrentSimulationsFlag = &cli.IntFlag{
+		Name:     "mev.simulation.maxconcurrent",
+		Usage:    "Maximum concurrent RPC bundle simulations (shared by sendBundle and simulateGaslessBundle)",
+		Value:    miner.DefaultMevConfig.MaxConcurrentSimulations,
+		Category: flags.MEVCategory,
+	}
+	MevSimulationGasRateFlag = &cli.Uint64Flag{
+		Name:     "mev.simulation.gasrate",
+		Usage:    "Declared RPC bundle simulation gas admitted per second (burst is one bundle gas limit)",
+		Value:    miner.DefaultMevConfig.SimulationGasRate,
+		Category: flags.MEVCategory,
+	}
+	MevSimulationTimeoutFlag = &cli.DurationFlag{
+		Name:     "mev.simulation.timeout",
+		Usage:    "Maximum duration of an RPC bundle simulation",
+		Value:    miner.DefaultMevConfig.SimulationTimeout,
+		Category: flags.MEVCategory,
+	}
+
 	// Account settings
 	UnlockedAccountFlag = &cli.StringFlag{
 		Name:     "unlock",
@@ -1798,6 +1817,16 @@ func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.IsSet(MevBundleGasPriceFloorFlag.Name) {
 		cfg.Mev.MevBundleGasPriceFloor = ctx.Int64(MevBundleGasPriceFloorFlag.Name)
 	}
+	if ctx.IsSet(MevMaxConcurrentSimulationsFlag.Name) {
+		cfg.Mev.MaxConcurrentSimulations = ctx.Int(MevMaxConcurrentSimulationsFlag.Name)
+	}
+	if ctx.IsSet(MevSimulationGasRateFlag.Name) {
+		cfg.Mev.SimulationGasRate = ctx.Uint64(MevSimulationGasRateFlag.Name)
+	}
+	if ctx.IsSet(MevSimulationTimeoutFlag.Name) {
+		cfg.Mev.SimulationTimeout = ctx.Duration(MevSimulationTimeoutFlag.Name)
+	}
+
 	// Set the maximum gas allowed per individual transaction to the default 16,777,216
 	cfg.TxGasLimit = params.MaxTxGas
 }

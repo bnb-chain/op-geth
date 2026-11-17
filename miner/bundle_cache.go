@@ -4,11 +4,13 @@ import (
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/lru"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const (
-	maxHeaders = 3
+	maxHeaders       = 3
+	maxCachedBundles = 128
 )
 
 type BundleCache struct {
@@ -38,51 +40,25 @@ func (b *BundleCache) GetBundleCache(header common.Hash) *BundleCacheEntry {
 	return newEntry
 }
 
+// BundleCacheEntry bounds both positive and negative results for one header.
+// A cached nil result denotes a failed simulation.
 type BundleCacheEntry struct {
-	mu                sync.Mutex
-	headerHash        common.Hash
-	successfulBundles map[common.Hash]*types.SimulatedBundle
-	failedBundles     map[common.Hash]struct{}
+	headerHash common.Hash
+	results    *lru.Cache[common.Hash, *types.SimulatedBundle]
 }
 
 func newCacheEntry(header common.Hash) *BundleCacheEntry {
-	return &BundleCacheEntry{
-		headerHash:        header,
-		successfulBundles: make(map[common.Hash]*types.SimulatedBundle),
-		failedBundles:     make(map[common.Hash]struct{}),
-	}
+	return &BundleCacheEntry{headerHash: header, results: lru.NewCache[common.Hash, *types.SimulatedBundle](maxCachedBundles)}
 }
 
 func (c *BundleCacheEntry) GetSimulatedBundle(bundle common.Hash) (*types.SimulatedBundle, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if simmed, ok := c.successfulBundles[bundle]; ok {
-		return simmed, true
-	}
-
-	if _, ok := c.failedBundles[bundle]; ok {
-		return nil, true
-	}
-
-	return nil, false
+	return c.results.Get(bundle)
 }
 
 func (c *BundleCacheEntry) UpdateSimulatedBundles(result map[common.Hash]*types.SimulatedBundle, bundles []*types.Bundle) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	for _, bundle := range bundles {
-		if bundle == nil {
-			continue
-		}
-
-		bundleHash := bundle.Hash()
-
-		if result[bundleHash] != nil {
-			c.successfulBundles[bundleHash] = result[bundleHash]
-		} else {
-			c.failedBundles[bundleHash] = struct{}{}
+		if bundle != nil {
+			c.results.Add(bundle.Hash(), result[bundle.Hash()])
 		}
 	}
 }

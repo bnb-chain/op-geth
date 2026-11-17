@@ -381,7 +381,7 @@ func (b *backendMock) SubscribeChainSideEvent(ch chan<- core.ChainSideEvent) eve
 	return nil
 }
 func (b *backendMock) SendTx(ctx context.Context, signedTx *types.Transaction) error { return nil }
-func (b *backendMock) SimulateGaslessBundle(bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+func (b *backendMock) SimulateGaslessBundle(ctx context.Context, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
 	panic("implement me")
 }
 func (b *backendMock) SendBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error {

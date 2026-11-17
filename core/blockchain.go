@@ -1883,10 +1883,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 	}()
 
 	defer func() {
-		DebugInnerExecutionDuration = 0
+		DebugInnerExecutionDuration.Store(0)
 	}()
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
-		DebugInnerExecutionDuration = 0
+		DebugInnerExecutionDuration.Store(0)
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
 			log.Debug("Abort during block processing")
@@ -2035,7 +2035,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		blockExecutionTimer.Update(ptime)  // The time spent on block execution
 		blockValidationTimer.Update(vtime) // The time spent on block validation
 
-		innerExecutionTimer.Update(DebugInnerExecutionDuration)
+		innerExecutionTimer.Update(time.Duration(DebugInnerExecutionDuration.Load()))
 
 		log.Debug("New payload execution and validation metrics", "hash", block.Hash(), "execution", common.PrettyDuration(ptime), "validation", common.PrettyDuration(vtime), "accountReads", common.PrettyDuration(statedb.AccountReads), "storageReads", common.PrettyDuration(statedb.StorageReads), "snapshotAccountReads", common.PrettyDuration(statedb.SnapshotAccountReads), "snapshotStorageReads", common.PrettyDuration(statedb.SnapshotStorageReads), "accountUpdates", common.PrettyDuration(statedb.AccountUpdates), "storageUpdates", common.PrettyDuration(statedb.StorageUpdates), "accountHashes", common.PrettyDuration(statedb.AccountHashes), "storageHashes", common.PrettyDuration(statedb.StorageHashes))
 

@@ -1,6 +1,7 @@
 package miner
 
 import (
+	"context"
 	"errors"
 	"math/big"
 	"slices"
@@ -28,7 +29,7 @@ var (
 
 // fillTransactions retrieves the pending bundles and transactions from the txpool and fills them
 // into the given sealing block. The selection and ordering strategy can be extended in the future.
-func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *environment) error {
+func (w *worker) fillTransactionsAndBundles(ctx context.Context, interrupt *atomic.Int32, env *environment) error {
 	// TODO will remove after fix txpool perf issue
 	if interrupt != nil {
 		if signal := interrupt.Load(); signal != commitInterruptNone {
@@ -50,7 +51,7 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 	}
 
 	genStart := time.Now()
-	txs, _, err := w.generateOrderedBundles(env, bundles)
+	txs, _, err := w.generateOrderedBundles(ctx, env, bundles)
 	genDuration := time.Since(genStart)
 	if err != nil {
 		log.Error("fail to generate ordered bundles", "err", err, "elapsed", common.PrettyDuration(genDuration))
@@ -63,7 +64,7 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 	}
 
 	commitStart := time.Now()
-	if err = w.commitBundles(env, txs, interrupt); err != nil {
+	if err = w.commitBundles(ctx, env, txs, interrupt); err != nil {
 		log.Error("Failed to commit bundles", "err", err, "bundleCount", len(bundles), "txCount", len(txs),
 			"bundleHashes", bundleHashes,
 			"pendingElapsed", common.PrettyDuration(pendingDuration),
@@ -137,11 +138,15 @@ func (w *worker) fillTransactionsAndBundles(interrupt *atomic.Int32, env *enviro
 	}
 	commitTxpoolTxsTimer.UpdateSince(start)
 	log.Debug("commitTxpoolTxsTimer", "duration", common.PrettyDuration(time.Since(start)), "hash", env.header.Hash())
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	log.Info("fill bundles and transactions done", "total_txs_count", len(env.txs))
 	return nil
 }
 
 func (w *worker) commitBundles(
+	ctx context.Context,
 	env *environment,
 	txs types.Transactions,
 	interrupt *atomic.Int32,
@@ -153,6 +158,9 @@ func (w *worker) commitBundles(
 	var coalescedLogs []*types.Log
 
 	for _, tx := range txs {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if interrupt != nil {
 			if signal := interrupt.Load(); signal != commitInterruptNone {
 				return errors.New("failed bundle commit due to payload timeout or resolve")
@@ -178,7 +186,10 @@ func (w *worker) commitBundles(
 		// Start executing the transaction
 		env.state.SetTxContext(tx.Hash(), env.tcount)
 
-		logs, err := w.commitBundleTransaction(env, tx, env.UnRevertible.Contains(tx.Hash()))
+		logs, err := w.commitBundleTransaction(ctx, env, tx, env.UnRevertible.Contains(tx.Hash()))
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		switch err {
 		case core.ErrGasLimitReached:
 			// Pop the current out-of-gas transaction without shifting in the next from the account
@@ -209,6 +220,9 @@ func (w *worker) commitBundles(
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if !w.isRunning() && len(coalescedLogs) > 0 {
 		// We don't push the pendingLogsEvent while we are mining. The reason is that
 		// when we are mining, the worker will regenerate a mining block every second.
@@ -232,17 +246,12 @@ func (w *worker) commitBundles(
 // 2. simulate bundles based on the same state, resort.
 // 3. merge resorted simulateBundles based on the iterative state.
 func (w *worker) generateOrderedBundles(
+	ctx context.Context,
 	env *environment,
 	bundles []*types.Bundle,
 ) (types.Transactions, *types.SimulatedBundle, error) {
-	// sort bundles according to gas price computed when received
-	slices.SortStableFunc(bundles, func(i, j *types.Bundle) int {
-		priceI, priceJ := i.Price, j.Price
-		return priceJ.Cmp(priceI)
-	})
-
 	// recompute bundle gas price based on the same state and current env
-	simulatedBundles, err := w.simulateBundles(env, bundles)
+	simulatedBundles, err := w.simulateBundles(ctx, env, bundles)
 	if err != nil {
 		log.Error("fail to simulate bundles base on the same state", "err", err)
 		return nil, nil, err
@@ -255,7 +264,7 @@ func (w *worker) generateOrderedBundles(
 	})
 
 	// merge bundles based on iterative state
-	includedTxs, mergedBundle, err := w.mergeBundles(env, simulatedBundles)
+	includedTxs, mergedBundle, err := w.mergeBundles(ctx, env, simulatedBundles)
 	if err != nil {
 		log.Error("fail to merge bundles", "err", err)
 		return nil, nil, err
@@ -264,60 +273,74 @@ func (w *worker) generateOrderedBundles(
 	return includedTxs, mergedBundle, nil
 }
 
-func (w *worker) simulateBundles(env *environment, bundles []*types.Bundle) ([]*types.SimulatedBundle, error) {
-	headerHash := env.header.Hash()
-	simCache := w.bundleCache.GetBundleCache(headerHash)
-	simResult := make(map[common.Hash]*types.SimulatedBundle)
-
-	var wg sync.WaitGroup
+// simulateBundles starts a fixed number of workers. A worker owns execution
+// capacity before it copies state; copies from the shared source are serialized.
+func (w *worker) simulateBundles(ctx context.Context, env *environment, bundles []*types.Bundle) ([]*types.SimulatedBundle, error) {
+	selected, err := selectBuilderBundles(ctx, bundles)
+	if err != nil {
+		return nil, err
+	}
+	simCache := w.bundleCache.GetBundleCache(env.header.Hash())
+	results := make([]*types.SimulatedBundle, len(selected))
+	var next int
 	var mu sync.Mutex
-	for i, bundle := range bundles {
-		if simmed, ok := simCache.GetSimulatedBundle(bundle.Hash()); ok {
-			mu.Lock()
-			simResult[bundle.Hash()] = simmed
-			mu.Unlock()
-			continue
-		}
-
+	var wg sync.WaitGroup
+	for i := 0; i < min(bundleBuilderWorkers, len(selected)); i++ {
 		wg.Add(1)
-		go func(idx int, bundle *types.Bundle, state *state.StateDB) {
+		go func() {
 			defer wg.Done()
-			gasPool := prepareGasPool()
-			simmed, err := w.simulateBundle(env, bundle, state, gasPool, 0, true, true)
-			if err != nil {
-				log.Trace("Error computing gas for a simulateBundle", "error", err)
-				return
+			for {
+				mu.Lock()
+				if ctx.Err() != nil || next == len(selected) {
+					mu.Unlock()
+					return
+				}
+				idx := next
+				next++
+				bundle := selected[idx]
+				if cached, ok := simCache.GetSimulatedBundle(bundle.Hash()); ok {
+					results[idx] = cached
+					mu.Unlock()
+					continue
+				}
+				simulationState := env.state.Copy()
+				mu.Unlock()
+				if ctx.Err() != nil {
+					return
+				}
+				simmed, err := w.simulateBundleWithContext(ctx, env, bundle, simulationState, prepareGasPool(), 0, true, true, nil)
+				// Interrupted/queued work must never become a negative cache entry.
+				if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return
+				}
+				simCache.results.Add(bundle.Hash(), simmed)
+				results[idx] = simmed
 			}
-
-			mu.Lock()
-			defer mu.Unlock()
-			simResult[bundle.Hash()] = simmed
-		}(i, bundle, env.state.Copy())
+		}()
 	}
-
 	wg.Wait()
-
-	simulatedBundles := make([]*types.SimulatedBundle, 0)
-
-	for _, bundle := range simResult {
-		if bundle == nil {
-			continue
-		}
-
-		simulatedBundles = append(simulatedBundles, bundle)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
-	simCache.UpdateSimulatedBundles(simResult, bundles)
-
-	return simulatedBundles, nil
+	simulated := make([]*types.SimulatedBundle, 0, len(results))
+	for _, bundle := range results {
+		if bundle != nil {
+			simulated = append(simulated, bundle)
+		}
+	}
+	return simulated, nil
 }
 
 // mergeBundles merges the given simulateBundle into the given environment.
 // It returns the merged simulateBundle and the number of transactions that were merged.
 func (w *worker) mergeBundles(
+	ctx context.Context,
 	env *environment,
 	bundles []*types.SimulatedBundle,
 ) (types.Transactions, *types.SimulatedBundle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	currentState := env.state.Copy()
 	gasPool := prepareGasPool()
 	env.UnRevertible = mapset.NewSet[common.Hash]()
@@ -330,6 +353,9 @@ func (w *worker) mergeBundles(
 	}
 
 	for _, bundle := range bundles {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		prevState := currentState.Copy()
 		prevGasPool := new(core.GasPool).AddGas(gasPool.Gas())
 
@@ -337,7 +363,12 @@ func (w *worker) mergeBundles(
 		floorGasPrice := new(big.Int).Mul(bundle.BundleGasPrice, big.NewInt(99))
 		floorGasPrice = floorGasPrice.Div(floorGasPrice, big.NewInt(100))
 
-		simulatedBundle, err := w.simulateBundle(env, bundle.OriginalBundle, currentState, gasPool, len(includedTxs), true, false)
+		// Conflicts on tentative merged state do not invalidate a bundle at the
+		// parent. The entire merge may still be discarded on cancellation.
+		simulatedBundle, err := w.simulateBundleWithContext(ctx, env, bundle.OriginalBundle, currentState, gasPool, len(includedTxs), false, false, nil)
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
 
 		if err != nil && errors.Is(err, core.ErrGasLimitReached) {
 			log.Error("failed to merge bundle, interrupt merge process", "err", err)
@@ -377,11 +408,10 @@ func (w *worker) mergeBundles(
 	return includedTxs, &mergedBundle, nil
 }
 
-// simulateBundle computes the gas price for a whole simulateBundle based on the same ctx
-// named computeBundleGas in flashbots
-func (w *worker) simulateBundle(
-	env *environment, bundle *types.Bundle, state *state.StateDB, gasPool *core.GasPool, currentTxCount int,
-	prune, pruneGasExceed bool,
+// simulateBundleWithContext computes bundle gas price on disposable state.
+func (w *worker) simulateBundleWithContext(
+	ctx context.Context, env *environment, bundle *types.Bundle, state *state.StateDB, gasPool *core.GasPool, currentTxCount int,
+	prune, pruneGasExceed bool, publicTxs map[common.Hash]bool,
 ) (*types.SimulatedBundle, error) {
 	var (
 		tempGasUsed   uint64
@@ -390,13 +420,19 @@ func (w *worker) simulateBundle(
 	)
 
 	for i, tx := range bundle.Txs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		state.SetTxContext(tx.Hash(), i+currentTxCount)
 
-		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &w.coinbase, gasPool, state, env.header, tx,
+		receipt, err := core.ApplyTransactionWithContext(ctx, w.chainConfig, w.chain, &w.coinbase, gasPool, state, env.header, tx,
 			&tempGasUsed, *w.chain.GetVMConfig())
 		if err != nil {
 			log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
 
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if prune {
 				if errors.Is(err, core.ErrGasLimitReached) && !pruneGasExceed {
 					log.Warn("bundle gas limit exceed", "hash", bundle.Hash().String())
@@ -413,6 +449,9 @@ func (w *worker) simulateBundle(
 			err = errNonRevertingTxInBundleFailed
 			log.Warn("fail to simulate bundle", "hash", bundle.Hash().String(), "err", err)
 
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			if prune {
 				w.eth.TxPool().PruneBundle(bundle.Hash())
 				log.Warn("prune bundle", "hash", bundle.Hash().String())
@@ -420,7 +459,11 @@ func (w *worker) simulateBundle(
 
 			return nil, err
 		}
-		if !w.eth.TxPool().Has(tx.Hash()) {
+		known := publicTxs[tx.Hash()]
+		if publicTxs == nil {
+			known = w.eth.TxPool().Has(tx.Hash())
+		}
+		if !known {
 			bundleGasUsed += receipt.GasUsed
 
 			txGasUsed := new(big.Int).SetUint64(receipt.GasUsed)
@@ -435,7 +478,10 @@ func (w *worker) simulateBundle(
 			bundleGasFees.Add(bundleGasFees, txGasFees)
 		}
 	}
-	// if all txs in the bundle are from txpool, we accept the bundle without checking gas price
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Transactions already in the ordinary txpool do not contribute to bundle price.
 	bundleGasPrice := big.NewInt(0)
 	if bundleGasUsed != 0 {
 		bundleGasPrice = new(big.Int).Div(bundleGasFees, new(big.Int).SetUint64(bundleGasUsed))
@@ -461,12 +507,15 @@ func (w *worker) simulateBundle(
 	}, nil
 }
 
-func (w *worker) simulateGaslessBundle(env *environment, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+func (w *worker) simulateGaslessBundle(ctx context.Context, env *environment, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
 	validResults := make([]types.GaslessTxSimResult, 0)
 	gasReachedResults := make([]types.GaslessTxSimResult, 0)
 
 	txIdx := 0
 	for _, tx := range bundle.Txs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		env.state.SetTxContext(tx.Hash(), txIdx)
 
 		var (
@@ -474,9 +523,12 @@ func (w *worker) simulateGaslessBundle(env *environment, bundle *types.Bundle) (
 			gp   = env.gasPool.Gas()
 		)
 
-		receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &w.coinbase, env.gasPool, env.state, env.header, tx,
+		receipt, err := core.ApplyTransactionWithContext(ctx, w.chainConfig, w.chain, &w.coinbase, env.gasPool, env.state, env.header, tx,
 			&env.header.GasUsed, *w.chain.GetVMConfig())
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			env.state.RevertToSnapshot(snap)
 			env.gasPool.SetGas(gp)
 			log.Error("fail to simulate gasless bundle, skipped", "txHash", tx.Hash(), "err", err)

@@ -17,6 +17,7 @@
 package miner
 
 import (
+	"context"
 	"math/big"
 	"reflect"
 	"testing"
@@ -210,5 +211,59 @@ func TestPayloadId(t *testing.T) {
 			t.Errorf("ID collision, case %d and case %d: id %v", prev, i, id)
 		}
 		ids[id] = i
+	}
+}
+
+func TestPayloadDiscardsExpiredPublication(t *testing.T) {
+	for _, when := range []string{"before-publication", "while-acquiring-lock", "canceled-parent"} {
+		t.Run(when, func(t *testing.T) {
+			// Both results have finished generation; the second offers higher fees.
+			initial := &newPayloadResult{block: types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)}), fees: big.NewInt(1)}
+			late := &newPayloadResult{block: types.NewBlockWithHeader(&types.Header{Number: big.NewInt(2)}), fees: big.NewInt(2)}
+			payload := newPayload(nil, engine.PayloadID{})
+			defer payload.stopBuilding()
+			payload.update(initial, 0)
+			var published bool
+			callback := func() { published = true }
+			if when == "while-acquiring-lock" {
+				payload.lock.Lock()
+				// Install the deadline before starting the updater; its first context
+				// observation must happen after it acquires this publication lock.
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(10*time.Millisecond))
+				defer cancel()
+				payload.ctx = ctx
+				started, done := make(chan struct{}), make(chan struct{})
+				go func() { close(started); payload.update(late, 0, callback); close(done) }()
+				<-started
+				<-ctx.Done()
+				payload.lock.Unlock()
+				<-done
+			} else if when == "before-publication" {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				defer cancel()
+				payload.ctx = ctx
+				payload.update(late, 0, callback)
+			} else {
+				payload.cancel()
+				payload.update(late, 0, callback)
+			}
+			if payload.full != initial.block || payload.fullFees.Cmp(initial.fees) != 0 {
+				t.Fatal("late generation replaced successful payload after parent lifetime")
+			}
+			if published {
+				t.Fatal("late generation ran publication callback")
+			}
+		})
+	}
+}
+
+func TestPayloadPublishesFirstExpiredFallback(t *testing.T) {
+	payload := newPayload(nil, engine.PayloadID{}, time.Now().Add(-time.Second))
+	defer payload.stopBuilding()
+	first := &newPayloadResult{block: types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)}), fees: big.NewInt(1)}
+	published := false
+	payload.update(first, 0, func() { published = true })
+	if payload.full != first.block || !published {
+		t.Fatal("expired parent suppressed mandatory first valid fallback")
 	}
 }

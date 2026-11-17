@@ -4,8 +4,10 @@ import (
 	"container/heap"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
@@ -56,6 +58,7 @@ var (
 	// ErrBundleAlreadyExist is returned if the bundle is already contained
 	// within the pool.
 	ErrBundleAlreadyExist = errors.New("bundle already exist")
+	ErrBundlePoolOverflow = errors.New("bundle exceeds pool capacity")
 )
 
 // BlockChain defines the minimal set of methods needed to back a tx pool with
@@ -75,7 +78,7 @@ type BlockChain interface {
 }
 
 type BundleSimulator interface {
-	SimulateBundle(bundle *types.Bundle) (*big.Int, error)
+	SimulateBundle(ctx context.Context, bundle *types.Bundle) (*big.Int, error)
 }
 
 type BundlePool struct {
@@ -84,10 +87,12 @@ type BundlePool struct {
 	chain     BlockChain
 
 	bundles    map[common.Hash]*types.Bundle
+	inflight   map[common.Hash]struct{}
 	bundleHeap BundleHeap
 	mu         sync.RWMutex
 
-	slots uint64 // Number of slots currently allocated
+	slots    uint64        // Number of slots currently allocated
+	maxTxGas atomic.Uint64 // Maximum gas per transaction (0 = no cap)
 
 	simulator BundleSimulator
 
@@ -103,6 +108,7 @@ func New(config Config, mevConfig miner.MevConfig, chain BlockChain) *BundlePool
 		mevConfig:             mevConfig,
 		chain:                 chain,
 		bundles:               make(map[common.Hash]*types.Bundle),
+		inflight:              make(map[common.Hash]struct{}),
 		bundleHeap:            make(BundleHeap, 0),
 		bundleReceiverClients: make(map[string]*rpc.Client),
 	}
@@ -158,7 +164,16 @@ func (p *BundlePool) FilterBundle(bundle *types.Bundle) bool {
 }
 
 // AddBundle adds a mev bundle to the pool
-func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
+func (p *BundlePool) AddBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := bundle.ValidateBasic(); err != nil {
+		return err
+	}
+	if err := p.validateTxGas(bundle); err != nil {
+		return err
+	}
 	if p.simulator == nil {
 		return ErrSimulatorMissing
 	}
@@ -168,7 +183,40 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 	}
 
 	hash := bundle.Hash()
-	price, err := p.simulator.SimulateBundle(bundle)
+	if numSlots(bundle) > p.config.GlobalSlots {
+		return ErrBundlePoolOverflow
+	}
+	p.mu.Lock()
+	_, exists := p.bundles[hash]
+	_, running := p.inflight[hash]
+	if exists || running {
+		p.mu.Unlock()
+		return ErrBundleAlreadyExist
+	}
+	if p.slots+numSlots(bundle) > p.config.GlobalSlots {
+		// A bundle's gas-weighted price cannot exceed its highest fee cap.
+		// Reject only a provably impossible replacement; the actual price and
+		// capacity must still be checked again after simulation.
+		upper := new(big.Int)
+		for _, tx := range bundle.Txs {
+			if tx.GasFeeCap().Cmp(upper) > 0 {
+				upper.Set(tx.GasFeeCap())
+			}
+		}
+		if upper.Cmp(p.minimalBundleGasPrice()) <= 0 {
+			p.mu.Unlock()
+			return ErrBundleGasPriceLow
+		}
+	}
+	p.inflight[hash] = struct{}{}
+	p.mu.Unlock()
+	defer func() {
+		p.mu.Lock()
+		delete(p.inflight, hash)
+		p.mu.Unlock()
+	}()
+
+	price, err := p.simulator.SimulateBundle(ctx, bundle)
 	if err != nil {
 		log.Warn("Bundle simulation failed", "hash", hash, "err", err)
 		return err
@@ -177,6 +225,13 @@ func (p *BundlePool) AddBundle(bundle *types.Bundle, originBundle *types.SendBun
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// The cap may have changed while simulation ran without the pool lock.
+	if err := p.validateTxGas(bundle); err != nil {
+		return err
+	}
 
 	if _, ok := p.bundles[hash]; ok {
 		log.Debug("Bundle already exists in pool", "hash", hash)
@@ -235,6 +290,11 @@ func (p *BundlePool) PendingBundles(blockNumber uint64, blockTimestamp uint64) [
 
 	ret := make([]*types.Bundle, 0)
 	for hash, bundle := range p.bundles {
+		if err := p.validateTxGas(bundle); err != nil {
+			log.Debug("Bundle exceeds transaction gas cap", "hash", hash, "err", err)
+			p.deleteBundle(hash)
+			continue
+		}
 		// Prune outdated bundles
 		if (bundle.MaxTimestamp != 0 && blockTimestamp > bundle.MaxTimestamp) ||
 			(bundle.MaxBlockNumber != 0 && blockNumber > bundle.MaxBlockNumber) {
@@ -408,14 +468,8 @@ func (p *BundlePool) deleteBundle(hash common.Hash) {
 func (p *BundlePool) drop(bundle *types.Bundle) bool {
 	dropBundles := make([]*types.Bundle, 0, numSlots(bundle))
 	dropSlots := uint64(0)
-	for len(p.bundleHeap) > 0 {
-		if dropSlots >= numSlots(bundle) {
-			for _, dropBundle := range dropBundles {
-				log.Info("Bundle dropped due to slot limit", "hash", dropBundle.Hash(), "price", dropBundle.Price)
-				p.deleteBundle(dropBundle.Hash())
-			}
-			return true
-		}
+	required := p.slots + numSlots(bundle) - p.config.GlobalSlots
+	for len(p.bundleHeap) > 0 && dropSlots < required {
 		// Pop the bundle with the lowest gas price
 		// the min element in the heap may not exist in the pool as it may be pruned
 		leastPriceBundleHash := heap.Pop(&p.bundleHeap).(*types.Bundle).Hash()
@@ -433,7 +487,16 @@ func (p *BundlePool) drop(bundle *types.Bundle) bool {
 			}
 		}
 	}
-	return false
+	if dropSlots < required {
+		for _, dropBundle := range dropBundles {
+			heap.Push(&p.bundleHeap, dropBundle)
+		}
+		return false
+	}
+	for _, dropBundle := range dropBundles {
+		p.deleteBundle(dropBundle.Hash())
+	}
+	return true
 }
 
 // minimalBundleGasPrice return the lowest gas price from the pool.
@@ -448,7 +511,26 @@ func (p *BundlePool) minimalBundleGasPrice() *big.Int {
 	return new(big.Int)
 }
 
-func (p *BundlePool) SetMaxTxGas(maxTxGas uint64) {}
+// SetMaxTxGas updates the maximum gas allowed per transaction. Zero disables the cap.
+func (p *BundlePool) SetMaxTxGas(maxTxGas uint64) {
+	// Serialize updates with the final admission check and pending selection.
+	p.mu.Lock()
+	p.maxTxGas.Store(maxTxGas)
+	p.mu.Unlock()
+}
+
+func (p *BundlePool) validateTxGas(bundle *types.Bundle) error {
+	cap := p.maxTxGas.Load()
+	if cap == 0 {
+		return nil
+	}
+	for _, tx := range bundle.Txs {
+		if tx.Gas() > cap {
+			return fmt.Errorf("%w (cap: %d, tx: %d)", core.ErrTxGasLimitTooHigh, cap, tx.Gas())
+		}
+	}
+	return nil
+}
 
 // =====================================================================================================================
 

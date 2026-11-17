@@ -104,16 +104,25 @@ type Payload struct {
 	err       error
 	stopOnce  sync.Once
 	interrupt *atomic.Int32 // interrupt signal shared with worker
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // newPayload initializes the payload object.
-func newPayload(empty *types.Block, id engine.PayloadID) *Payload {
+func newPayload(empty *types.Block, id engine.PayloadID, deadline ...time.Time) *Payload {
+	ctx, cancel := context.WithCancel(context.Background())
+	if len(deadline) > 0 {
+		cancel()
+		ctx, cancel = context.WithDeadline(context.Background(), deadline[0])
+	}
 	payload := &Payload{
 		id:    id,
 		empty: empty,
 		stop:  make(chan struct{}),
 
 		interrupt: new(atomic.Int32),
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 	log.Info("Starting work on payload", "id", payload.id)
 	payload.cond = sync.NewCond(&payload.lock)
@@ -134,6 +143,14 @@ func (payload *Payload) update(r *newPayloadResult, elapsed time.Duration, postF
 	}
 
 	defer payload.cond.Broadcast() // fire signal for notifying any full block result
+
+	// A completed initial fallback is mandatory even after the payload lifetime
+	// ends. Later results must recheck that lifetime under the publication lock:
+	// it can expire during finalization or while this updater waits for the lock.
+	if payload.full != nil && payload.ctx.Err() != nil {
+		log.Debug("Ignoring payload update after payload lifetime", "id", payload.id)
+		return
+	}
 
 	if errors.Is(r.err, errInterruptedUpdate) {
 		log.Debug("Ignoring interrupted payload update", "id", payload.id)
@@ -254,6 +271,7 @@ func (payload *Payload) GetBlock() *types.Block {
 // the update anyways.
 // interruptBuilding is safe to be called concurrently.
 func (payload *Payload) interruptBuilding() {
+	payload.cancel()
 	// Set the interrupt if not interrupted already.
 	// It's ok if it has either already been interrupted by payload resolution earlier,
 	// or by the timeout timer set to commitInterruptTimeout.
@@ -272,6 +290,7 @@ func (payload *Payload) interruptBuilding() {
 func (payload *Payload) stopBuilding() {
 	// Concurrent Resolve calls should only stop once.
 	payload.stopOnce.Do(func() {
+		payload.cancel()
 		log.Debug("Stop payload building.", "id", payload.id)
 		close(payload.stop)
 	})
@@ -350,6 +369,9 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 		return nil, err
 	}
 
+	fullParams.blockTime = blockTime
+	deadline := time.Now().Add(blockTime)
+
 	//check state of parent block
 	_, err = w.retrieveParentState(fullParams)
 	if err != nil && strings.Contains(err.Error(), "missing trie node") {
@@ -362,25 +384,23 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 		return nil, err
 	}
 
-	payload := newPayload(nil, args.Id())
+	payload := newPayload(nil, args.Id(), deadline)
 	// set shared interrupt
 	fullParams.interrupt = payload.interrupt
+	fullParams.ctx = payload.ctx
 
 	// Spin up a routine for updating the payload in background. This strategy
 	// can maximum the revenue for including transactions with highest fee.
 	go func() {
-		// Setup the timer for re-building the payload. The initial clock is kept
-		// for triggering process immediately.
-		timer := time.NewTimer(0)
-		defer timer.Stop()
+		defer payload.cancel()
 
 		start := time.Now()
 		// Setup the timer for terminating the payload building process as determined
 		// by validateParams.
-		endTimer := time.NewTimer(blockTime)
+		endTimer := time.NewTimer(time.Until(deadline))
 		defer endTimer.Stop()
 
-		timeout := time.Now().Add(blockTime)
+		timeout := deadline
 
 		stopReason := "delivery"
 		defer func() {
@@ -405,11 +425,15 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 			} else {
 				log.Error("Failed to build full payload", "id", payload.id, "err", r.err)
 			}
-			timer.Reset(w.recommit)
 			return dur
 		}
 
-		var lastDuration time.Duration
+		// Always finish the initial attempt, even if delivery or the absolute
+		// deadline arrived before this goroutine ran. Its ordinary/forced-tx
+		// fallback is the only payload Resolve can return in that case.
+		lastDuration := updatePayload()
+		timer := time.NewTimer(w.recommit)
+		defer timer.Stop()
 		for {
 			select {
 			case <-timer.C:
@@ -427,6 +451,7 @@ func (w *worker) buildPayload(args *BuildPayloadArgs) (*Payload, error) {
 					return
 				}
 				lastDuration = updatePayload()
+				timer.Reset(w.recommit)
 			case <-payload.stop:
 				return
 			case <-endTimer.C:

@@ -325,11 +325,11 @@ func (b *EthAPIBackend) SendTx(ctx context.Context, signedTx *types.Transaction)
 }
 
 func (b *EthAPIBackend) SendBundle(ctx context.Context, bundle *types.Bundle, originBundle *types.SendBundleArgs) error {
-	return b.eth.txPool.AddBundle(bundle, originBundle)
+	return b.eth.txPool.AddBundle(ctx, bundle, originBundle)
 }
 
-func (b *EthAPIBackend) SimulateGaslessBundle(bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
-	return b.Miner().SimulateGaslessBundle(bundle)
+func (b *EthAPIBackend) SimulateGaslessBundle(ctx context.Context, bundle *types.Bundle) (*types.SimulateGaslessBundleResp, error) {
+	return b.Miner().SimulateGaslessBundle(ctx, bundle)
 }
 
 func (b *EthAPIBackend) BundlePrice() *big.Int {

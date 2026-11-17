@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -28,9 +29,12 @@ func (s *PrivateTxBundleAPI) BundlePrice(ctx context.Context) *big.Int {
 }
 
 // SimulateGaslessBundle simulates the execution of a list of transactions with order
-func (s *PrivateTxBundleAPI) SimulateGaslessBundle(_ context.Context, args types.SimulateGaslessBundleArgs) (*types.SimulateGaslessBundleResp, error) {
-	if len(args.Txs) == 0 {
-		return nil, newBundleError(errors.New("bundle missing txs"))
+func (s *PrivateTxBundleAPI) SimulateGaslessBundle(ctx context.Context, args types.SimulateGaslessBundleArgs) (*types.SimulateGaslessBundleResp, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := validateEncodedBundle(args.Txs); err != nil {
+		return nil, newBundleError(err)
 	}
 
 	var txs types.Transactions
@@ -54,14 +58,23 @@ func (s *PrivateTxBundleAPI) SimulateGaslessBundle(_ context.Context, args types
 		Txs: txs,
 	}
 
-	return s.b.SimulateGaslessBundle(bundle)
+	if err := bundle.ValidateBasic(); err != nil {
+		return nil, newBundleError(err)
+	}
+	return s.b.SimulateGaslessBundle(ctx, bundle)
 }
 
 // SendBundle will add the signed transaction to the transaction pool.
 // The sender is responsible for signing the transaction and using the correct nonce and ensuring validity
 func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBundleArgs) (common.Hash, error) {
-	if len(args.Txs) == 0 {
-		return common.Hash{}, newBundleError(errors.New("bundle missing txs"))
+	if err := ctx.Err(); err != nil {
+		return common.Hash{}, err
+	}
+	if err := validateEncodedBundle(args.Txs); err != nil {
+		return common.Hash{}, newBundleError(err)
+	}
+	if len(args.RevertingTxHashes) > len(args.Txs) {
+		return common.Hash{}, newBundleError(errors.New("too many reverting transaction hashes"))
 	}
 
 	currentHeader := s.b.CurrentHeader()
@@ -123,6 +136,9 @@ func (s *PrivateTxBundleAPI) SendBundle(ctx context.Context, args types.SendBund
 		bundle.MaxBlockNumber = currentHeader.Number.Uint64() + types.MaxBundleAliveBlock
 	}
 
+	if err := bundle.ValidateBasic(); err != nil {
+		return common.Hash{}, newBundleError(err)
+	}
 	hash := bundle.Hash()
 	log.Info("Received bundle via RPC", "hash", hash, "txCount", len(txs), "maxBlockNumber", bundle.MaxBlockNumber, "minTimestamp", minTimestamp, "maxTimestamp", maxTimestamp)
 
@@ -152,4 +168,22 @@ type bundleError struct {
 // See: https://github.com/ethereum/wiki/wiki/JSON-RPC-Error-Codes-Improvement-Proposal
 func (e *bundleError) ErrorCode() int {
 	return InvalidBundleParamError
+}
+
+// validateEncodedBundle caps work before allocating and decoding transactions.
+func validateEncodedBundle(txs []hexutil.Bytes) error {
+	if len(txs) == 0 {
+		return errors.New("bundle missing txs")
+	}
+	if len(txs) > types.MaxBundleTransactions {
+		return errors.New("too many bundle transactions")
+	}
+	var size uint64
+	for _, tx := range txs {
+		size += uint64(len(tx))
+		if size > types.MaxBundleSize {
+			return errors.New("bundle exceeds size limit")
+		}
+	}
+	return nil
 }

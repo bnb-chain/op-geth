@@ -65,6 +65,19 @@ func TestTransactionsPacketDecodeLimit(t *testing.T) {
 			t.Fatalf("expected transaction count error, got %v", err)
 		}
 	})
+
+	t.Run("over limit before decoding", func(t *testing.T) {
+		// An invalid first transaction must not be decoded in an oversized packet.
+		entries[0] = rlp.EmptyList
+		encoded, err := rlp.EncodeToBytes(entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var packet TransactionsPacket
+		if err := rlp.DecodeBytes(encoded, &packet); err == nil || !strings.Contains(err.Error(), "too many transactions") {
+			t.Fatalf("expected transaction count error before decoding, got %v", err)
+		}
+	})
 }
 
 // Tests that the custom union field encoder and decoder works correctly.

@@ -117,23 +117,25 @@ func (p *NewBlockHashesPacket) Unpack() ([]common.Hash, []uint64) {
 // TransactionsPacket is the network packet for broadcasting new transactions.
 type TransactionsPacket []*types.Transaction
 
-// DecodeRLP bounds the number of transactions decoded from a broadcast packet.
+// DecodeRLP checks the transaction count before decoding any transactions.
 func (p *TransactionsPacket) DecodeRLP(s *rlp.Stream) error {
-	if _, err := s.List(); err != nil {
+	raw, err := s.Raw()
+	if err != nil {
 		return err
 	}
-	txs := make(TransactionsPacket, 0)
-	for s.MoreDataInList() {
-		if len(txs) == maxTransactionsPerPacket {
-			return fmt.Errorf("too many transactions in message (limit %d)", maxTransactionsPerPacket)
-		}
-		tx := new(types.Transaction)
-		if err := tx.DecodeRLP(s); err != nil {
-			return fmt.Errorf("transaction %d: %w", len(txs), err)
-		}
-		txs = append(txs, tx)
+	content, _, err := rlp.SplitList(raw)
+	if err != nil {
+		return err
 	}
-	if err := s.ListEnd(); err != nil {
+	count, err := rlp.CountValues(content)
+	if err != nil {
+		return err
+	}
+	if count > maxTransactionsPerPacket {
+		return fmt.Errorf("too many transactions in message (%d)", count)
+	}
+	var txs []*types.Transaction
+	if err := rlp.DecodeBytes(raw, &txs); err != nil {
 		return err
 	}
 	*p = txs

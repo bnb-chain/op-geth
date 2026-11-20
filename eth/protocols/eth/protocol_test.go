@@ -19,12 +19,66 @@ package eth
 import (
 	"bytes"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
 )
+
+func TestTransactionsPacketDecodeLimit(t *testing.T) {
+	const limit = 5_000
+	tx := types.NewTx(&types.LegacyTx{Gas: 21_000})
+	encodedTx, err := rlp.EncodeToBytes(tx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]rlp.RawValue, limit+1)
+	for i := range entries[:limit] {
+		entries[i] = encodedTx
+	}
+	// The final entry is malformed. Rejection must happen before decoding it.
+	entries[limit] = rlp.EmptyList
+
+	t.Run("at limit", func(t *testing.T) {
+		encoded, err := rlp.EncodeToBytes(entries[:limit])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var packet TransactionsPacket
+		if err := rlp.DecodeBytes(encoded, &packet); err != nil {
+			t.Fatal(err)
+		}
+		if len(packet) != limit {
+			t.Fatalf("decoded %d transactions, want %d", len(packet), limit)
+		}
+	})
+
+	t.Run("over limit", func(t *testing.T) {
+		encoded, err := rlp.EncodeToBytes(entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var packet TransactionsPacket
+		if err := rlp.DecodeBytes(encoded, &packet); err == nil || !strings.Contains(err.Error(), "too many transactions") {
+			t.Fatalf("expected transaction count error, got %v", err)
+		}
+	})
+
+	t.Run("over limit before decoding", func(t *testing.T) {
+		// An invalid first transaction must not be decoded in an oversized packet.
+		entries[0] = rlp.EmptyList
+		encoded, err := rlp.EncodeToBytes(entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var packet TransactionsPacket
+		if err := rlp.DecodeBytes(encoded, &packet); err == nil || !strings.Contains(err.Error(), "too many transactions") {
+			t.Fatalf("expected transaction count error before decoding, got %v", err)
+		}
+	})
+}
 
 // Tests that the custom union field encoder and decoder works correctly.
 func TestGetBlockHeadersDataEncodeDecode(t *testing.T) {

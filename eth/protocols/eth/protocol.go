@@ -48,6 +48,9 @@ var protocolLengths = map[uint]uint64{ETH68: 17}
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
 
+// maxTransactionsPerPacket bounds the number of transactions in a Transactions message.
+const maxTransactionsPerPacket = 5_000
+
 const (
 	StatusMsg                     = 0x00
 	NewBlockHashesMsg             = 0x01
@@ -113,6 +116,31 @@ func (p *NewBlockHashesPacket) Unpack() ([]common.Hash, []uint64) {
 
 // TransactionsPacket is the network packet for broadcasting new transactions.
 type TransactionsPacket []*types.Transaction
+
+// DecodeRLP checks the transaction count before decoding any transactions.
+func (p *TransactionsPacket) DecodeRLP(s *rlp.Stream) error {
+	raw, err := s.Raw()
+	if err != nil {
+		return err
+	}
+	content, _, err := rlp.SplitList(raw)
+	if err != nil {
+		return err
+	}
+	count, err := rlp.CountValues(content)
+	if err != nil {
+		return err
+	}
+	if count > maxTransactionsPerPacket {
+		return fmt.Errorf("too many transactions in message (%d)", count)
+	}
+	var txs []*types.Transaction
+	if err := rlp.DecodeBytes(raw, &txs); err != nil {
+		return err
+	}
+	*p = txs
+	return nil
+}
 
 // GetBlockHeadersRequest represents a block header query.
 type GetBlockHeadersRequest struct {

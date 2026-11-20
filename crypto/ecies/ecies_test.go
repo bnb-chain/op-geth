@@ -36,6 +36,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -231,6 +232,44 @@ func TestEncryptDecrypt(t *testing.T) {
 	_, err = prv1.Decrypt(ct, nil, nil)
 	if err == nil {
 		t.Fatal("ecies: encryption should not have succeeded")
+	}
+}
+
+func TestDecryptShortCiphertext(t *testing.T) {
+	prv, err := GenerateKey(rand.Reader, DefaultCurve, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ephemeral, err := GenerateKey(rand.Reader, DefaultCurve, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := prv.PublicKey.Params
+	shared, err := ephemeral.GenerateShared(&prv.PublicKey, params.KeyLen, params.KeyLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, macKey := deriveKeys(params.Hash(), shared, nil, params.KeyLen)
+	publicKey := elliptic.Marshal(ephemeral.Curve, ephemeral.X, ephemeral.Y)
+
+	for size := 0; size <= params.BlockSize; size++ {
+		t.Run(fmt.Sprintf("body_%d", size), func(t *testing.T) {
+			// Use a valid MAC so short bodies would reach symmetric decryption.
+			body := make([]byte, size)
+			tag := messageTag(params.Hash, macKey, body, nil)
+			ciphertext := append([]byte{}, publicKey...)
+			ciphertext = append(ciphertext, body...)
+			ciphertext = append(ciphertext, tag...)
+
+			plaintext, err := prv.Decrypt(ciphertext, nil, nil)
+			if size < params.BlockSize {
+				if err != ErrInvalidMessage {
+					t.Fatalf("got error %v, want %v", err, ErrInvalidMessage)
+				}
+			} else if err != nil || len(plaintext) != 0 {
+				t.Fatalf("full IV should decrypt to empty plaintext, got %x, %v", plaintext, err)
+			}
+		})
 	}
 }
 

@@ -44,8 +44,8 @@ func TestListAddL1Cost(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx := types.NewTransaction(0, common.Address{}, big.NewInt(100), 21000, big.NewInt(1), nil)
-			list := newList(true)
-			if ok, _ := list.Add(tx, DefaultConfig.PriceBump, tc.costFn); !ok {
+			list := newRollupList(true, &LegacyPool{l1CostFn: tc.costFn})
+			if ok, _ := list.Add(tx, DefaultConfig.PriceBump); !ok {
 				t.Fatal("transaction rejected")
 			}
 			want := new(big.Int).Add(tx.Cost(), big.NewInt(tc.fee))
@@ -72,17 +72,17 @@ func TestListRemovalL1Cost(t *testing.T) {
 		{"ready", true, func(l *list, _ types.Transactions) { l.Ready(0) }, nil},
 		{"remove strict", true, func(l *list, txs types.Transactions) { l.Remove(txs[1]) }, []int{0}},
 		{"remove nonstrict", false, func(l *list, txs types.Transactions) { l.Remove(txs[1]) }, []int{0, 2}},
-		{"filter strict", true, func(l *list, _ types.Transactions) { l.Filter(uint256.NewInt(1000000), 25000) }, []int{0}},
-		{"filter nonstrict", false, func(l *list, _ types.Transactions) { l.Filter(uint256.NewInt(1000000), 25000) }, []int{0, 2}},
+		{"filter strict", true, func(l *list, _ types.Transactions) { l.Filter(uint256.NewInt(1000000000), 25000) }, []int{0}},
+		{"filter nonstrict", false, func(l *list, _ types.Transactions) { l.Filter(uint256.NewInt(1000000000), 25000) }, []int{0, 2}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fee := big.NewInt(100)
 			costFn := func(types.RollupCostData) *big.Int { return fee }
-			list := newList(tc.strict)
+			list := newRollupList(tc.strict, &LegacyPool{l1CostFn: costFn})
 			txs := make(types.Transactions, 3)
 			for i, gas := range []uint64{21000, 30000, 21000} {
 				txs[i] = types.NewTransaction(uint64(i), common.Address{}, big.NewInt(100), gas, big.NewInt(1), nil)
-				if ok, _ := list.Add(txs[i], DefaultConfig.PriceBump, costFn); !ok {
+				if ok, _ := list.Add(txs[i], DefaultConfig.PriceBump); !ok {
 					t.Fatal("transaction rejected")
 				}
 			}
@@ -112,17 +112,17 @@ func TestListReplacementL1Cost(t *testing.T) {
 	replacement := types.NewTransaction(0, common.Address{}, big.NewInt(100), 21000, big.NewInt(2), nil)
 	fee := big.NewInt(100000)
 	costFn := func(types.RollupCostData) *big.Int { return fee }
-	list := newList(true)
-	list.Add(tx, DefaultConfig.PriceBump, costFn)
+	list := newRollupList(true, &LegacyPool{l1CostFn: costFn})
+	list.Add(tx, DefaultConfig.PriceBump)
 	fee.SetInt64(100)
 	before := new(uint256.Int).Set(list.totalcost)
-	if ok, _ := list.Add(tx, DefaultConfig.PriceBump, costFn); ok {
+	if ok, _ := list.Add(tx, DefaultConfig.PriceBump); ok {
 		t.Fatal("underpriced replacement accepted")
 	}
 	if !list.totalcost.Eq(before) {
 		t.Fatal("rejected replacement changed cost")
 	}
-	if ok, old := list.Add(replacement, DefaultConfig.PriceBump, costFn); !ok || old != tx {
+	if ok, old := list.Add(replacement, DefaultConfig.PriceBump); !ok || old != tx {
 		t.Fatal("replacement failed")
 	}
 	want := new(big.Int).Add(replacement.Cost(), fee)
@@ -151,20 +151,21 @@ func TestListCostOverflow(t *testing.T) {
 		{"replacement aggregate", new(big.Int).Sub(max, big.NewInt(10)), 0, new(big.Int).Sub(max, big.NewInt(3)), nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			list := newList(true)
+			pool := new(LegacyPool)
+			list := newRollupList(true, pool)
 			initial := types.NewTransaction(0, common.Address{}, tc.initialValue, 1, big.NewInt(1), nil)
-			if ok, _ := list.Add(initial, DefaultConfig.PriceBump, nil); !ok {
+			if ok, _ := list.Add(initial, DefaultConfig.PriceBump); !ok {
 				t.Fatal("initial transaction rejected")
 			}
 			// Keep another reservation to exercise replacement aggregate overflow.
 			if tc.name == "replacement aggregate" {
-				list.Add(types.NewTransaction(1, common.Address{}, big.NewInt(1), 1, big.NewInt(1), nil), DefaultConfig.PriceBump, nil)
+				list.Add(types.NewTransaction(1, common.Address{}, big.NewInt(1), 1, big.NewInt(1), nil), DefaultConfig.PriceBump)
 			}
 			before := new(uint256.Int).Set(list.totalcost)
 			costcap, gascap, length := new(uint256.Int).Set(list.costcap), list.gascap, list.Len()
 			candidate := types.NewTransaction(tc.nonce, common.Address{}, tc.value, 1, big.NewInt(2), nil)
-			costFn := func(types.RollupCostData) *big.Int { return tc.fee }
-			if ok, old := list.Add(candidate, DefaultConfig.PriceBump, costFn); ok || old != nil {
+			pool.l1CostFn = func(types.RollupCostData) *big.Int { return tc.fee }
+			if ok, old := list.Add(candidate, DefaultConfig.PriceBump); ok || old != nil {
 				t.Fatal("overflowing transaction accepted")
 			}
 			if !list.totalcost.Eq(before) || !list.costcap.Eq(costcap) || list.gascap != gascap || list.Len() != length || list.txs.Get(0) != initial {
@@ -184,10 +185,10 @@ func TestListCostUint256Boundary(t *testing.T) {
 	value := new(big.Int).Sub(max, big.NewInt(2))
 	tx := types.NewTransaction(0, common.Address{}, value, 1, big.NewInt(1), nil)
 	replacement := types.NewTransaction(0, common.Address{}, value, 1, big.NewInt(2), nil)
-	if ok, _ := list.Add(tx, DefaultConfig.PriceBump, nil); !ok {
+	if ok, _ := list.Add(tx, DefaultConfig.PriceBump); !ok {
 		t.Fatal("initial transaction rejected")
 	}
-	if ok, old := list.Add(replacement, DefaultConfig.PriceBump, nil); !ok || old != tx {
+	if ok, old := list.Add(replacement, DefaultConfig.PriceBump); !ok || old != tx {
 		t.Fatal("valid boundary replacement rejected")
 	}
 	if list.totalcost.ToBig().Cmp(max) != 0 {
@@ -199,8 +200,9 @@ func TestListCostUint256Boundary(t *testing.T) {
 	}
 	// The L1-inclusive reservation may also equal the maximum exactly.
 	l1Fee := new(big.Int).Sub(max, big.NewInt(1))
+	list = newRollupList(true, &LegacyPool{l1CostFn: func(types.RollupCostData) *big.Int { return l1Fee }})
 	tx = types.NewTransaction(0, common.Address{}, new(big.Int), 1, big.NewInt(1), nil)
-	if ok, _ := list.Add(tx, DefaultConfig.PriceBump, func(types.RollupCostData) *big.Int { return l1Fee }); !ok {
+	if ok, _ := list.Add(tx, DefaultConfig.PriceBump); !ok {
 		t.Fatal("valid L1-inclusive boundary cost rejected")
 	}
 	if list.totalcost.ToBig().Cmp(max) != 0 {
@@ -297,10 +299,10 @@ func TestLegacyPoolL1CostSolvency(t *testing.T) {
 			sender := crypto.PubkeyToAddress(key.PublicKey)
 			pool.currentState.SetBalance(sender, uint256.NewInt(uint64(tc.balance)))
 			pool.l1CostFn = func(types.RollupCostData) *big.Int { return big.NewInt(tc.oldFee) }
-			list := newList(true)
-			list.Add(transaction(0, 21000, key), DefaultConfig.PriceBump, pool.l1CostFn)
+			list := newRollupList(true, pool)
+			list.Add(transaction(0, 21000, key), DefaultConfig.PriceBump)
 			if tc.replace {
-				list.Add(transaction(1, 21000, key), DefaultConfig.PriceBump, pool.l1CostFn)
+				list.Add(transaction(1, 21000, key), DefaultConfig.PriceBump)
 			}
 			pool.pending[sender] = list
 			pool.l1CostFn = func(types.RollupCostData) *big.Int { return big.NewInt(tc.newFee) }
